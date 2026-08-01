@@ -1,0 +1,58 @@
+services:
+  nllb-translate:
+    build: .
+    container_name: nllb-translate
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "5051:5051"
+    volumes:
+      - hf-cache:/cache/huggingface
+      - history:/data/history
+    environment:
+      HF_HOME: /cache/huggingface
+    networks:
+      - proxy-net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5051/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+
+  nllb-translate-gpu:
+    profiles: ["gpu"]
+    build: .
+    container_name: nllb-translate-gpu
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "5052:5051"
+    volumes:
+      - hf-cache:/cache/huggingface
+      - history:/data/history
+    environment:
+      HF_HOME: /cache/huggingface
+      NLLB_DEVICE: cuda
+    networks:
+      - proxy-net
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: ["gpu"]
+
+volumes:
+  hf-cache:
+    driver: local
+  history:
+    driver: local
+
+networks:
+  proxy-net:
+    external: true
