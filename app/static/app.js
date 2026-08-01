@@ -205,6 +205,13 @@
       return (display.flag ? display.flag + " " : "") + display.name + " (" + display.script + ")";
     }
 
+    function extractionPathForFile(fileName) {
+      if (fileName.endsWith(".csv")) return "/extract-csv";
+      if (fileName.endsWith(".xlsx")) return "/extract-xlsx";
+      if (fileName.endsWith(".odt")) return "/extract-odt";
+      return "/extract-docx";
+    }
+
     function languageByCode(code) {
       return languageData.languages.find((language) => language.code === code);
     }
@@ -314,12 +321,13 @@
       const blob = new Blob([text], {type: contentType + ";charset=utf-8"});
       const link = document.createElement("a");
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-      link.href = URL.createObjectURL(blob);
+      const url = URL.createObjectURL(blob);
+      link.href = url;
       link.download = "nllb-result-" + stamp + "." + extension;
       document.body.appendChild(link);
       link.click();
       link.remove();
-      URL.revokeObjectURL(link.href);
+      URL.revokeObjectURL(url);
     }
 
     async function loadTextFile() {
@@ -341,7 +349,7 @@
         if (isXlsx) {
           form.append("sheet_name", document.getElementById("sheetName").value);
         }
-        const path = isCsv ? "/extract-csv" : (isXlsx ? "/extract-xlsx" : (lowerName.endsWith(".odt") ? "/extract-odt" : "/extract-docx"));
+        const path = extractionPathForFile(lowerName);
         showProgress("queued", 0, "Extracting " + lowerName.split(".").pop().toUpperCase() + "...");
         const response = await fetch(path, {method: "POST", body: form});
         const text = await response.text();
@@ -408,7 +416,7 @@
       ocr.checked = Boolean(data.ocr_enabled);
       ocr.disabled = true;
       ocrLabel.textContent = data.ocr_enabled
-        ? "OCR configured: " + data.ocr_language + " (fallback not implemented yet)"
+        ? "OCR configured: " + data.ocr_language
         : "OCR disabled";
       updateCounter();
     }
@@ -449,6 +457,12 @@
     async function pollJob(jobId) {
       while (true) {
         const response = await fetch("/jobs/" + jobId);
+        if (!response.ok) {
+          const text = await response.text();
+          setResult(errorTextFromResponse(text));
+          activeJobId = null;
+          return;
+        }
         const job = await response.json();
         updateProgress(job);
         if (job.status === "complete") {
@@ -486,6 +500,12 @@
           target: target
         })
       });
+      if (!response.ok) {
+        const text = await response.text();
+        setResult(errorTextFromResponse(text));
+        clearProgress();
+        return;
+      }
       const data = await response.json();
       activeJobId = data.job_id;
       await pollJob(data.job_id);
@@ -530,6 +550,12 @@
       setResult("");
       showProgress("queued", 0, "Uploading PDF...");
       const response = await fetch("/jobs/translate-pdf", {method: "POST", body: form});
+      if (!response.ok) {
+        const text = await response.text();
+        setResult(errorTextFromResponse(text));
+        clearProgress();
+        return;
+      }
       const data = await response.json();
       activeJobId = data.job_id;
       await pollJob(data.job_id);
@@ -538,6 +564,11 @@
     async function controlActiveJob(action) {
       if (!activeJobId) return;
       const response = await fetch("/jobs/" + activeJobId + "/" + action, {method: "POST"});
+      if (!response.ok) {
+        const text = await response.text();
+        setResult(errorTextFromResponse(text));
+        return;
+      }
       const job = await response.json();
       updateProgress(job);
     }
@@ -554,6 +585,7 @@
       if (!response.ok) {
         const text = await response.text();
         setResult(errorTextFromResponse(text));
+        return;
       }
       await loadHistory();
     }

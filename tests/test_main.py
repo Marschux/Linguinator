@@ -61,7 +61,12 @@ def minimal_odt(paragraphs):
     return buffer.getvalue()
 
 
-def minimal_xlsx():
+def minimal_xlsx(target="worksheets/sheet1.xml", sheet_cell_type="inlineStr", sheet_value=None):
+    if sheet_cell_type == "s":
+        first_value = f'<c r="A1" t="s"><v>{sheet_value or "99"}</v></c>'
+    else:
+        first_value = '<c r="A1" t="inlineStr"><is><t>title</t></is></c>'
+
     buffer = BytesIO()
     with zipfile.ZipFile(buffer, "w") as xlsx:
         xlsx.writestr(
@@ -73,14 +78,19 @@ def minimal_xlsx():
         xlsx.writestr(
             "xl/_rels/workbook.xml.rels",
             '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            '<Relationship Id="rId1" Target="worksheets/sheet1.xml" '
+            f'<Relationship Id="rId1" Target="{target}" '
             'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"/>'
             "</Relationships>",
         )
         xlsx.writestr(
+            "xl/sharedStrings.xml",
+            '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            "<si><t>title</t></si></sst>",
+        )
+        xlsx.writestr(
             "xl/worksheets/sheet1.xml",
             '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
-            '<row r="1"><c r="A1" t="inlineStr"><is><t>title</t></is></c>'
+            f'<row r="1">{first_value}'
             '<c r="B1" t="inlineStr"><is><t>description</t></is></c></row>'
             '<row r="2"><c r="A2" t="inlineStr"><is><t>Hello</t></is></c>'
             '<c r="B2" t="inlineStr"><is><t>World</t></is></c></row>'
@@ -216,6 +226,18 @@ class MainTests(unittest.TestCase):
         text = main.extract_xlsx_text_from_bytes(minimal_xlsx(), "Sheet1", "title,description")
 
         self.assertEqual(text, "Hello | World")
+
+    def test_xlsx_extraction_resolves_absolute_sheet_target(self):
+        text = main.extract_xlsx_text_from_bytes(minimal_xlsx("/xl/worksheets/sheet1.xml"), "Sheet1", "title")
+
+        self.assertEqual(text, "Hello")
+
+    def test_xlsx_extraction_reports_bad_shared_string_reference(self):
+        with self.assertRaises(HTTPException) as raised:
+            main.extract_xlsx_text_from_bytes(minimal_xlsx(sheet_cell_type="s", sheet_value="99"), "Sheet1", "title")
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("Invalid XLSX shared string reference", raised.exception.detail)
 
 
 if __name__ == "__main__":

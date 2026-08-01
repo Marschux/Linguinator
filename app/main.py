@@ -29,6 +29,7 @@ MODEL_ID = os.getenv("NLLB_MODEL", "facebook/nllb-200-distilled-600M")
 DEVICE_SETTING = os.getenv("NLLB_DEVICE", "cpu")
 MAX_CHARS = int(os.getenv("NLLB_MAX_CHARS", "6000"))
 MAX_FILE_MB = int(os.getenv("NLLB_MAX_FILE_MB", "50"))
+MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
 HISTORY_DAYS = int(os.getenv("NLLB_HISTORY_DAYS", "7"))
 HISTORY_DIR = Path(os.getenv("NLLB_HISTORY_DIR", "/data/history"))
 DEFAULT_SOURCE = os.getenv("NLLB_DEFAULT_SOURCE", "eng_Latn")
@@ -187,6 +188,13 @@ def history_paths(item_id: str):
     if ".." in item_id or "/" in item_id or "\\" in item_id:
         raise HTTPException(status_code=400, detail="Invalid history id")
     return HISTORY_DIR / f"{item_id}.md", HISTORY_DIR / f"{item_id}.json"
+
+
+async def read_upload_bytes(file: UploadFile, label: str = "File") -> bytes:
+    content = await file.read()
+    if len(content) > MAX_FILE_BYTES:
+        raise HTTPException(status_code=413, detail=f"{label} exceeds {MAX_FILE_MB} MB")
+    return content
 
 
 def create_job(kind: str) -> str:
@@ -349,7 +357,7 @@ def extract_pdf_markdown_from_bytes(
     if content_type not in ("application/pdf", "application/octet-stream"):
         raise HTTPException(status_code=400, detail="Only PDF uploads are supported")
 
-    if len(content) > MAX_FILE_MB * 1024 * 1024:
+    if len(content) > MAX_FILE_BYTES:
         raise HTTPException(status_code=413, detail=f"PDF exceeds {MAX_FILE_MB} MB")
 
     try:
@@ -384,9 +392,9 @@ def extract_pdf_markdown_from_bytes(
     markdown = "\n\n".join(pages).strip()
     if not pages_with_text:
         ocr_detail = (
-            f"OCR is configured for {OCR_LANGUAGE}, but OCR fallback is not implemented yet."
+            f"OCR is configured for {OCR_LANGUAGE}, but no readable text was produced."
             if OCR_ENABLED
-            else "OCR is disabled. Set NLLB_ENABLE_OCR=true after OCR support is implemented."
+            else "OCR is disabled. Set NLLB_ENABLE_OCR=true to use OCR fallback."
         )
         raise HTTPException(
             status_code=422,
@@ -504,6 +512,15 @@ def xlsx_shared_strings(workbook: zipfile.ZipFile) -> List[str]:
     return values
 
 
+def xlsx_relationship_target(target: str) -> str:
+    normalized = target.replace("\\", "/").lstrip("/")
+    if normalized.startswith("../") or "/../" in normalized:
+        raise HTTPException(status_code=400, detail="Invalid XLSX relationship target")
+    if normalized.startswith("xl/"):
+        return normalized
+    return "xl/" + normalized
+
+
 def xlsx_sheet_path(workbook: zipfile.ZipFile, sheet_name: str) -> str:
     namespace = {
         "m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
@@ -534,7 +551,7 @@ def xlsx_sheet_path(workbook: zipfile.ZipFile, sheet_name: str) -> str:
     target = rels.get(selected.attrib["{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"])
     if not target:
         raise HTTPException(status_code=400, detail="Could not resolve XLSX sheet")
-    return "xl/" + target.lstrip("/")
+    return xlsx_relationship_target(target)
 
 
 def extract_xlsx_text_from_bytes(content: bytes, sheet_name: str, columns: str) -> str:
@@ -547,10 +564,15 @@ def extract_xlsx_text_from_bytes(content: bytes, sheet_name: str, columns: str) 
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read XLSX: {exc}") from exc
 
-    with workbook:
-        shared = xlsx_shared_strings(workbook)
-        sheet_path = xlsx_sheet_path(workbook, sheet_name)
-        root = ElementTree.fromstring(workbook.read(sheet_path))
+    try:
+        with workbook:
+            shared = xlsx_shared_strings(workbook)
+            sheet_path = xlsx_sheet_path(workbook, sheet_name)
+            root = ElementTree.fromstring(workbook.read(sheet_path))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not parse XLSX: {exc}") from exc
 
     namespace = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     rows = []
@@ -564,7 +586,10 @@ def extract_xlsx_text_from_bytes(content: bytes, sheet_name: str, columns: str) 
             inline_node = cell.find(".//s:t", namespace)
             value = ""
             if cell_type == "s" and value_node is not None:
-                value = shared[int(value_node.text or "0")]
+                try:
+                    value = shared[int(value_node.text or "0")]
+                except (ValueError, IndexError) as exc:
+                    raise HTTPException(status_code=400, detail="Invalid XLSX shared string reference") from exc
             elif inline_node is not None:
                 value = inline_node.text or ""
             elif value_node is not None:
@@ -596,7 +621,7 @@ def extract_xlsx_text_from_bytes(content: bytes, sheet_name: str, columns: str) 
 
 
 async def extract_pdf_markdown(file: UploadFile, page_range: str = "") -> str:
-    content = await file.read()
+    content = await read_upload_bytes(file, "PDF")
     return extract_pdf_markdown_from_bytes(content, file.content_type or "application/pdf", page_range)
 
 
@@ -728,9 +753,7 @@ async def start_translate_pdf_job(
     target: str = Form(DEFAULT_TARGET),
     page_range: str = Form(""),
 ):
-    content = await file.read()
-    if len(content) > MAX_FILE_MB * 1024 * 1024:
-        raise HTTPException(status_code=413, detail=f"PDF exceeds {MAX_FILE_MB} MB")
+    content = await read_upload_bytes(file, "PDF")
     job_id = create_job("translate-pdf")
     thread = threading.Thread(
         target=run_pdf_translate_job,
@@ -785,19 +808,19 @@ async def extract_pdf(file: UploadFile = File(...), page_range: str = Form("")):
 
 @app.post("/extract-docx", response_class=PlainTextResponse)
 async def extract_docx(file: UploadFile = File(...)):
-    content = await file.read()
+    content = await read_upload_bytes(file, "DOCX")
     return extract_docx_text_from_bytes(content)
 
 
 @app.post("/extract-odt", response_class=PlainTextResponse)
 async def extract_odt(file: UploadFile = File(...)):
-    content = await file.read()
+    content = await read_upload_bytes(file, "ODT")
     return extract_odt_text_from_bytes(content)
 
 
 @app.post("/extract-csv", response_class=PlainTextResponse)
 async def extract_csv(file: UploadFile = File(...), columns: str = Form("")):
-    content = await file.read()
+    content = await read_upload_bytes(file, "CSV")
     return extract_csv_text_from_bytes(content, columns)
 
 
@@ -807,7 +830,7 @@ async def extract_xlsx(
     sheet_name: str = Form(""),
     columns: str = Form(""),
 ):
-    content = await file.read()
+    content = await read_upload_bytes(file, "XLSX")
     return extract_xlsx_text_from_bytes(content, sheet_name, columns)
 
 
