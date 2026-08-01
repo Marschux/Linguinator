@@ -1,6 +1,6 @@
 services:
   nllb-translate:
-    build: .
+    image: registry.gitlab.com/marschu/nllb-translate-ui:latest
     container_name: nllb-translate
     restart: unless-stopped
     env_file: .env
@@ -27,7 +27,7 @@ services:
 
   nllb-translate-gpu:
     profiles: ["gpu"]
-    build: .
+    image: registry.gitlab.com/marschu/nllb-translate-ui:latest
     container_name: nllb-translate-gpu
     restart: unless-stopped
     env_file: .env
