@@ -1,4 +1,4 @@
-    let languageData = null;
+gerade    let languageData = null;
     let maxChars = 0;
     let activeJobId = null;
     let currentInputTab = "textarea";
@@ -992,11 +992,17 @@
       }[char]));
     }
 
-    function showProgress(status, percent, info) {
+    function showProgress(status, percent, info, position) {
       const progress = document.getElementById("progress");
       const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
       const titleStatus = status.charAt(0).toUpperCase() + status.slice(1);
-      document.title = safePercent + "% " + titleStatus + " - " + baseTitle;
+      let prefix;
+      if ((status === "queued" || status === "running") && position && position > 0) {
+        prefix = "#" + position + " " + titleStatus;
+      } else {
+        prefix = safePercent + "% " + titleStatus;
+      }
+      document.title = prefix + " - " + baseTitle;
       progress.className = "progress " + status;
       progress.innerHTML =
         '<div class="progress-top">' +
@@ -1112,9 +1118,10 @@
         const languages = [job.source, job.target].filter(Boolean).join(" -> ");
         const started = job.started_at ? t("started") + " " + formatJobTime(job.started_at) : t("queued") + " " + formatJobTime(job.queued_at);
         meta.textContent = [languages, started].filter(Boolean).join(" | ");
+        const positionText = job.position ? "#" + job.position : "";
         const progress = document.createElement("div");
         progress.className = "queue-progress";
-        progress.textContent = (job.percent || 0) + "% | " + (job.current || 0) + " / " + (job.total || 0) + " " + t("chunks") + " | " + (job.message || "");
+        progress.textContent = (positionText ? positionText + " " : "") + (job.percent || 0) + "% | " + (job.current || 0) + " / " + (job.total || 0) + " " + t("chunks") + " | " + (job.message || "");
         const actions = document.createElement("div");
         actions.className = "queue-actions";
         actions.appendChild(queueActionButton(job, "pause", t("pause"), ["queued", "running"]));
@@ -1133,11 +1140,13 @@
       const current = job.current || 0;
       const total = job.total || 0;
       const percent = job.percent || 0;
+      const position = job.position && job.position > 0 ? job.position : undefined;
       const eta = job.status === "running" ? "ETA " + formatEta(job.eta_seconds) : "";
       showProgress(
         job.status,
         percent,
-        percent + "% | " + current + " / " + total + " chunks | " + eta + " " + (job.message || "")
+        percent + "% | " + current + " / " + total + " chunks | " + eta + " " + (job.message || ""),
+        position
       );
       document.getElementById("pauseJob").disabled = !["queued", "running"].includes(job.status);
       document.getElementById("resumeJob").disabled = job.status !== "paused";
