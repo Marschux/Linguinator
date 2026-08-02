@@ -88,22 +88,6 @@ Basic Auth still accepts the older `NLLB_AUTH_*` variables as fallback, but new 
 - OCR build: `docker compose build --build-arg INSTALL_OCR=true`
 - Docker image: `registry.gitlab.com/marschu/lingumachina:latest`
 
-## API
-
-Main endpoints:
-
-- `GET /health`
-- `GET /languages`
-- `POST /jobs/translate`
-- `POST /jobs/translate-pdf`
-- `GET /jobs/{job_id}`
-- `POST /jobs/{job_id}/pause`
-- `POST /jobs/{job_id}/resume`
-- `POST /jobs/{job_id}/cancel`
-- `GET /history`
-- `POST /export-pdf`
-- `POST /export-pdf-overlay`
-
 ## License
 
 AGPL-3.0-or-later. See `LICENSE`.
