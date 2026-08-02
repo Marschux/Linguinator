@@ -8,6 +8,7 @@ Local document translation workbench based on Meta NLLB.
 - Text translation with chunking
 - Text-PDF extraction to Markdown
 - Text-PDF translation to Markdown
+- Original-format workflows for DOCX, ODT, PPTX, CSV, XLSX, HTML, SRT/VTT, JSON/YAML, PO, and XLIFF
 - Progress, ETA, pause, resume, and stop for background jobs
 - Local conversion history with configurable retention
 - Optional HTTP Basic password protection
@@ -72,6 +73,8 @@ NLLB_OCR_LANGUAGE=deu+eng
 LINGUMACHINA_AUTH_ENABLED=false
 LINGUMACHINA_AUTH_USERNAME=admin
 LINGUMACHINA_AUTH_PASSWORD=
+LINGUMACHINA_UNLOAD_MODEL_AFTER_IDLE=true
+LINGUMACHINA_MODEL_IDLE_SECONDS=1200
 ```
 
 ## Password Protection
@@ -85,6 +88,23 @@ LINGUMACHINA_AUTH_PASSWORD=change-me
 ```
 
 `GET /health` stays public so Docker healthchecks continue to work.
+
+## Idle Memory
+
+By default, Lingumachina unloads the cached translation model after 20 minutes without translation activity to reduce idle RAM use:
+
+```env
+LINGUMACHINA_UNLOAD_MODEL_AFTER_IDLE=true
+LINGUMACHINA_MODEL_IDLE_SECONDS=1200
+```
+
+Disable this if you prefer faster warm translations and can spare the RAM:
+
+```env
+LINGUMACHINA_UNLOAD_MODEL_AFTER_IDLE=false
+```
+
+After the model is unloaded, the next translation has to load it again from the local HuggingFace cache.
 
 ## OCR
 
@@ -133,8 +153,15 @@ For loaded source files, `Originalformat` can export translated content back int
 
 - DOCX: replaces paragraph text nodes in the main document, headers, footers, footnotes, endnotes, and comments while keeping the DOCX package structure.
 - ODT: replaces text paragraphs in `content.xml` while preserving existing inline span markup where possible.
+- PPTX: replaces slide text runs in slide XML while keeping the presentation package structure.
 - XLSX: replaces selected sheet cells in selected columns; formula cells keep their formula and receive an updated cached value.
 - CSV: replaces selected columns and writes CSV again.
+- HTML: replaces visible text nodes while leaving tags, comments, script, and style content alone.
+- SRT/VTT: replaces cue text while keeping cue timing and block order.
+- JSON: replaces string values while keeping arrays, objects, numbers, booleans, and null values.
+- YAML: replaces simple inline scalar values conservatively.
+- PO: updates `msgstr` entries from translated blocks.
+- XLIFF: updates `target` entries and falls back to `source` text when a target is empty.
 
 This is a conservative 1:1 mode. It does not rebuild complex layout, tracked changes, embedded objects, exact styling, or full recalculation semantics. A later PDF layout mode may extract images, detect text blocks, and rebuild a new PDF layout, but that is separate from the current overlay and text-PDF modes.
 
@@ -158,8 +185,15 @@ GNU Affero General Public License v3.0 or later. See `LICENSE`.
 - `POST /extract-pdf`
 - `POST /extract-docx`
 - `POST /extract-odt`
+- `POST /extract-pptx`
 - `POST /extract-csv`
 - `POST /extract-xlsx`
+- `POST /extract-html`
+- `POST /extract-subtitle`
+- `POST /extract-json`
+- `POST /extract-yaml`
+- `POST /extract-po`
+- `POST /extract-xliff`
 - `POST /translate-pdf`
 - `POST /jobs/translate`
 - `POST /jobs/translate-pdf`
@@ -173,5 +207,12 @@ GNU Affero General Public License v3.0 or later. See `LICENSE`.
 - `POST /export-pdf-overlay`
 - `POST /export-docx`
 - `POST /export-odt`
+- `POST /export-pptx`
 - `POST /export-csv`
 - `POST /export-xlsx`
+- `POST /export-html`
+- `POST /export-subtitle`
+- `POST /export-json`
+- `POST /export-yaml`
+- `POST /export-po`
+- `POST /export-xliff`

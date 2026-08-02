@@ -67,6 +67,46 @@ class FakeTorch:
         return FakeInferenceMode()
 
 
+class FakeCuda:
+    def __init__(self):
+        self.emptied = False
+
+    def is_available(self):
+        return True
+
+    def empty_cache(self):
+        self.emptied = True
+
+
+class FakeTorchWithCuda(FakeTorch):
+    def __init__(self):
+        self.cuda = FakeCuda()
+
+
+class FakeCacheInfo:
+    def __init__(self, currsize):
+        self.currsize = currsize
+
+
+class FakeCachedLoader:
+    def __init__(self, value, currsize=1):
+        self.value = value
+        self.currsize = currsize
+        self.cleared = False
+        self.called = False
+
+    def __call__(self):
+        self.called = True
+        return self.value
+
+    def cache_info(self):
+        return FakeCacheInfo(self.currsize)
+
+    def cache_clear(self):
+        self.cleared = True
+        self.currsize = 0
+
+
 def test_temp_dir():
     path = Path(__file__).resolve().parent / ".tmp-history" / str(uuid.uuid4())
     path.mkdir(parents=True, exist_ok=False)
@@ -141,6 +181,23 @@ def minimal_odt(paragraphs):
     buffer = BytesIO()
     with zipfile.ZipFile(buffer, "w") as odt:
         odt.writestr("content.xml", document)
+    return buffer.getvalue()
+
+
+def minimal_pptx(paragraphs):
+    body = "".join(
+        '<p:sp><p:txBody><a:p><a:r><a:t>' + text + '</a:t></a:r></a:p></p:txBody></p:sp>'
+        for text in paragraphs
+    )
+    slide = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        '<p:cSld><p:spTree>' + body + '</p:spTree></p:cSld></p:sld>'
+    )
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as pptx:
+        pptx.writestr("ppt/slides/slide1.xml", slide)
     return buffer.getvalue()
 
 
@@ -279,6 +336,58 @@ class MainTests(unittest.TestCase):
             translated = main.translate_one("Hello", "eng_Latn", "deu_Latn")
 
         self.assertEqual(translated, "Uebersetzt")
+
+    def test_model_idle_unload_clears_cached_model_after_timeout(self):
+        torch_module = FakeTorchWithCuda()
+        model_loader = FakeCachedLoader((FakeTokenizer(), FakeModel(), "cuda", torch_module))
+        tokenizer_loader = FakeCachedLoader(FakeTokenizer())
+
+        with patch.object(main, "load_model", model_loader):
+            with patch.object(main, "load_tokenizer", tokenizer_loader):
+                with patch.object(main, "MODEL_IDLE_UNLOAD_ENABLED", True):
+                    with patch.object(main, "MODEL_IDLE_SECONDS", 1200):
+                        with patch.object(main, "MODEL_ACTIVE_USERS", 0):
+                            with patch.object(main, "MODEL_LAST_USED", 100.0):
+                                unloaded = main.unload_model_if_idle(now=1301.0)
+
+        self.assertTrue(unloaded)
+        self.assertTrue(model_loader.called)
+        self.assertTrue(model_loader.cleared)
+        self.assertTrue(tokenizer_loader.cleared)
+        self.assertTrue(torch_module.cuda.emptied)
+
+    def test_model_idle_unload_keeps_recent_model_loaded(self):
+        model_loader = FakeCachedLoader((FakeTokenizer(), FakeModel(), "cpu", FakeTorch()))
+        tokenizer_loader = FakeCachedLoader(FakeTokenizer())
+
+        with patch.object(main, "load_model", model_loader):
+            with patch.object(main, "load_tokenizer", tokenizer_loader):
+                with patch.object(main, "MODEL_IDLE_UNLOAD_ENABLED", True):
+                    with patch.object(main, "MODEL_IDLE_SECONDS", 1200):
+                        with patch.object(main, "MODEL_ACTIVE_USERS", 0):
+                            with patch.object(main, "MODEL_LAST_USED", 100.0):
+                                unloaded = main.unload_model_if_idle(now=1000.0)
+
+        self.assertFalse(unloaded)
+        self.assertFalse(model_loader.cleared)
+        self.assertFalse(tokenizer_loader.cleared)
+
+    def test_model_idle_unload_skips_when_disabled_or_active(self):
+        model_loader = FakeCachedLoader((FakeTokenizer(), FakeModel(), "cpu", FakeTorch()))
+        tokenizer_loader = FakeCachedLoader(FakeTokenizer())
+
+        with patch.object(main, "load_model", model_loader):
+            with patch.object(main, "load_tokenizer", tokenizer_loader):
+                with patch.object(main, "MODEL_IDLE_UNLOAD_ENABLED", False):
+                    self.assertFalse(main.unload_model_if_idle(now=2000.0))
+                with patch.object(main, "MODEL_IDLE_UNLOAD_ENABLED", True):
+                    with patch.object(main, "MODEL_IDLE_SECONDS", 1200):
+                        with patch.object(main, "MODEL_ACTIVE_USERS", 1):
+                            with patch.object(main, "MODEL_LAST_USED", 100.0):
+                                self.assertFalse(main.unload_model_if_idle(now=2000.0))
+
+        self.assertFalse(model_loader.cleared)
+        self.assertFalse(tokenizer_loader.cleared)
 
     def test_pdf_extraction_marks_empty_pages(self):
         reader = FakeReader([FakePage("Hello PDF\n"), FakePage("")])
@@ -452,6 +561,17 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 413)
 
+    def test_zip_rewrite_rejects_unsafe_archive_paths(self):
+        buffer = BytesIO()
+        with zipfile.ZipFile(buffer, "w") as archive:
+            archive.writestr("../bad.xml", "bad")
+
+        with self.assertRaises(HTTPException) as raised:
+            main.write_zip_with_replacement(buffer.getvalue(), {})
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("unsafe paths", raised.exception.detail)
+
     def test_odt_extraction_preserves_paragraphs(self):
         content = minimal_odt(["First paragraph", "Second paragraph"])
 
@@ -476,6 +596,15 @@ class MainTests(unittest.TestCase):
             content_xml = odt.read("content.xml")
         self.assertIn(b"text:span", content_xml)
         self.assertIn(b'text:style-name="Strong"', content_xml)
+
+    def test_pptx_extraction_and_export_replace_slide_text(self):
+        content = minimal_pptx(["Title", "Subtitle"])
+
+        text = main.extract_pptx_text_from_bytes(content)
+        updated = main.export_pptx_with_translated_text(content, "Titel\n\nUntertitel")
+
+        self.assertEqual(text, "Title\n\nSubtitle")
+        self.assertEqual(main.extract_pptx_text_from_bytes(updated), "Titel\n\nUntertitel")
 
     def test_csv_extraction_uses_selected_columns(self):
         content = b"title,description,ignore\nHello,World,Nope\nSecond,Row,Skip\n"
@@ -533,6 +662,80 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 400)
         self.assertIn("Invalid XLSX shared string reference", raised.exception.detail)
+
+    def test_html_extraction_and_export_preserve_markup(self):
+        content = b"<html><body><h1>Hello</h1><script>ignore()</script><p>World</p></body></html>"
+
+        text = main.extract_html_text_from_bytes(content)
+        updated = main.export_html_with_translated_text(content, "Hallo\n\nWelt")
+
+        self.assertEqual(text, "Hello\n\nWorld")
+        self.assertIn(b"<h1>Hallo</h1>", updated)
+        self.assertIn(b"<script>ignore()</script>", updated)
+
+    def test_subtitle_extraction_and_export_keep_timings(self):
+        content = b"1\n00:00:01,000 --> 00:00:02,000\nHello\n\n2\n00:00:03,000 --> 00:00:04,000\nWorld\n"
+
+        text = main.extract_subtitle_text_from_bytes(content)
+        updated = main.export_subtitle_with_translated_text(content, "Hallo\n\nWelt")
+
+        self.assertEqual(text, "Hello\n\nWorld")
+        self.assertIn(b"00:00:01,000 --> 00:00:02,000\nHallo", updated)
+        self.assertIn(b"00:00:03,000 --> 00:00:04,000\nWelt", updated)
+
+    def test_json_extraction_and_export_replace_string_values(self):
+        content = b'{"title":"Hello","items":["World", 3]}'
+
+        text = main.extract_json_text_from_bytes(content)
+        updated = main.export_json_with_translated_text(content, "Hallo\n\nWelt")
+
+        self.assertEqual(text, "Hello\n\nWorld")
+        self.assertEqual(json.loads(updated.decode("utf-8")), {"title": "Hallo", "items": ["Welt", 3]})
+
+    def test_yaml_extraction_and_export_replace_simple_scalars(self):
+        content = b"title: Hello\ncount: 3\nnested:\n  text: World\n"
+
+        text = main.extract_yaml_text_from_bytes(content)
+        updated = main.export_yaml_with_translated_text(content, "Hallo\n\nWelt")
+
+        self.assertEqual(text, "Hello\n\nWorld")
+        self.assertIn(b"title: Hallo", updated)
+        self.assertIn(b"  text: Welt", updated)
+
+    def test_po_extraction_and_export_update_msgstr(self):
+        content = b'msgid "Hello"\nmsgstr ""\n\nmsgid "World"\nmsgstr "Existing"\n'
+
+        text = main.extract_po_text_from_bytes(content)
+        updated = main.export_po_with_translated_text(content, "Hallo\n\nWelt")
+
+        self.assertEqual(text, "Hello\n\nExisting")
+        self.assertIn('msgstr "Hallo"'.encode("utf-8"), updated)
+        self.assertIn('msgstr "Welt"'.encode("utf-8"), updated)
+
+    def test_xliff_extraction_and_export_update_targets(self):
+        content = (
+            b'<xliff version="1.2"><file><body>'
+            b'<trans-unit id="1"><source>Hello</source><target></target></trans-unit>'
+            b'<trans-unit id="2"><source>World</source></trans-unit>'
+            b'</body></file></xliff>'
+        )
+
+        text = main.extract_xliff_text_from_bytes(content)
+        updated = main.export_xliff_with_translated_text(content, "Hallo\n\nWelt")
+
+        self.assertEqual(text, "Hello\n\nWorld")
+        self.assertIn(b"<target>Hallo</target>", updated)
+        self.assertIn(b"<target>Welt</target>", updated)
+
+    def test_xliff_export_creates_namespaced_targets(self):
+        content = (
+            b'<xliff xmlns="urn:oasis:names:tc:xliff:document:1.2" version="1.2">'
+            b'<file><body><trans-unit id="1"><source>Hello</source></trans-unit></body></file></xliff>'
+        )
+
+        updated = main.export_xliff_with_translated_text(content, "Hallo")
+
+        self.assertIn(b"<xlf:target>Hallo</xlf:target>", updated)
 
 
 if __name__ == "__main__":

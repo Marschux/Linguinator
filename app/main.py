@@ -1,4 +1,5 @@
 import base64
+import gc
 import os
 import re
 import secrets
@@ -13,9 +14,10 @@ import uuid
 import zipfile
 from datetime import datetime, timezone
 from functools import lru_cache
+from html.parser import HTMLParser
 from io import BytesIO, StringIO
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Tuple, Union
 from xml.etree import ElementTree
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -40,6 +42,8 @@ OCR_LANGUAGE = os.getenv("NLLB_OCR_LANGUAGE", "deu+eng")
 AUTH_ENABLED = os.getenv("LINGUMACHINA_AUTH_ENABLED", os.getenv("NLLB_AUTH_ENABLED", "false")).lower() in ("1", "true", "yes", "on")
 AUTH_USERNAME = os.getenv("LINGUMACHINA_AUTH_USERNAME", os.getenv("NLLB_AUTH_USERNAME", "admin"))
 AUTH_PASSWORD = os.getenv("LINGUMACHINA_AUTH_PASSWORD", os.getenv("NLLB_AUTH_PASSWORD", ""))
+MODEL_IDLE_UNLOAD_ENABLED = os.getenv("LINGUMACHINA_UNLOAD_MODEL_AFTER_IDLE", "true").lower() in ("1", "true", "yes", "on")
+MODEL_IDLE_SECONDS = int(os.getenv("LINGUMACHINA_MODEL_IDLE_SECONDS", "1200"))
 PDF_LOW_TEXT_CHARS = 20
 PDF_PAGE_WIDTH = 595
 PDF_PAGE_HEIGHT = 842
@@ -53,6 +57,8 @@ ElementTree.register_namespace("w", "http://schemas.openxmlformats.org/wordproce
 ElementTree.register_namespace("office", "urn:oasis:names:tc:opendocument:xmlns:office:1.0")
 ElementTree.register_namespace("text", "urn:oasis:names:tc:opendocument:xmlns:text:1.0")
 ElementTree.register_namespace("s", "http://schemas.openxmlformats.org/spreadsheetml/2006/main")
+ElementTree.register_namespace("a", "http://schemas.openxmlformats.org/drawingml/2006/main")
+ElementTree.register_namespace("xlf", "urn:oasis:names:tc:xliff:document:1.2")
 
 APP_DIR = Path(__file__).resolve().parent
 
@@ -60,6 +66,9 @@ app = FastAPI(title="Lingumachina", version="0.1.0")
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOBS_LOCK = threading.Lock()
+MODEL_LOCK = threading.RLock()
+MODEL_ACTIVE_USERS = 0
+MODEL_LAST_USED = 0.0
 
 
 class TranslateRequest(BaseModel):
@@ -141,6 +150,67 @@ def load_model():
     return tokenizer, model, device, torch
 
 
+def model_cache_loaded() -> bool:
+    return load_model.cache_info().currsize > 0 or load_tokenizer.cache_info().currsize > 0
+
+
+def begin_model_use():
+    global MODEL_ACTIVE_USERS
+    with MODEL_LOCK:
+        MODEL_ACTIVE_USERS += 1
+
+
+def end_model_use():
+    global MODEL_ACTIVE_USERS, MODEL_LAST_USED
+    with MODEL_LOCK:
+        MODEL_ACTIVE_USERS = max(0, MODEL_ACTIVE_USERS - 1)
+        MODEL_LAST_USED = time.time()
+
+
+def unload_model_cache() -> bool:
+    torch_module = None
+    with MODEL_LOCK:
+        if MODEL_ACTIVE_USERS > 0:
+            return False
+        if not model_cache_loaded():
+            return False
+        if load_model.cache_info().currsize > 0:
+            try:
+                _, _, _, torch_module = load_model()
+            except Exception:
+                torch_module = None
+        load_model.cache_clear()
+        load_tokenizer.cache_clear()
+    gc.collect()
+    cuda = getattr(torch_module, "cuda", None) if torch_module else None
+    if cuda and hasattr(cuda, "is_available") and hasattr(cuda, "empty_cache") and cuda.is_available():
+        cuda.empty_cache()
+    return True
+
+
+def unload_model_if_idle(now: float | None = None) -> bool:
+    if not MODEL_IDLE_UNLOAD_ENABLED or MODEL_IDLE_SECONDS <= 0:
+        return False
+    current_time = time.time() if now is None else now
+    with MODEL_LOCK:
+        if MODEL_ACTIVE_USERS > 0 or MODEL_LAST_USED <= 0:
+            return False
+        if current_time - MODEL_LAST_USED < MODEL_IDLE_SECONDS:
+            return False
+    return unload_model_cache()
+
+
+def model_idle_unloader():
+    while True:
+        sleep_seconds = min(60, max(1, MODEL_IDLE_SECONDS // 4 or 1))
+        time.sleep(sleep_seconds)
+        unload_model_if_idle()
+
+
+if MODEL_IDLE_UNLOAD_ENABLED and MODEL_IDLE_SECONDS > 0:
+    threading.Thread(target=model_idle_unloader, daemon=True).start()
+
+
 def language_codes():
     tokenizer = load_tokenizer()
     codes = getattr(tokenizer, "additional_special_tokens", [])
@@ -154,19 +224,23 @@ def translate_one(text: str, source: str, target: str) -> str:
     if not text:
         return ""
 
-    tokenizer, model, device, torch_module = load_model()
-    tokenizer.src_lang = source
-    inputs = tokenizer(text, return_tensors="pt", truncation=True).to(device)
-    forced_bos_token_id = tokenizer.convert_tokens_to_ids(target)
+    begin_model_use()
+    try:
+        tokenizer, model, device, torch_module = load_model()
+        tokenizer.src_lang = source
+        inputs = tokenizer(text, return_tensors="pt", truncation=True).to(device)
+        forced_bos_token_id = tokenizer.convert_tokens_to_ids(target)
 
-    with torch_module.inference_mode():
-        generated = model.generate(
-            **inputs,
-            forced_bos_token_id=forced_bos_token_id,
-            max_new_tokens=1024,
-            num_beams=4,
-        )
-    return tokenizer.batch_decode(generated, skip_special_tokens=True)[0]
+        with torch_module.inference_mode():
+            generated = model.generate(
+                **inputs,
+                forced_bos_token_id=forced_bos_token_id,
+                max_new_tokens=1024,
+                num_beams=4,
+            )
+        return tokenizer.batch_decode(generated, skip_special_tokens=True)[0]
+    finally:
+        end_model_use()
 
 
 def split_long_text(text: str, max_chars: int) -> List[str]:
@@ -718,6 +792,9 @@ def write_zip_with_replacement(content: bytes, replacements: Dict[str, bytes]) -
         ensure_zip_size(source)
         with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as target:
             for item in source.infolist():
+                normalized_name = item.filename.replace("\\", "/")
+                if normalized_name.startswith("/") or normalized_name.startswith("../") or "/../" in normalized_name:
+                    raise HTTPException(status_code=400, detail="Archive contains unsafe paths")
                 data = replacements.get(item.filename)
                 if data is None:
                     data = source.read(item.filename)
@@ -843,6 +920,79 @@ def export_odt_with_translated_text(content: bytes, translated_text: str) -> byt
         replace_text_preserving_markup(paragraph, blocks[block_index])
         block_index += 1
     return write_zip_with_replacement(content, {"content.xml": ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)})
+
+
+def pptx_text_part_names(pptx: zipfile.ZipFile) -> List[str]:
+    names = [
+        item.filename
+        for item in pptx.infolist()
+        if item.filename.startswith("ppt/slides/slide") and item.filename.endswith(".xml")
+    ]
+    return sorted(names, key=lambda name: [int(part) if part.isdigit() else part for part in re.split(r"(\d+)", name)])
+
+
+def extract_pptx_text_from_bytes(content: bytes) -> str:
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as pptx:
+            ensure_zip_size(pptx)
+            documents = {part: pptx.read(part) for part in pptx_text_part_names(pptx)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read PPTX: {exc}") from exc
+
+    namespaces = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+    paragraphs = []
+    for part, document in documents.items():
+        try:
+            root = ElementTree.fromstring(document)
+        except ElementTree.ParseError as exc:
+            raise HTTPException(status_code=400, detail=f"Could not parse PPTX XML {part}: {exc}") from exc
+        for paragraph in root.findall(".//a:p", namespaces):
+            text = "".join(node.text or "" for node in paragraph.findall(".//a:t", namespaces)).strip()
+            if text:
+                paragraphs.append(text)
+
+    result = "\n\n".join(paragraphs).strip()
+    if not result:
+        raise HTTPException(status_code=422, detail="No text found in PPTX")
+    return result
+
+
+def export_pptx_with_translated_text(content: bytes, translated_text: str) -> bytes:
+    blocks = translated_blocks(translated_text)
+    if not blocks:
+        raise HTTPException(status_code=400, detail="No translated text to export")
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as pptx:
+            ensure_zip_size(pptx)
+            documents = {part: pptx.read(part) for part in pptx_text_part_names(pptx)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read PPTX: {exc}") from exc
+
+    namespaces = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+    replacements = {}
+    block_index = 0
+    for part, document in documents.items():
+        root = ElementTree.fromstring(document)
+        changed = False
+        for paragraph in root.findall(".//a:p", namespaces):
+            text_nodes = paragraph.findall(".//a:t", namespaces)
+            if not "".join(node.text or "" for node in text_nodes).strip():
+                continue
+            if block_index >= len(blocks):
+                break
+            for node_index, node in enumerate(text_nodes):
+                node.text = blocks[block_index] if node_index == 0 else ""
+            block_index += 1
+            changed = True
+        if changed:
+            replacements[part] = ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
+        if block_index >= len(blocks):
+            break
+    return write_zip_with_replacement(content, replacements)
 
 
 def replace_text_preserving_markup(element, text: str):
@@ -1123,6 +1273,294 @@ def export_xlsx_with_translated_text(content: bytes, sheet_name: str, columns: s
     return write_zip_with_replacement(content, {sheet_path: ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)})
 
 
+class TranslatableHtmlParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=False)
+        self.output = []
+        self.texts = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        self.output.append(self.get_starttag_text())
+        if tag.lower() in {"script", "style"}:
+            self._skip_depth += 1
+
+    def handle_startendtag(self, tag, attrs):
+        self.output.append(self.get_starttag_text())
+
+    def handle_endtag(self, tag):
+        if tag.lower() in {"script", "style"} and self._skip_depth:
+            self._skip_depth -= 1
+        self.output.append(f"</{tag}>")
+
+    def handle_data(self, data):
+        if self._skip_depth or not data.strip():
+            self.output.append(data)
+            return
+        index = len(self.texts)
+        self.texts.append(data.strip())
+        prefix = data[:len(data) - len(data.lstrip())]
+        suffix = data[len(data.rstrip()):]
+        self.output.append(("text", index, prefix, suffix))
+
+    def handle_entityref(self, name):
+        self.output.append(f"&{name};")
+
+    def handle_charref(self, name):
+        self.output.append(f"&#{name};")
+
+    def handle_comment(self, data):
+        self.output.append(f"<!--{data}-->")
+
+    def handle_decl(self, decl):
+        self.output.append(f"<!{decl}>")
+
+    def handle_pi(self, data):
+        self.output.append(f"<?{data}>")
+
+
+def parse_html(content: bytes) -> TranslatableHtmlParser:
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not decode HTML as UTF-8: {exc}") from exc
+    parser = TranslatableHtmlParser()
+    parser.feed(text)
+    parser.close()
+    return parser
+
+
+def extract_html_text_from_bytes(content: bytes) -> str:
+    parser = parse_html(content)
+    result = "\n\n".join(parser.texts).strip()
+    if not result:
+        raise HTTPException(status_code=422, detail="No text found in HTML")
+    return result
+
+
+def export_html_with_translated_text(content: bytes, translated_text: str) -> bytes:
+    parser = parse_html(content)
+    blocks = translated_blocks(translated_text)
+    rendered = []
+    for part in parser.output:
+        if isinstance(part, tuple):
+            _, index, prefix, suffix = part
+            rendered.append(prefix + (blocks[index] if index < len(blocks) else parser.texts[index]) + suffix)
+        else:
+            rendered.append(part)
+    return "".join(rendered).encode("utf-8")
+
+
+def subtitle_text_blocks(text: str) -> List[Tuple[int, str]]:
+    blocks = []
+    for match in re.finditer(r"(?ms)(^|\n)([^\n]*-->\s*[^\n]+)\n(.*?)(?=\n\s*\n|\Z)", text):
+        cue_text = "\n".join(line for line in match.group(3).splitlines() if line.strip() and not line.lstrip().startswith(("NOTE", "STYLE", "REGION")))
+        if cue_text.strip():
+            blocks.append((match.start(3), cue_text.strip()))
+    return blocks
+
+
+def extract_subtitle_text_from_bytes(content: bytes) -> str:
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not decode subtitle as UTF-8: {exc}") from exc
+    blocks = [block for _, block in subtitle_text_blocks(text)]
+    result = "\n\n".join(blocks).strip()
+    if not result:
+        raise HTTPException(status_code=422, detail="No subtitle text found")
+    return result
+
+
+def export_subtitle_with_translated_text(content: bytes, translated_text: str) -> bytes:
+    try:
+        original = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not decode subtitle as UTF-8: {exc}") from exc
+    blocks = translated_blocks(translated_text)
+    parts = re.split(r"(\n\s*\n)", original)
+    block_index = 0
+    for index, part in enumerate(parts):
+        if "-->" not in part or block_index >= len(blocks):
+            continue
+        lines = part.splitlines()
+        cue_line = next((line_index for line_index, line in enumerate(lines) if "-->" in line), None)
+        if cue_line is None:
+            continue
+        parts[index] = "\n".join(lines[:cue_line + 1] + blocks[block_index].splitlines())
+        block_index += 1
+    return "".join(parts).encode("utf-8")
+
+
+def json_string_paths(value: Any, path: Tuple[Any, ...] = ()) -> List[Tuple[Tuple[Any, ...], str]]:
+    if isinstance(value, str):
+        return [(path, value)] if value.strip() else []
+    if isinstance(value, list):
+        paths = []
+        for index, item in enumerate(value):
+            paths.extend(json_string_paths(item, path + (index,)))
+        return paths
+    if isinstance(value, dict):
+        paths = []
+        for key, item in value.items():
+            paths.extend(json_string_paths(item, path + (key,)))
+        return paths
+    return []
+
+
+def set_path_value(value: Any, path: Tuple[Any, ...], replacement: str):
+    target = value
+    for part in path[:-1]:
+        target = target[part]
+    target[path[-1]] = replacement
+
+
+def extract_json_text_from_bytes(content: bytes) -> str:
+    try:
+        data = json.loads(content.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Could not parse JSON: {exc}") from exc
+    values = [text for _, text in json_string_paths(data)]
+    result = "\n\n".join(values).strip()
+    if not result:
+        raise HTTPException(status_code=422, detail="No translatable strings found in JSON")
+    return result
+
+
+def export_json_with_translated_text(content: bytes, translated_text: str) -> bytes:
+    try:
+        data = json.loads(content.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=400, detail=f"Could not parse JSON: {exc}") from exc
+    paths = json_string_paths(data)
+    for (path, _), block in zip(paths, translated_blocks(translated_text)):
+        set_path_value(data, path, block)
+    return (json.dumps(data, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+
+
+YAML_SCALAR_RE = re.compile(r"^(\s*[-\w\"'].*?:\s*)(['\"]?)([^#\n]*?\S)(\2)(\s*(?:#.*)?)$")
+
+
+def yaml_scalar_lines(text: str) -> List[Tuple[int, str]]:
+    scalars = []
+    for index, line in enumerate(text.splitlines()):
+        match = YAML_SCALAR_RE.match(line)
+        if match and match.group(3).strip() not in {"true", "false", "null", "~"} and not re.fullmatch(r"[-+]?\d+(\.\d+)?", match.group(3).strip()):
+            scalars.append((index, match.group(3).strip()))
+    return scalars
+
+
+def extract_yaml_text_from_bytes(content: bytes) -> str:
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not decode YAML as UTF-8: {exc}") from exc
+    values = [value for _, value in yaml_scalar_lines(text)]
+    result = "\n\n".join(values).strip()
+    if not result:
+        raise HTTPException(status_code=422, detail="No simple YAML strings found")
+    return result
+
+
+def export_yaml_with_translated_text(content: bytes, translated_text: str) -> bytes:
+    text = content.decode("utf-8-sig")
+    lines = text.splitlines()
+    blocks = translated_blocks(translated_text)
+    for (line_index, _), block in zip(yaml_scalar_lines(text), blocks):
+        match = YAML_SCALAR_RE.match(lines[line_index])
+        if match:
+            lines[line_index] = match.group(1) + match.group(2) + block + match.group(4) + match.group(5)
+    return ("\n".join(lines) + ("\n" if text.endswith("\n") else "")).encode("utf-8")
+
+
+def po_entries(text: str) -> List[Tuple[str, str]]:
+    entries = []
+    current_id = None
+    for line in text.splitlines():
+        if line.startswith("msgid "):
+            current_id = po_unquote(line[6:].strip())
+        elif line.startswith("msgstr ") and current_id:
+            entries.append((current_id, po_unquote(line[7:].strip())))
+            current_id = None
+    return entries
+
+
+def po_unquote(value: str) -> str:
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value.strip('"')
+
+
+def po_quote(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+def extract_po_text_from_bytes(content: bytes) -> str:
+    text = content.decode("utf-8-sig")
+    values = [msgstr or msgid for msgid, msgstr in po_entries(text) if (msgstr or msgid).strip()]
+    result = "\n\n".join(values).strip()
+    if not result:
+        raise HTTPException(status_code=422, detail="No PO messages found")
+    return result
+
+
+def export_po_with_translated_text(content: bytes, translated_text: str) -> bytes:
+    lines = content.decode("utf-8-sig").splitlines()
+    blocks = translated_blocks(translated_text)
+    block_index = 0
+    for index, line in enumerate(lines):
+        if line.startswith("msgstr ") and block_index < len(blocks):
+            lines[index] = "msgstr " + po_quote(blocks[block_index])
+            block_index += 1
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def extract_xliff_text_from_bytes(content: bytes) -> str:
+    try:
+        root = ElementTree.fromstring(content)
+    except ElementTree.ParseError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not parse XLIFF: {exc}") from exc
+    values = []
+    for unit in root.findall(".//{*}trans-unit"):
+        target = unit.find("{*}target")
+        source = unit.find("{*}source")
+        text = "".join(target.itertext()).strip() if target is not None else ""
+        if not text and source is not None:
+            text = "".join(source.itertext()).strip()
+        if text:
+            values.append(text)
+    result = "\n\n".join(values).strip()
+    if not result:
+        raise HTTPException(status_code=422, detail="No XLIFF text found")
+    return result
+
+
+def xml_tag_with_namespace(parent, local_name: str) -> str:
+    if parent.tag.startswith("{"):
+        namespace, _, _ = parent.tag[1:].partition("}")
+        return "{" + namespace + "}" + local_name
+    return local_name
+
+
+def export_xliff_with_translated_text(content: bytes, translated_text: str) -> bytes:
+    try:
+        root = ElementTree.fromstring(content)
+    except ElementTree.ParseError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not parse XLIFF: {exc}") from exc
+    blocks = translated_blocks(translated_text)
+    block_index = 0
+    for unit in root.findall(".//{*}trans-unit"):
+        target = unit.find("{*}target")
+        if target is None:
+            target = ElementTree.SubElement(unit, xml_tag_with_namespace(unit, "target"))
+        if block_index >= len(blocks):
+            break
+        replace_text_preserving_markup(target, blocks[block_index])
+        block_index += 1
+    return ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
+
+
 async def extract_pdf_markdown(file: UploadFile, page_range: str = "") -> str:
     content = await read_upload_bytes(file, "PDF")
     return extract_pdf_markdown_from_bytes(content, file.content_type or "application/pdf", page_range)
@@ -1214,6 +1652,9 @@ def health():
         "max_file_mb": MAX_FILE_MB,
         "ocr_enabled": OCR_ENABLED,
         "ocr_language": OCR_LANGUAGE,
+        "model_idle_unload_enabled": MODEL_IDLE_UNLOAD_ENABLED,
+        "model_idle_seconds": MODEL_IDLE_SECONDS,
+        "model_loaded": model_cache_loaded(),
     }
 
 
@@ -1333,6 +1774,19 @@ async def export_odt(
     )
 
 
+@app.post("/export-pptx")
+async def export_pptx(
+    file: UploadFile = File(...),
+    text: str = Form(""),
+):
+    content = await read_upload_bytes(file, "PPTX")
+    return Response(
+        export_pptx_with_translated_text(content, text),
+        media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        headers={"Content-Disposition": 'attachment; filename="nllb-translation.pptx"'},
+    )
+
+
 @app.post("/export-csv")
 async def export_csv(
     file: UploadFile = File(...),
@@ -1360,6 +1814,42 @@ async def export_xlsx(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="nllb-translation.xlsx"'},
     )
+
+
+@app.post("/export-html")
+async def export_html(file: UploadFile = File(...), text: str = Form("")):
+    content = await read_upload_bytes(file, "HTML")
+    return Response(export_html_with_translated_text(content, text), media_type="text/html")
+
+
+@app.post("/export-subtitle")
+async def export_subtitle(file: UploadFile = File(...), text: str = Form("")):
+    content = await read_upload_bytes(file, "Subtitle")
+    return Response(export_subtitle_with_translated_text(content, text), media_type="text/plain")
+
+
+@app.post("/export-json")
+async def export_json(file: UploadFile = File(...), text: str = Form("")):
+    content = await read_upload_bytes(file, "JSON")
+    return Response(export_json_with_translated_text(content, text), media_type="application/json")
+
+
+@app.post("/export-yaml")
+async def export_yaml(file: UploadFile = File(...), text: str = Form("")):
+    content = await read_upload_bytes(file, "YAML")
+    return Response(export_yaml_with_translated_text(content, text), media_type="text/yaml")
+
+
+@app.post("/export-po")
+async def export_po(file: UploadFile = File(...), text: str = Form("")):
+    content = await read_upload_bytes(file, "PO")
+    return Response(export_po_with_translated_text(content, text), media_type="text/plain")
+
+
+@app.post("/export-xliff")
+async def export_xliff(file: UploadFile = File(...), text: str = Form("")):
+    content = await read_upload_bytes(file, "XLIFF")
+    return Response(export_xliff_with_translated_text(content, text), media_type="application/xml")
 
 
 @app.delete("/history/{item_id}")
@@ -1403,6 +1893,12 @@ async def extract_odt(file: UploadFile = File(...)):
     return extract_odt_text_from_bytes(content)
 
 
+@app.post("/extract-pptx", response_class=PlainTextResponse)
+async def extract_pptx(file: UploadFile = File(...)):
+    content = await read_upload_bytes(file, "PPTX")
+    return extract_pptx_text_from_bytes(content)
+
+
 @app.post("/extract-csv", response_class=PlainTextResponse)
 async def extract_csv(file: UploadFile = File(...), columns: str = Form("")):
     content = await read_upload_bytes(file, "CSV")
@@ -1417,6 +1913,42 @@ async def extract_xlsx(
 ):
     content = await read_upload_bytes(file, "XLSX")
     return extract_xlsx_text_from_bytes(content, sheet_name, columns)
+
+
+@app.post("/extract-html", response_class=PlainTextResponse)
+async def extract_html(file: UploadFile = File(...)):
+    content = await read_upload_bytes(file, "HTML")
+    return extract_html_text_from_bytes(content)
+
+
+@app.post("/extract-subtitle", response_class=PlainTextResponse)
+async def extract_subtitle(file: UploadFile = File(...)):
+    content = await read_upload_bytes(file, "Subtitle")
+    return extract_subtitle_text_from_bytes(content)
+
+
+@app.post("/extract-json", response_class=PlainTextResponse)
+async def extract_json(file: UploadFile = File(...)):
+    content = await read_upload_bytes(file, "JSON")
+    return extract_json_text_from_bytes(content)
+
+
+@app.post("/extract-yaml", response_class=PlainTextResponse)
+async def extract_yaml(file: UploadFile = File(...)):
+    content = await read_upload_bytes(file, "YAML")
+    return extract_yaml_text_from_bytes(content)
+
+
+@app.post("/extract-po", response_class=PlainTextResponse)
+async def extract_po(file: UploadFile = File(...)):
+    content = await read_upload_bytes(file, "PO")
+    return extract_po_text_from_bytes(content)
+
+
+@app.post("/extract-xliff", response_class=PlainTextResponse)
+async def extract_xliff(file: UploadFile = File(...)):
+    content = await read_upload_bytes(file, "XLIFF")
+    return extract_xliff_text_from_bytes(content)
 
 
 @app.post("/translate-pdf", response_class=PlainTextResponse)

@@ -220,7 +220,7 @@
       },
       text: {
         panel: "filePanel",
-        accept: ".txt,text/plain",
+        accept: ".txt,.html,.htm,.srt,.vtt,.json,.yaml,.yml,.po,.xlf,.xliff,text/plain,text/html,application/json,text/yaml,application/x-xliff+xml",
         label: "Text File",
         sourceFormat: "txt"
       },
@@ -232,7 +232,7 @@
       },
       office: {
         panel: "filePanel",
-        accept: ".docx,.odt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.oasis.opendocument.text",
+        accept: ".docx,.odt,.pptx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.oasis.opendocument.text,application/vnd.openxmlformats-officedocument.presentationml.presentation",
         label: "Office Doc",
         sourceFormat: "md"
       },
@@ -254,6 +254,13 @@
       if (fileName.endsWith(".csv")) return "/extract-csv";
       if (fileName.endsWith(".xlsx")) return "/extract-xlsx";
       if (fileName.endsWith(".odt")) return "/extract-odt";
+      if (fileName.endsWith(".pptx")) return "/extract-pptx";
+      if (fileName.endsWith(".html") || fileName.endsWith(".htm")) return "/extract-html";
+      if (fileName.endsWith(".srt") || fileName.endsWith(".vtt")) return "/extract-subtitle";
+      if (fileName.endsWith(".json")) return "/extract-json";
+      if (fileName.endsWith(".yaml") || fileName.endsWith(".yml")) return "/extract-yaml";
+      if (fileName.endsWith(".po")) return "/extract-po";
+      if (fileName.endsWith(".xlf") || fileName.endsWith(".xliff")) return "/extract-xliff";
       return "/extract-docx";
     }
 
@@ -448,7 +455,7 @@
 
     function outputFormatDetails(format) {
       if (format === "original") {
-        if (["docx", "odt", "csv", "xlsx"].includes(currentOriginalExtension)) {
+        if (["docx", "odt", "pptx", "csv", "xlsx", "html", "htm", "srt", "vtt", "json", "yaml", "yml", "po", "xlf", "xliff"].includes(currentOriginalExtension)) {
           return {extension: currentOriginalExtension, originalFile: true};
         }
         if (currentSourceFormat === "pdf") return {extension: "pdf", contentType: "application/pdf", pdf: true};
@@ -491,8 +498,19 @@
       return {
         docx: "/export-docx",
         odt: "/export-odt",
+        pptx: "/export-pptx",
         csv: "/export-csv",
-        xlsx: "/export-xlsx"
+        xlsx: "/export-xlsx",
+        html: "/export-html",
+        htm: "/export-html",
+        srt: "/export-subtitle",
+        vtt: "/export-subtitle",
+        json: "/export-json",
+        yaml: "/export-yaml",
+        yml: "/export-yaml",
+        po: "/export-po",
+        xlf: "/export-xliff",
+        xliff: "/export-xliff"
       }[extension];
     }
 
@@ -554,15 +572,16 @@
     async function loadTextFile() {
       const file = document.getElementById("textFile").files[0];
       if (!file) {
-        setResult("Select a TXT, Markdown, DOCX, ODT, CSV, or XLSX file first.");
+        setResult("Select a supported text, document, table, subtitle, or localization file first.");
         return;
       }
       const lowerName = file.name.toLowerCase();
       const isCsv = lowerName.endsWith(".csv");
       const isXlsx = lowerName.endsWith(".xlsx");
-      const isOfficeFile = lowerName.endsWith(".docx") || lowerName.endsWith(".odt");
+      const isOfficeFile = lowerName.endsWith(".docx") || lowerName.endsWith(".odt") || lowerName.endsWith(".pptx");
+      const isStructuredText = [".html", ".htm", ".srt", ".vtt", ".json", ".yaml", ".yml", ".po", ".xlf", ".xliff"].some((extension) => lowerName.endsWith(extension));
       currentOriginalExtension = lowerName.split(".").pop() || currentOriginalExtension;
-      if (isCsv || isXlsx || isOfficeFile) {
+      if (isCsv || isXlsx || isOfficeFile || isStructuredText) {
         const form = new FormData();
         form.append("file", file);
         if (isCsv || isXlsx) {
@@ -580,7 +599,7 @@
           return;
         }
         document.getElementById("text").value = text;
-        currentSourceFormat = isCsv || isXlsx || isOfficeFile ? "md" : currentSourceFormat;
+        currentSourceFormat = isCsv || isXlsx || isOfficeFile || isStructuredText ? "md" : currentSourceFormat;
       } else {
         document.getElementById("text").value = await file.text();
         currentSourceFormat = lowerName.endsWith(".md") ? "md" : "txt";
