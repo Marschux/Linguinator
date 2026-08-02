@@ -275,12 +275,19 @@
       padding-top: 1.45rem;
     }
 
-    /* Ersten Abschnitt nach dem Header ohne Trennstrich */
-    header + .workspace-section,
-    #progress.workspace-section {
+    /* Progress-Bereich und ersten Abschnitt nach dem Header ohne Trennstrich */
+    #progress,
+    header + .workspace-section:not(#queuePanel) {
       border-top: none;
       margin-top: 0;
       padding-top: 0;
+    }
+
+    /* Queue-Bereich hat eigenen Abstand nach Progress */
+    #queuePanel.workspace-section {
+      margin-top: 1.35rem;
+      padding-top: 1.45rem;
+      border-top: 1px solid rgba(255, 255, 255, .1);
     }
     .row { display: grid; gap: 1rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
