@@ -44,6 +44,8 @@ AUTH_USERNAME = os.getenv("LINGUMACHINA_AUTH_USERNAME", os.getenv("NLLB_AUTH_USE
 AUTH_PASSWORD = os.getenv("LINGUMACHINA_AUTH_PASSWORD", os.getenv("NLLB_AUTH_PASSWORD", ""))
 MODEL_IDLE_UNLOAD_ENABLED = os.getenv("LINGUMACHINA_UNLOAD_MODEL_AFTER_IDLE", "true").lower() in ("1", "true", "yes", "on")
 MODEL_IDLE_SECONDS = int(os.getenv("LINGUMACHINA_MODEL_IDLE_SECONDS", "1200"))
+PUBLIC_URL = os.getenv("LINGUMACHINA_PUBLIC_URL", "").rstrip("/")
+TRUST_PROXY_HEADERS = os.getenv("LINGUMACHINA_TRUST_PROXY_HEADERS", "true").lower() in ("1", "true", "yes", "on")
 PDF_LOW_TEXT_CHARS = 20
 PDF_PAGE_WIDTH = 595
 PDF_PAGE_HEIGHT = 842
@@ -62,7 +64,15 @@ ElementTree.register_namespace("xlf", "urn:oasis:names:tc:xliff:document:1.2")
 
 APP_DIR = Path(__file__).resolve().parent
 
-app = FastAPI(title="Lingumachina", version="0.1.0")
+
+def normalized_root_path(value: str) -> str:
+    path = value.strip().strip("/")
+    return f"/{path}" if path else ""
+
+
+ROOT_PATH = normalized_root_path(os.getenv("LINGUMACHINA_ROOT_PATH", ""))
+
+app = FastAPI(title="Lingumachina", version="0.1.0", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOBS_LOCK = threading.Lock()
@@ -1655,6 +1665,9 @@ def health():
         "model_idle_unload_enabled": MODEL_IDLE_UNLOAD_ENABLED,
         "model_idle_seconds": MODEL_IDLE_SECONDS,
         "model_loaded": model_cache_loaded(),
+        "root_path": ROOT_PATH,
+        "public_url": PUBLIC_URL,
+        "trust_proxy_headers": TRUST_PROXY_HEADERS,
     }
 
 

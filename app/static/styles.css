@@ -40,16 +40,32 @@
 
     header {
       align-items: end;
+      border-bottom: 1px solid rgba(255, 255, 255, .08);
       display: flex;
       gap: 1rem;
       justify-content: space-between;
       margin-bottom: 1.5rem;
+      padding-bottom: 1.25rem;
     }
 
     h1, h2 { line-height: 1.1; margin: 0; }
-    h1 { font-size: clamp(2rem, 5vw, 3.5rem); }
+    h1 {
+      align-items: center;
+      color: #fff;
+      display: flex;
+      font-size: clamp(2.15rem, 5vw, 3.65rem);
+      font-weight: 850;
+      gap: .15em;
+      text-shadow: 0 2px 0 rgba(47, 125, 246, .42);
+    }
     h2 { font-size: 1.05rem; margin-top: .25rem; }
     .subtle { color: var(--muted); margin: .5rem 0 0; }
+
+    .brand-logo {
+      flex: 0 0 auto;
+      height: .95em;
+      width: .95em;
+    }
 
     label {
       color: var(--text);
@@ -240,8 +256,6 @@
     .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
     .section { margin-top: 1.4rem; }
     .hidden { display: none; }
-    .app.history-mode .workspace-section { display: none; }
-    .app.history-mode #historySection { display: block; }
     .tabs {
       display: flex;
       flex-wrap: wrap;
@@ -283,6 +297,29 @@
     .section-heading label { margin-bottom: 0; }
     .section-heading button { min-height: 2.25rem; padding: .4rem .75rem; }
     .section-heading .actions { margin-top: 0; }
+    .view-tabs {
+      display: flex;
+      gap: .45rem;
+    }
+
+    .view-tab {
+      background: transparent;
+      border-color: var(--line);
+      color: var(--muted);
+      min-height: 2.25rem;
+      padding: .4rem .75rem;
+    }
+
+    .view-tab.active,
+    .view-tab:hover {
+      background: rgba(47, 125, 246, .16);
+      border-color: var(--accent);
+      color: var(--text);
+      transform: none;
+    }
+
+    .result-panel { display: none; }
+    .result-panel.active { display: block; }
     .download-row {
       align-items: end;
       display: flex;
@@ -375,7 +412,7 @@
     }
 
     .history-main { min-width: 0; }
-    .history-meta { color: var(--muted); font-size: .85rem; margin-top: .15rem; }
+    .history-meta { color: var(--muted); font-size: .85rem; margin-top: .15rem; overflow-wrap: anywhere; }
     .history-delete { min-height: 2.25rem; padding: .4rem .7rem; }
 
     pre {
@@ -403,12 +440,136 @@
     }
 
     @media (max-width: 720px) {
-      body { align-items: stretch; padding: 1rem; }
-      .app { padding: 1.2rem; }
-      header { align-items: start; display: block; }
+      body {
+        align-items: stretch;
+        display: block;
+        padding: .75rem;
+      }
+
+      .app {
+        box-shadow: none;
+        padding: 1rem;
+        width: 100%;
+      }
+
+      header {
+        align-items: start;
+        display: block;
+        margin-bottom: 1rem;
+        padding-bottom: .9rem;
+      }
+
+      h1 { font-size: 2rem; }
+      .subtle { font-size: .92rem; }
+      .grid { gap: .75rem; }
       .row { grid-template-columns: 1fr; }
-      .section-heading { align-items: stretch; flex-direction: column; gap: .6rem; }
-      .download-row { align-items: stretch; flex-direction: column; gap: .2rem; }
-      .history-row { align-items: stretch; flex-direction: column; }
+
+      textarea {
+        min-height: 10rem;
+        padding: .75rem;
+      }
+
+      .section { margin-top: 1rem; }
+      .section.tab-panel { margin-top: .75rem; }
+      .tab-panel.active { min-height: auto; }
+
+      .tabs {
+        flex-wrap: nowrap;
+        margin: 0 -1rem;
+        overflow-x: auto;
+        padding: 0 1rem .25rem;
+        scrollbar-width: thin;
+      }
+
+      .tab {
+        flex: 0 0 auto;
+        min-height: 2.2rem;
+        white-space: nowrap;
+      }
+
+      .actions.workspace-section {
+        background: rgba(24, 28, 34, .98);
+        border-top: 1px solid rgba(255, 255, 255, .08);
+        bottom: 0;
+        display: grid;
+        gap: .5rem;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        margin: 1rem -1rem 0;
+        padding: .75rem 1rem calc(.75rem + env(safe-area-inset-bottom));
+        position: sticky;
+        z-index: 15;
+      }
+
+      .actions.workspace-section #translate {
+        grid-column: 1 / -1;
+      }
+
       button { width: 100%; }
+
+      .section-heading {
+        align-items: stretch;
+        flex-direction: column;
+        gap: .55rem;
+      }
+
+      .view-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+      .download-row {
+        align-items: stretch;
+        display: grid;
+        gap: .45rem;
+        grid-template-columns: 1fr;
+      }
+
+      .export-actions {
+        display: grid;
+        gap: .5rem;
+        grid-template-columns: minmax(0, 1fr) auto;
+        margin-top: 0;
+      }
+
+      .export-actions select { width: 100%; }
+
+      .history-row {
+        align-items: stretch;
+        flex-direction: column;
+        gap: .55rem;
+      }
+
+      .history a {
+        display: block;
+        word-break: break-word;
+      }
+
+      .history-meta {
+        line-height: 1.35;
+        word-break: break-word;
+      }
+    }
+
+    @media (max-width: 430px) {
+      body { padding: .5rem; }
+      .app { padding: .85rem; }
+      h1 { font-size: 1.75rem; }
+      label { font-size: .85rem; }
+
+      .language-trigger,
+      input[type=file],
+      input[type=text],
+      select {
+        min-height: 2.75rem;
+        padding-bottom: .55rem;
+        padding-top: .55rem;
+      }
+
+      .actions.workspace-section {
+        grid-template-columns: 1fr;
+        margin-left: -.85rem;
+        margin-right: -.85rem;
+        padding-left: .85rem;
+        padding-right: .85rem;
+      }
+
+      .export-actions { grid-template-columns: 1fr; }
+      pre { min-height: 120px; padding: .75rem; }
     }

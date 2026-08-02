@@ -34,16 +34,14 @@ http://localhost:5051/
 - Default languages: source and target language.
 - OCR: enable flag and OCR language.
 - Basic auth: login protection for the UI and API.
+- Reverse proxy: root path, public URL, and trusted proxy headers.
+- Direct HTTPS: optional certificate and key files.
 - Idle memory handling: unload the cached model after inactivity.
-
-Planned environment-based features:
-
-- HTTPS support.
-- Reverse proxy support.
 
 ## Notes
 
 - Default port: `5051`
+- HTTPS is best terminated by Caddy, Traefik, Nginx, or another reverse proxy.
 - GPU test profile: `docker compose --profile gpu up -d lingumachina-gpu`
 - OCR build: `docker compose build --build-arg INSTALL_OCR=true`
 - Docker image: `registry.gitlab.com/marschu/lingumachina:latest`

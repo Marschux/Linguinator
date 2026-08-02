@@ -5,6 +5,7 @@
     let currentSourceFormat = "txt";
     let currentOriginalExtension = "txt";
     let fullResultText = "";
+    const baseTitle = document.title || "Lingumachina";
     const PREVIEW_MAX_CHARS = 12000;
     const EXCERPT_MAX_CHARS = 4000;
     const favoriteLanguages = ["deu_Latn", "eng_Latn", "fra_Latn", "spa_Latn", "ita_Latn"];
@@ -251,17 +252,17 @@
     };
 
     function extractionPathForFile(fileName) {
-      if (fileName.endsWith(".csv")) return "/extract-csv";
-      if (fileName.endsWith(".xlsx")) return "/extract-xlsx";
-      if (fileName.endsWith(".odt")) return "/extract-odt";
-      if (fileName.endsWith(".pptx")) return "/extract-pptx";
-      if (fileName.endsWith(".html") || fileName.endsWith(".htm")) return "/extract-html";
-      if (fileName.endsWith(".srt") || fileName.endsWith(".vtt")) return "/extract-subtitle";
-      if (fileName.endsWith(".json")) return "/extract-json";
-      if (fileName.endsWith(".yaml") || fileName.endsWith(".yml")) return "/extract-yaml";
-      if (fileName.endsWith(".po")) return "/extract-po";
-      if (fileName.endsWith(".xlf") || fileName.endsWith(".xliff")) return "/extract-xliff";
-      return "/extract-docx";
+      if (fileName.endsWith(".csv")) return "extract-csv";
+      if (fileName.endsWith(".xlsx")) return "extract-xlsx";
+      if (fileName.endsWith(".odt")) return "extract-odt";
+      if (fileName.endsWith(".pptx")) return "extract-pptx";
+      if (fileName.endsWith(".html") || fileName.endsWith(".htm")) return "extract-html";
+      if (fileName.endsWith(".srt") || fileName.endsWith(".vtt")) return "extract-subtitle";
+      if (fileName.endsWith(".json")) return "extract-json";
+      if (fileName.endsWith(".yaml") || fileName.endsWith(".yml")) return "extract-yaml";
+      if (fileName.endsWith(".po")) return "extract-po";
+      if (fileName.endsWith(".xlf") || fileName.endsWith(".xliff")) return "extract-xliff";
+      return "extract-docx";
     }
 
     function languageByCode(code) {
@@ -346,7 +347,7 @@
     }
 
     async function loadLanguages() {
-      const response = await fetch("/languages");
+      const response = await fetch("languages");
       languageData = await response.json();
       renderSelect("source", getRecent("source")[0] || languageData.source_default);
       renderSelect("target", getRecent("target")[0] || languageData.target_default);
@@ -387,19 +388,19 @@
       button.addEventListener("click", () => setInputTab(button.dataset.inputTab));
     });
 
-    document.getElementById("historyToggle").addEventListener("click", async () => {
-      const app = document.querySelector(".app");
-      const historySection = document.getElementById("historySection");
-      const historyButton = document.getElementById("historyToggle");
-      const historyMode = !app.classList.contains("history-mode");
-      app.classList.toggle("history-mode", historyMode);
-      historySection.classList.toggle("hidden", !historyMode);
-      historyButton.textContent = historyMode ? "Back" : "History";
-      historyButton.title = historyMode ? "Return to the workspace." : "Open the history view.";
-      if (historyMode) {
-        await loadHistory();
+    function setResultView(view) {
+      const showHistory = view === "history";
+      document.getElementById("previewPanel").classList.toggle("active", !showHistory);
+      document.getElementById("historyPanel").classList.toggle("active", showHistory);
+      document.getElementById("previewToggle").classList.toggle("active", !showHistory);
+      document.getElementById("historyToggle").classList.toggle("active", showHistory);
+      if (showHistory) {
+        loadHistory();
       }
-    });
+    }
+
+    document.getElementById("previewToggle").addEventListener("click", () => setResultView("preview"));
+    document.getElementById("historyToggle").addEventListener("click", () => setResultView("history"));
 
     function syncOverlayControls() {
       const cover = document.getElementById("coverPdfText");
@@ -472,7 +473,7 @@
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
       const url = URL.createObjectURL(blob);
       link.href = url;
-      link.download = "nllb-result-" + stamp + "." + extension;
+      link.download = "lingumachina-result-" + stamp + "." + extension;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -485,7 +486,7 @@
       form.append("file", file);
       form.append("text", text);
       form.append("cover_original", document.getElementById("coverPdfText").checked ? "true" : "false");
-      const response = await fetch("/export-pdf-overlay", {method: "POST", body: form});
+      const response = await fetch("export-pdf-overlay", {method: "POST", body: form});
       if (!response.ok) {
         const error = await response.text();
         setPreview(errorTextFromResponse(error));
@@ -496,21 +497,21 @@
 
     function originalExportPath(extension) {
       return {
-        docx: "/export-docx",
-        odt: "/export-odt",
-        pptx: "/export-pptx",
-        csv: "/export-csv",
-        xlsx: "/export-xlsx",
-        html: "/export-html",
-        htm: "/export-html",
-        srt: "/export-subtitle",
-        vtt: "/export-subtitle",
-        json: "/export-json",
-        yaml: "/export-yaml",
-        yml: "/export-yaml",
-        po: "/export-po",
-        xlf: "/export-xliff",
-        xliff: "/export-xliff"
+        docx: "export-docx",
+        odt: "export-odt",
+        pptx: "export-pptx",
+        csv: "export-csv",
+        xlsx: "export-xlsx",
+        html: "export-html",
+        htm: "export-html",
+        srt: "export-subtitle",
+        vtt: "export-subtitle",
+        json: "export-json",
+        yaml: "export-yaml",
+        yml: "export-yaml",
+        po: "export-po",
+        xlf: "export-xliff",
+        xliff: "export-xliff"
       }[extension];
     }
 
@@ -553,7 +554,7 @@
           await downloadOverlayPdf(text, details);
           return;
         }
-        const response = await fetch("/export-pdf", {
+        const response = await fetch("export-pdf", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({text})
@@ -635,6 +636,8 @@
     function showProgress(status, percent, info) {
       const progress = document.getElementById("progress");
       const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+      const titleStatus = status.charAt(0).toUpperCase() + status.slice(1);
+      document.title = safePercent + "% " + titleStatus + " - " + baseTitle;
       progress.className = "progress " + status;
       progress.innerHTML =
         '<div class="progress-top">' +
@@ -646,12 +649,13 @@
 
     function clearProgress() {
       const progress = document.getElementById("progress");
+      document.title = baseTitle;
       progress.className = "progress";
       progress.innerHTML = "";
     }
 
     async function loadHealth() {
-      const response = await fetch("/health");
+      const response = await fetch("health");
       const data = await response.json();
       maxChars = data.max_chars || 0;
       const ocr = document.getElementById("useOcr");
@@ -669,6 +673,7 @@
       const length = document.getElementById("text").value.length;
       const chunks = maxChars > 0 ? Math.max(1, Math.ceil(length / maxChars)) : 1;
       counter.textContent = length + " / " + maxChars + " (" + chunks + " chunk" + (chunks === 1 ? "" : "s") + ")";
+      counter.title = length + " characters used out of " + maxChars + ". Estimated translation chunks: " + chunks + ".";
       counter.classList.toggle("over", maxChars > 0 && length > maxChars);
     }
 
@@ -699,7 +704,7 @@
 
     async function pollJob(jobId) {
       while (true) {
-        const response = await fetch("/jobs/" + jobId);
+        const response = await fetch("jobs/" + jobId);
         if (!response.ok) {
           const text = await response.text();
           setResult(errorTextFromResponse(text));
@@ -743,7 +748,7 @@
       }
       setResult("");
       showProgress("queued", 0, chunks > 1 ? "Starting " + chunks + " chunks..." : "Starting...");
-      const response = await fetch("/jobs/translate", {
+      const response = await fetch("jobs/translate", {
         method: "POST",
         headers: {"Content-Type": "application/json"},
         body: JSON.stringify({
@@ -793,7 +798,7 @@
       form.append("page_range", document.getElementById("pageRange").value);
       setResult("");
       showProgress("queued", 0, "Uploading PDF...");
-      const response = await fetch("/jobs/translate-pdf", {method: "POST", body: form});
+      const response = await fetch("jobs/translate-pdf", {method: "POST", body: form});
       if (!response.ok) {
         const text = await response.text();
         setResult(errorTextFromResponse(text));
@@ -807,7 +812,7 @@
 
     async function controlActiveJob(action) {
       if (!activeJobId) return;
-      const response = await fetch("/jobs/" + activeJobId + "/" + action, {method: "POST"});
+      const response = await fetch("jobs/" + activeJobId + "/" + action, {method: "POST"});
       if (!response.ok) {
         const text = await response.text();
         setResult(errorTextFromResponse(text));
@@ -825,7 +830,7 @@
     }
 
     async function deleteHistoryItem(id) {
-      const response = await fetch("/history/" + id, {method: "DELETE"});
+      const response = await fetch("history/" + id, {method: "DELETE"});
       if (!response.ok) {
         const text = await response.text();
         setResult(errorTextFromResponse(text));
@@ -835,7 +840,7 @@
     }
 
     async function loadHistory() {
-      const response = await fetch("/history");
+      const response = await fetch("history");
       const data = await response.json();
       const history = document.getElementById("history");
       history.innerHTML = "";
@@ -849,7 +854,7 @@
         const main = document.createElement("div");
         main.className = "history-main";
         const link = document.createElement("a");
-        link.href = "/history/" + item.id;
+        link.href = "history/" + item.id;
         link.textContent = item.filename;
         link.download = item.filename;
         const meta = document.createElement("div");
