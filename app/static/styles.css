@@ -262,6 +262,11 @@
     button.secondary:hover { background: var(--panel-soft); border-color: #4b5565; }
 
     .grid { display: grid; gap: 1rem; }
+    .grid.workspace-section {
+      border-top: 1px solid rgba(255, 255, 255, .12);
+      margin-top: 1.35rem;
+      padding-top: 1.45rem;
+    }
     .row { display: grid; gap: 1rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
     .section { margin-top: 1.4rem; }
@@ -271,6 +276,8 @@
       flex-wrap: wrap;
       gap: .5rem;
     }
+
+    .input-tab-select { display: none; }
 
     .tab {
       background: transparent;
@@ -533,22 +540,15 @@
       }
 
       .section { margin-top: 1rem; }
+      .grid.workspace-section {
+        margin-top: 1rem;
+        padding-top: 1.15rem;
+      }
       .section.tab-panel { margin-top: .75rem; }
       .tab-panel.active { min-height: auto; }
 
-      .tabs {
-        flex-wrap: nowrap;
-        margin: 0 -1rem;
-        overflow-x: auto;
-        padding: 0 1rem .25rem;
-        scrollbar-width: thin;
-      }
-
-      .tab {
-        flex: 0 0 auto;
-        min-height: 2.2rem;
-        white-space: nowrap;
-      }
+      .tabs { display: none; }
+      .input-tab-select { display: block; }
 
       .actions.workspace-section {
         background: rgba(24, 28, 34, .98);
@@ -556,7 +556,7 @@
         bottom: 0;
         display: grid;
         gap: .5rem;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         margin: 1rem -1rem 0;
         padding: .75rem 1rem calc(.75rem + env(safe-area-inset-bottom));
         position: sticky;

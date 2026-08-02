@@ -59,6 +59,14 @@
         <button class="tab" type="button" data-input-tab="csv" title="Load and translate selected CSV or XLSX columns.">CSV File</button>
         <button class="tab" type="button" data-input-tab="pdf" title="Extract and translate a PDF page by page.">PDF</button>
       </div>
+      <select id="inputTabSelect" class="input-tab-select" aria-label="Input type" title="Select the input type.">
+        <option value="textarea">Text Field</option>
+        <option value="text">Text</option>
+        <option value="markdown">Markdown</option>
+        <option value="office">Office Doc</option>
+        <option value="csv">CSV File</option>
+        <option value="pdf">PDF</option>
+      </select>
 
       <div id="textareaPanel" class="tab-panel active">
         <label for="text">Text Field</label>
@@ -97,6 +105,7 @@
 
     <div class="actions workspace-section">
       <button id="translate" title="Start a new translation for the current input.">Translate Input</button>
+      <button id="clearInput" class="secondary" type="button" title="Clear the current input and preview.">Clear</button>
       <button id="pauseJob" class="secondary" disabled title="Pause the running job.">Pause</button>
       <button id="resumeJob" class="secondary" disabled title="Resume the paused job.">Resume</button>
       <button id="stopJob" class="secondary" disabled title="Cancel the running job.">Stop</button>

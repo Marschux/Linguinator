@@ -33,6 +33,7 @@
         overlayPdf: "Overlay PDF",
         coverOldText: "Cover old text",
         translateInput: "Translate Input",
+        clear: "Clear",
         pause: "Pause",
         resume: "Resume",
         stop: "Stop",
@@ -86,6 +87,7 @@
         overlayPdf: "PDF ueberlagern",
         coverOldText: "Alten Text abdecken",
         translateInput: "Eingabe uebersetzen",
+        clear: "Leeren",
         pause: "Pause",
         resume: "Fortsetzen",
         stop: "Stoppen",
@@ -139,6 +141,7 @@
         overlayPdf: "Superponer PDF",
         coverOldText: "Cubrir texto anterior",
         translateInput: "Traducir entrada",
+        clear: "Limpiar",
         pause: "Pausar",
         resume: "Continuar",
         stop: "Detener",
@@ -192,6 +195,7 @@
         overlayPdf: "Superposer PDF",
         coverOldText: "Masquer l'ancien texte",
         translateInput: "Traduire l'entree",
+        clear: "Effacer",
         pause: "Pause",
         resume: "Reprendre",
         stop: "Arreter",
@@ -413,6 +417,7 @@
       setText('label[for="coverPdfText"]', "coverOldText");
       setText("#loadTextFile", "loadFile");
       setText("#translate", "translateInput");
+      setText("#clearInput", "clear");
       setText("#pauseJob", "pause");
       setText("#resumeJob", "resume");
       setText("#stopJob", "stop");
@@ -422,6 +427,7 @@
       setText('label[for="history"]', "history");
       setTitle("#uiLanguage", "uiLanguage");
       refreshInputLabels();
+      refreshInputTabSelectLabels();
       refreshOutputFormats(document.getElementById("outputFormat").value);
       updateOcrLabel();
       updateCounter();
@@ -438,6 +444,15 @@
         localStorage.setItem("lingumachina_ui_language", currentUiLanguage);
         applyUiLanguage();
       });
+    }
+
+    function refreshInputTabSelectLabels() {
+      const select = document.getElementById("inputTabSelect");
+      if (!select) return;
+      for (const option of select.options) {
+        const config = inputTabs[option.value];
+        if (config) option.textContent = t(config.labelKey);
+      }
     }
 
     function recentKey(id) {
@@ -663,6 +678,8 @@
     function setInputTab(tab) {
       const config = inputTabs[tab] || inputTabs.textarea;
       currentInputTab = tab;
+      const inputTabSelect = document.getElementById("inputTabSelect");
+      if (inputTabSelect) inputTabSelect.value = currentInputTab;
       currentSourceFormat = config.sourceFormat;
       currentOriginalExtension = config.sourceFormat;
       document.querySelectorAll("[data-input-tab]").forEach((button) => {
@@ -688,10 +705,17 @@
       button.addEventListener("click", () => setInputTab(button.dataset.inputTab));
     });
 
+    document.getElementById("inputTabSelect").addEventListener("change", (event) => {
+      setInputTab(event.target.value);
+    });
+
     function syncOverlayControls() {
       const cover = document.getElementById("coverPdfText");
-      cover.disabled = !document.getElementById("usePdfOverlay").checked;
-      if (cover.disabled) {
+      const overlayEnabled = document.getElementById("usePdfOverlay").checked;
+      cover.disabled = !overlayEnabled;
+      if (overlayEnabled) {
+        cover.checked = true;
+      } else {
         cover.checked = false;
       }
     }
@@ -720,6 +744,23 @@
       setPreview(text, options);
       const hasText = Boolean(text.trim());
       document.getElementById("downloadResult").disabled = !hasText;
+    }
+
+    function clearCurrentWork() {
+      document.getElementById("text").value = "";
+      document.getElementById("textFile").value = "";
+      document.getElementById("pdf").value = "";
+      document.getElementById("pageRange").value = "";
+      document.getElementById("sheetName").value = "";
+      document.getElementById("csvColumns").value = "";
+      document.getElementById("usePdfOverlay").checked = false;
+      syncOverlayControls();
+      currentSourceFormat = (inputTabs[currentInputTab] || inputTabs.textarea).sourceFormat;
+      currentOriginalExtension = currentSourceFormat;
+      updateCounter();
+      refreshOutputFormats(defaultOutputFormat());
+      setResult("");
+      clearProgress();
     }
 
     function setPreview(text, options = {}) {
@@ -930,6 +971,7 @@
 
     document.getElementById("downloadResult").addEventListener("click", downloadResult);
     document.getElementById("loadTextFile").addEventListener("click", loadTextFile);
+    document.getElementById("clearInput").addEventListener("click", clearCurrentWork);
 
     function errorTextFromResponse(text) {
       try {

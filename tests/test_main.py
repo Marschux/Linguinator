@@ -399,12 +399,16 @@ class MainTests(unittest.TestCase):
         self.assertIn('href="static/styles.css"', template)
         self.assertIn('src="static/app.js"', template)
         self.assertIn('id="uiLanguage"', template)
+        self.assertIn('id="inputTabSelect"', template)
+        self.assertIn('id="clearInput"', template)
         self.assertIn('value="de">Deutsch', template)
         self.assertNotIn("previewToggle", template)
         self.assertNotIn("historyToggle", template)
         self.assertNotIn('fetch("/', script)
         self.assertNotIn('href = "/history/', script)
         self.assertIn('fetch("jobs/translate-file"', script)
+        self.assertIn('document.getElementById("inputTabSelect").addEventListener("change"', script)
+        self.assertIn('document.getElementById("clearInput").addEventListener("click", clearCurrentWork)', script)
         self.assertIn('download.href = "history/" + item.id + "/export?format="', script)
         self.assertIn('historyFormats.push("original")', script)
         self.assertIn("lingumachina_ui_language", script)
@@ -547,6 +551,7 @@ class MainTests(unittest.TestCase):
         )
 
         self.assertIn(b" re f", content)
+        self.assertIn(b"1 1 1 rg 0 0 595.00 842.00 re f", content)
         self.assertIn(b"Translated", content)
 
     def test_create_overlay_pdf_preserves_original_page_count(self):
