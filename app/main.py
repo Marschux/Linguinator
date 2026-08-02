@@ -37,9 +37,9 @@ DEFAULT_SOURCE = os.getenv("NLLB_DEFAULT_SOURCE", "eng_Latn")
 DEFAULT_TARGET = os.getenv("NLLB_DEFAULT_TARGET", "deu_Latn")
 OCR_ENABLED = os.getenv("NLLB_ENABLE_OCR", "false").lower() in ("1", "true", "yes", "on")
 OCR_LANGUAGE = os.getenv("NLLB_OCR_LANGUAGE", "deu+eng")
-AUTH_ENABLED = os.getenv("NLLB_AUTH_ENABLED", "false").lower() in ("1", "true", "yes", "on")
-AUTH_USERNAME = os.getenv("NLLB_AUTH_USERNAME", "admin")
-AUTH_PASSWORD = os.getenv("NLLB_AUTH_PASSWORD", "")
+AUTH_ENABLED = os.getenv("LINGUMACHINA_AUTH_ENABLED", os.getenv("NLLB_AUTH_ENABLED", "false")).lower() in ("1", "true", "yes", "on")
+AUTH_USERNAME = os.getenv("LINGUMACHINA_AUTH_USERNAME", os.getenv("NLLB_AUTH_USERNAME", "admin"))
+AUTH_PASSWORD = os.getenv("LINGUMACHINA_AUTH_PASSWORD", os.getenv("NLLB_AUTH_PASSWORD", ""))
 PDF_LOW_TEXT_CHARS = 20
 PDF_PAGE_WIDTH = 595
 PDF_PAGE_HEIGHT = 842
@@ -99,7 +99,7 @@ async def require_basic_auth(request: Request, call_next):
     if not AUTH_ENABLED or request.url.path == "/health":
         return await call_next(request)
     if not AUTH_PASSWORD:
-        return Response("Authentication is enabled but NLLB_AUTH_PASSWORD is not set", status_code=500)
+        return Response("Authentication is enabled but LINGUMACHINA_AUTH_PASSWORD is not set", status_code=500)
     if not basic_auth_valid(request.headers.get("authorization", "")):
         return unauthorized_response()
     return await call_next(request)

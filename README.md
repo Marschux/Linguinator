@@ -46,12 +46,12 @@ Recommended memory:
 The CI pipeline builds and pushes:
 
 ```text
-registry.gitlab.com/marschu/nllb-translate-ui:latest
-registry.gitlab.com/marschu/nllb-translate-ui:<commit-short-sha>
-registry.gitlab.com/marschu/nllb-translate-ui:<git-tag>
-registry.gitlab.com/marschu/nllb-translate-ui:latest-ocr
-registry.gitlab.com/marschu/nllb-translate-ui:<commit-short-sha>-ocr
-registry.gitlab.com/marschu/nllb-translate-ui:<git-tag>-ocr
+registry.gitlab.com/marschu/lingumachina:latest
+registry.gitlab.com/marschu/lingumachina:<commit-short-sha>
+registry.gitlab.com/marschu/lingumachina:<git-tag>
+registry.gitlab.com/marschu/lingumachina:latest-ocr
+registry.gitlab.com/marschu/lingumachina:<commit-short-sha>-ocr
+registry.gitlab.com/marschu/lingumachina:<git-tag>-ocr
 ```
 
 Homelab deployments should use that image and run with only `compose.yml` plus `.env`.
@@ -69,9 +69,9 @@ NLLB_DEFAULT_SOURCE=eng_Latn
 NLLB_DEFAULT_TARGET=deu_Latn
 NLLB_ENABLE_OCR=false
 NLLB_OCR_LANGUAGE=deu+eng
-NLLB_AUTH_ENABLED=false
-NLLB_AUTH_USERNAME=admin
-NLLB_AUTH_PASSWORD=
+LINGUMACHINA_AUTH_ENABLED=false
+LINGUMACHINA_AUTH_USERNAME=admin
+LINGUMACHINA_AUTH_PASSWORD=
 ```
 
 ## Password Protection
@@ -79,9 +79,9 @@ NLLB_AUTH_PASSWORD=
 Password protection is disabled by default. To protect the web UI, API, and history endpoints with HTTP Basic auth, set:
 
 ```env
-NLLB_AUTH_ENABLED=true
-NLLB_AUTH_USERNAME=admin
-NLLB_AUTH_PASSWORD=change-me
+LINGUMACHINA_AUTH_ENABLED=true
+LINGUMACHINA_AUTH_USERNAME=admin
+LINGUMACHINA_AUTH_PASSWORD=change-me
 ```
 
 `GET /health` stays public so Docker healthchecks continue to work.
@@ -143,7 +143,7 @@ This is a conservative 1:1 mode. It does not rebuild complex layout, tracked cha
 The default compose service stays CPU-first. For a local GPU test service on port `5052`:
 
 ```bash
-docker compose --profile gpu up -d nllb-translate-gpu
+docker compose --profile gpu up -d lingumachina-gpu
 ```
 
 ## License

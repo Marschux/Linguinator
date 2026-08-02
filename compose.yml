@@ -1,7 +1,7 @@
 services:
-  nllb-translate:
-    image: registry.gitlab.com/marschu/nllb-translate-ui:latest
-    container_name: nllb-translate
+  lingumachina:
+    image: registry.gitlab.com/marschu/lingumachina:latest
+    container_name: lingumachina
     restart: unless-stopped
     env_file: .env
     ports:
@@ -25,10 +25,10 @@ services:
       retries: 3
       start_period: 120s
 
-  nllb-translate-gpu:
+  lingumachina-gpu:
     profiles: ["gpu"]
-    image: registry.gitlab.com/marschu/nllb-translate-ui:latest
-    container_name: nllb-translate-gpu
+    image: registry.gitlab.com/marschu/lingumachina:latest
+    container_name: lingumachina-gpu
     restart: unless-stopped
     env_file: .env
     ports:
