@@ -1,8 +1,9 @@
 import json
 import os
-import tempfile
+import shutil
 import time
 import unittest
+import uuid
 import zipfile
 from io import BytesIO
 from pathlib import Path
@@ -26,6 +27,50 @@ class FakeReader:
         self.pages = pages
 
 
+class FakeInputs(dict):
+    def to(self, device):
+        self["device"] = device
+        return self
+
+
+class FakeTokenizer:
+    def __init__(self):
+        self.src_lang = None
+
+    def __call__(self, text, return_tensors, truncation):
+        return FakeInputs({"text": text, "return_tensors": return_tensors, "truncation": truncation})
+
+    def convert_tokens_to_ids(self, target):
+        return 42
+
+    def batch_decode(self, generated, skip_special_tokens):
+        return ["Uebersetzt"]
+
+
+class FakeModel:
+    def generate(self, **inputs):
+        return ["generated"]
+
+
+class FakeInferenceMode:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
+
+
+class FakeTorch:
+    def inference_mode(self):
+        return FakeInferenceMode()
+
+
+def test_temp_dir():
+    path = Path(__file__).resolve().parent / ".tmp-history" / str(uuid.uuid4())
+    path.mkdir(parents=True, exist_ok=False)
+    return path
+
+
 def minimal_docx(paragraphs):
     body = "".join(
         "<w:p><w:r><w:t>" + text + "</w:t></w:r></w:p>"
@@ -42,6 +87,42 @@ def minimal_docx(paragraphs):
     return buffer.getvalue()
 
 
+def docx_with_extra_text_parts():
+    document = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:body><w:p><w:r><w:t>Body</w:t></w:r></w:p></w:body></w:document>'
+    )
+    header = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:p><w:r><w:t>Header</w:t></w:r></w:p></w:hdr>'
+    )
+    footer = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:p><w:r><w:t>Footer</w:t></w:r></w:p></w:ftr>'
+    )
+    footnotes = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:footnote><w:p><w:r><w:t>Footnote</w:t></w:r></w:p></w:footnote></w:footnotes>'
+    )
+    comments = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        '<w:comment><w:p><w:r><w:t>Comment</w:t></w:r></w:p></w:comment></w:comments>'
+    )
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as docx:
+        docx.writestr("word/document.xml", document)
+        docx.writestr("word/header1.xml", header)
+        docx.writestr("word/footer1.xml", footer)
+        docx.writestr("word/footnotes.xml", footnotes)
+        docx.writestr("word/comments.xml", comments)
+    return buffer.getvalue()
+
+
 def minimal_odt(paragraphs):
     body = "".join(
         "<text:p>" + text + "</text:p>"
@@ -54,6 +135,21 @@ def minimal_odt(paragraphs):
         'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">'
         "<office:body><office:text>" + body + "</office:text></office:body>"
         "</office:document-content>"
+    )
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as odt:
+        odt.writestr("content.xml", document)
+    return buffer.getvalue()
+
+
+def odt_with_span():
+    document = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<office:document-content '
+        'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+        'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">'
+        '<office:body><office:text><text:p><text:span text:style-name="Strong">First</text:span> Second</text:p>'
+        '</office:text></office:body></office:document-content>'
     )
     buffer = BytesIO()
     with zipfile.ZipFile(buffer, "w") as odt:
@@ -99,6 +195,32 @@ def minimal_xlsx(target="worksheets/sheet1.xml", sheet_cell_type="inlineStr", sh
     return buffer.getvalue()
 
 
+def xlsx_with_formula_cell():
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as xlsx:
+        xlsx.writestr(
+            "xl/workbook.xml",
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" '
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            '<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>',
+        )
+        xlsx.writestr(
+            "xl/_rels/workbook.xml.rels",
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>',
+        )
+        xlsx.writestr(
+            "xl/worksheets/sheet1.xml",
+            '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>'
+            '<row r="1"><c r="A1" t="inlineStr"><is><t>title</t></is></c>'
+            '<c r="B1" t="inlineStr"><is><t>description</t></is></c></row>'
+            '<row r="2"><c r="A2" t="inlineStr"><is><t>Hello</t></is></c>'
+            '<c r="B2"><f>CONCAT(A2)</f><v>World</v></c></row>'
+            "</sheetData></worksheet>",
+        )
+    return buffer.getvalue()
+
+
 class MainTests(unittest.TestCase):
     def test_split_long_text_keeps_chunks_under_limit(self):
         text = "One two three four five six seven eight"
@@ -108,6 +230,12 @@ class MainTests(unittest.TestCase):
         self.assertGreater(len(chunks), 1)
         self.assertTrue(all(len(chunk) <= 12 for chunk in chunks))
         self.assertEqual(" ".join(chunks), text)
+
+    def test_translate_one_uses_lazy_loaded_torch_module(self):
+        with patch.object(main, "load_model", return_value=(FakeTokenizer(), FakeModel(), "cpu", FakeTorch())):
+            translated = main.translate_one("Hello", "eng_Latn", "deu_Latn")
+
+        self.assertEqual(translated, "Uebersetzt")
 
     def test_pdf_extraction_marks_empty_pages(self):
         reader = FakeReader([FakePage("Hello PDF\n"), FakePage("")])
@@ -205,25 +333,29 @@ class MainTests(unittest.TestCase):
         self.assertTrue(main.pdf_text_object("Gruesse: " + chr(228)).startswith("<FEFF"))
 
     def test_cleanup_history_removes_old_files(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            old_file = Path(temp_dir) / "old.md"
-            fresh_file = Path(temp_dir) / "fresh.md"
+        temp_dir = test_temp_dir()
+        try:
+            old_file = temp_dir / "old.md"
+            fresh_file = temp_dir / "fresh.md"
             old_file.write_text("old", encoding="utf-8")
             fresh_file.write_text("fresh", encoding="utf-8")
             old_time = time.time() - (main.HISTORY_DAYS * 86400) - 60
             os.utime(old_file, (old_time, old_time))
 
-            with patch.object(main, "HISTORY_DIR", Path(temp_dir)):
+            with patch.object(main, "HISTORY_DIR", temp_dir):
                 main.cleanup_history()
 
             self.assertFalse(old_file.exists())
             self.assertTrue(fresh_file.exists())
+        finally:
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
 
     def test_history_items_include_file_size(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
+        temp_dir = test_temp_dir()
+        try:
             item_id = "2026-08-02-text-abc123"
-            md_path = Path(temp_dir) / f"{item_id}.md"
-            json_path = Path(temp_dir) / f"{item_id}.json"
+            md_path = temp_dir / f"{item_id}.md"
+            json_path = temp_dir / f"{item_id}.json"
             md_path.write_text("result", encoding="utf-8")
             json_path.write_text(json.dumps({
                 "id": item_id,
@@ -234,10 +366,12 @@ class MainTests(unittest.TestCase):
                 "filename": md_path.name,
             }), encoding="utf-8")
 
-            with patch.object(main, "HISTORY_DIR", Path(temp_dir)):
+            with patch.object(main, "HISTORY_DIR", temp_dir):
                 items = main.history_items()
 
-        self.assertEqual(items[0]["size_bytes"], len("result"))
+            self.assertEqual(items[0]["size_bytes"], len("result"))
+        finally:
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
 
     def test_docx_extraction_preserves_paragraphs(self):
         content = minimal_docx(["First paragraph", "Second paragraph"])
@@ -252,6 +386,19 @@ class MainTests(unittest.TestCase):
         updated = main.export_docx_with_translated_text(content, "Erster Absatz\n\nZweiter Absatz")
 
         self.assertEqual(main.extract_docx_text_from_bytes(updated), "Erster Absatz\n\nZweiter Absatz")
+
+    def test_docx_export_replaces_headers_footnotes_and_comments(self):
+        content = docx_with_extra_text_parts()
+
+        updated = main.export_docx_with_translated_text(
+            content,
+            "Body neu\n\nHeader neu\n\nFooter neu\n\nFootnote neu\n\nComment neu",
+        )
+
+        self.assertEqual(
+            main.extract_docx_text_from_bytes(updated),
+            "Body neu\n\nHeader neu\n\nFooter neu\n\nFootnote neu\n\nComment neu",
+        )
 
     def test_zip_size_limit_rejects_large_uncompressed_archives(self):
         content = minimal_docx(["First paragraph"])
@@ -275,6 +422,17 @@ class MainTests(unittest.TestCase):
         updated = main.export_odt_with_translated_text(content, "Erster Absatz\n\nZweiter Absatz")
 
         self.assertEqual(main.extract_odt_text_from_bytes(updated), "Erster Absatz\n\nZweiter Absatz")
+
+    def test_odt_export_preserves_inline_span_structure(self):
+        content = odt_with_span()
+
+        updated = main.export_odt_with_translated_text(content, "Erster Absatz")
+
+        self.assertEqual(main.extract_odt_text_from_bytes(updated), "Erster Absatz")
+        with zipfile.ZipFile(BytesIO(updated)) as odt:
+            content_xml = odt.read("content.xml")
+        self.assertIn(b"text:span", content_xml)
+        self.assertIn(b'text:style-name="Strong"', content_xml)
 
     def test_csv_extraction_uses_selected_columns(self):
         content = b"title,description,ignore\nHello,World,Nope\nSecond,Row,Skip\n"
@@ -310,6 +468,16 @@ class MainTests(unittest.TestCase):
 
         text = main.extract_xlsx_text_from_bytes(updated, "Sheet1", "title,description")
         self.assertEqual(text, "Hallo | Welt")
+
+    def test_xlsx_export_preserves_formula_and_updates_cached_value(self):
+        updated = main.export_xlsx_with_translated_text(xlsx_with_formula_cell(), "Sheet1", "description", "Welt")
+
+        text = main.extract_xlsx_text_from_bytes(updated, "Sheet1", "description")
+        self.assertEqual(text, "Welt")
+        with zipfile.ZipFile(BytesIO(updated)) as xlsx:
+            sheet = xlsx.read("xl/worksheets/sheet1.xml")
+        self.assertIn(b"<s:f>CONCAT(A2)</s:f>", sheet)
+        self.assertIn(b"<s:v>Welt</s:v>", sheet)
 
     def test_xlsx_extraction_resolves_absolute_sheet_target(self):
         text = main.extract_xlsx_text_from_bytes(minimal_xlsx("/xl/worksheets/sheet1.xml"), "Sheet1", "title")

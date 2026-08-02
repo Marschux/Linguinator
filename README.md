@@ -115,12 +115,12 @@ Known overlay limits:
 
 For loaded source files, `Originalformat` can export translated content back into a copy of the original container:
 
-- DOCX: replaces paragraph text nodes while keeping the DOCX package structure.
-- ODT: replaces text paragraphs in `content.xml`.
-- XLSX: replaces selected sheet cells in selected columns.
+- DOCX: replaces paragraph text nodes in the main document, headers, footers, footnotes, endnotes, and comments while keeping the DOCX package structure.
+- ODT: replaces text paragraphs in `content.xml` while preserving existing inline span markup where possible.
+- XLSX: replaces selected sheet cells in selected columns; formula cells keep their formula and receive an updated cached value.
 - CSV: replaces selected columns and writes CSV again.
 
-This is a conservative 1:1 mode. It does not rebuild complex layout, styling, formulas, comments, tracked changes, headers, footers, or embedded objects. A later PDF layout mode may extract images, detect text blocks, and rebuild a new PDF layout, but that is separate from the current overlay and text-PDF modes.
+This is a conservative 1:1 mode. It does not rebuild complex layout, tracked changes, embedded objects, exact styling, or full recalculation semantics. A later PDF layout mode may extract images, detect text blocks, and rebuild a new PDF layout, but that is separate from the current overlay and text-PDF modes.
 
 ## GPU Profile
 

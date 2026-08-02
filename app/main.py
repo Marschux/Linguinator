@@ -16,13 +16,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Union
 from xml.etree import ElementTree
 
-import torch
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from pypdf import PdfReader, PdfWriter
-from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
 
 MODEL_ID = os.getenv("NLLB_MODEL", "facebook/nllb-200-distilled-600M")
@@ -46,6 +44,11 @@ PDF_FONT_SIZE = 11
 PDF_HEADING_FONT_SIZE = 15
 PDF_FOOTER_FONT_SIZE = 9
 
+ElementTree.register_namespace("w", "http://schemas.openxmlformats.org/wordprocessingml/2006/main")
+ElementTree.register_namespace("office", "urn:oasis:names:tc:opendocument:xmlns:office:1.0")
+ElementTree.register_namespace("text", "urn:oasis:names:tc:opendocument:xmlns:text:1.0")
+ElementTree.register_namespace("s", "http://schemas.openxmlformats.org/spreadsheetml/2006/main")
+
 APP_DIR = Path(__file__).resolve().parent
 
 app = FastAPI(title="NLLB Translate", version="0.1.0")
@@ -65,24 +68,39 @@ class PdfExportRequest(BaseModel):
 
 
 def selected_device():
-    if DEVICE_SETTING == "cuda" and torch.cuda.is_available():
+    if DEVICE_SETTING != "cuda":
+        return "cpu"
+    try:
+        import torch
+    except ImportError:
+        return "cpu"
+    if torch.cuda.is_available():
         return "cuda"
     return "cpu"
 
 
 @lru_cache(maxsize=1)
 def load_tokenizer():
+    try:
+        from transformers import AutoTokenizer
+    except ImportError as exc:
+        raise RuntimeError("transformers is required for translation") from exc
     return AutoTokenizer.from_pretrained(MODEL_ID)
 
 
 @lru_cache(maxsize=1)
 def load_model():
+    try:
+        import torch
+        from transformers import AutoModelForSeq2SeqLM
+    except ImportError as exc:
+        raise RuntimeError("torch and transformers are required for translation") from exc
     device = selected_device()
     tokenizer = load_tokenizer()
     model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_ID)
     model.to(device)
     model.eval()
-    return tokenizer, model, device
+    return tokenizer, model, device, torch
 
 
 def language_codes():
@@ -98,12 +116,12 @@ def translate_one(text: str, source: str, target: str) -> str:
     if not text:
         return ""
 
-    tokenizer, model, device = load_model()
+    tokenizer, model, device, torch_module = load_model()
     tokenizer.src_lang = source
     inputs = tokenizer(text, return_tensors="pt", truncation=True).to(device)
     forced_bos_token_id = tokenizer.convert_tokens_to_ids(target)
 
-    with torch.inference_mode():
+    with torch_module.inference_mode():
         generated = model.generate(
             **inputs,
             forced_bos_token_id=forced_bos_token_id,
@@ -619,24 +637,26 @@ def extract_docx_text_from_bytes(content: bytes) -> str:
     try:
         with zipfile.ZipFile(BytesIO(content)) as docx:
             ensure_zip_size(docx)
-            document = docx.read("word/document.xml")
+            parts = docx_text_part_names(docx)
+            documents = {part: docx.read(part) for part in parts}
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read DOCX: {exc}") from exc
 
     namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-    try:
-        root = ElementTree.fromstring(document)
-    except ElementTree.ParseError as exc:
-        raise HTTPException(status_code=400, detail=f"Could not parse DOCX XML: {exc}") from exc
 
     paragraphs = []
-    for paragraph in root.findall(".//w:p", namespaces):
-        parts = [node.text or "" for node in paragraph.findall(".//w:t", namespaces)]
-        text = "".join(parts).strip()
-        if text:
-            paragraphs.append(text)
+    for part, document in documents.items():
+        try:
+            root = ElementTree.fromstring(document)
+        except ElementTree.ParseError as exc:
+            raise HTTPException(status_code=400, detail=f"Could not parse DOCX XML {part}: {exc}") from exc
+        for paragraph in root.findall(".//w:p", namespaces):
+            parts = [node.text or "" for node in paragraph.findall(".//w:t", namespaces)]
+            text = "".join(parts).strip()
+            if text:
+                paragraphs.append(text)
 
     result = "\n\n".join(paragraphs).strip()
     if not result:
@@ -667,6 +687,36 @@ def write_zip_with_replacement(content: bytes, replacements: Dict[str, bytes]) -
     return output.getvalue()
 
 
+def docx_text_part_names(docx: zipfile.ZipFile) -> List[str]:
+    preferred = [
+        "word/document.xml",
+        "word/header",
+        "word/footer",
+        "word/footnotes.xml",
+        "word/endnotes.xml",
+        "word/comments.xml",
+    ]
+    names = [
+        item.filename
+        for item in docx.infolist()
+        if item.filename.startswith("word/")
+        and item.filename.endswith(".xml")
+        and (
+            item.filename == "word/document.xml"
+            or re.match(r"word/header\d*\.xml$", item.filename)
+            or re.match(r"word/footer\d*\.xml$", item.filename)
+            or item.filename in {"word/footnotes.xml", "word/endnotes.xml", "word/comments.xml"}
+        )
+    ]
+    return sorted(
+        names,
+        key=lambda name: next(
+            (index for index, prefix in enumerate(preferred) if name == prefix or name.startswith(prefix)),
+            len(preferred),
+        ),
+    )
+
+
 def export_docx_with_translated_text(content: bytes, translated_text: str) -> bytes:
     blocks = translated_blocks(translated_text)
     if not blocks:
@@ -674,25 +724,33 @@ def export_docx_with_translated_text(content: bytes, translated_text: str) -> by
     try:
         with zipfile.ZipFile(BytesIO(content)) as docx:
             ensure_zip_size(docx)
-            document = docx.read("word/document.xml")
+            documents = {part: docx.read(part) for part in docx_text_part_names(docx)}
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read DOCX: {exc}") from exc
 
     namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
-    root = ElementTree.fromstring(document)
+    replacements = {}
     block_index = 0
-    for paragraph in root.findall(".//w:p", namespaces):
-        text_nodes = paragraph.findall(".//w:t", namespaces)
-        if not "".join(node.text or "" for node in text_nodes).strip():
-            continue
+    for part, document in documents.items():
+        root = ElementTree.fromstring(document)
+        changed = False
+        for paragraph in root.findall(".//w:p", namespaces):
+            text_nodes = paragraph.findall(".//w:t", namespaces)
+            if not "".join(node.text or "" for node in text_nodes).strip():
+                continue
+            if block_index >= len(blocks):
+                break
+            for node_index, node in enumerate(text_nodes):
+                node.text = blocks[block_index] if node_index == 0 else ""
+            block_index += 1
+            changed = True
+        if changed:
+            replacements[part] = ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
         if block_index >= len(blocks):
             break
-        for node_index, node in enumerate(text_nodes):
-            node.text = blocks[block_index] if node_index == 0 else ""
-        block_index += 1
-    return write_zip_with_replacement(content, {"word/document.xml": ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)})
+    return write_zip_with_replacement(content, replacements)
 
 
 def extract_odt_text_from_bytes(content: bytes) -> str:
@@ -744,11 +802,26 @@ def export_odt_with_translated_text(content: bytes, translated_text: str) -> byt
             continue
         if block_index >= len(blocks):
             break
-        for child in list(paragraph):
-            paragraph.remove(child)
-        paragraph.text = blocks[block_index]
+        replace_text_preserving_markup(paragraph, blocks[block_index])
         block_index += 1
     return write_zip_with_replacement(content, {"content.xml": ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)})
+
+
+def replace_text_preserving_markup(element, text: str):
+    text_written = False
+    if element.text is not None:
+        element.text = text
+        text_written = True
+    for node in element.iter():
+        if node is element:
+            continue
+        if node.text is not None:
+            node.text = "" if text_written else text
+            text_written = True
+        if node.tail is not None:
+            node.tail = ""
+    if not text_written:
+        element.text = text
 
 
 def parse_column_names(columns: str) -> List[str]:
@@ -957,11 +1030,21 @@ def extract_xlsx_text_from_bytes(content: bytes, sheet_name: str, columns: str) 
 
 
 def xlsx_set_cell_text(cell, text: str):
+    namespace = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+    formula = cell.find(f"{namespace}f")
+    if formula is not None:
+        cell.attrib.pop("t", None)
+        for child in list(cell):
+            if child.tag != f"{namespace}f":
+                cell.remove(child)
+        value_node = ElementTree.SubElement(cell, f"{namespace}v")
+        value_node.text = text
+        return
     cell.attrib["t"] = "inlineStr"
     for child in list(cell):
         cell.remove(child)
-    inline = ElementTree.SubElement(cell, "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}is")
-    node = ElementTree.SubElement(inline, "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}t")
+    inline = ElementTree.SubElement(cell, f"{namespace}is")
+    node = ElementTree.SubElement(inline, f"{namespace}t")
     node.text = text
 
 
