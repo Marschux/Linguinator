@@ -273,8 +273,9 @@
       padding-top: 1.45rem;
     }
 
-    /* Nur Progress-Bereich hat keinen Trennstrich oben */
-    #progress {
+    /* Progress und Queue haben keinen Trennstrich oben, alle anderen Sections einen */
+    #progress,
+    #queuePanel {
       border-top: none;
       margin-top: 0;
       padding-top: 0;
