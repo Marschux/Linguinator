@@ -1,6 +1,12 @@
     let languageData = null;
     let maxChars = 0;
     let activeJobId = null;
+    let currentInputTab = "textarea";
+    let currentSourceFormat = "txt";
+    let currentOriginalExtension = "txt";
+    let fullResultText = "";
+    const PREVIEW_MAX_CHARS = 12000;
+    const EXCERPT_MAX_CHARS = 4000;
     const favoriteLanguages = ["deu_Latn", "eng_Latn", "fra_Latn", "spa_Latn", "ita_Latn"];
     const languageNames = new Intl.DisplayNames(["en"], {type: "language"});
     const scriptNames = {
@@ -205,6 +211,45 @@
       return (display.flag ? display.flag + " " : "") + display.name + " (" + display.script + ")";
     }
 
+    const inputTabs = {
+      textarea: {
+        panel: "textareaPanel",
+        accept: "",
+        label: "Textfeld",
+        sourceFormat: "txt"
+      },
+      text: {
+        panel: "filePanel",
+        accept: ".txt,text/plain",
+        label: "Text File",
+        sourceFormat: "txt"
+      },
+      markdown: {
+        panel: "filePanel",
+        accept: ".md,text/markdown,text/plain",
+        label: "Markdown File",
+        sourceFormat: "md"
+      },
+      office: {
+        panel: "filePanel",
+        accept: ".docx,.odt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.oasis.opendocument.text",
+        label: "Office Doc",
+        sourceFormat: "md"
+      },
+      csv: {
+        panel: "filePanel",
+        accept: ".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        label: "CSV File",
+        sourceFormat: "md"
+      },
+      pdf: {
+        panel: "pdfPanel",
+        accept: "application/pdf",
+        label: "PDF",
+        sourceFormat: "pdf"
+      }
+    };
+
     function extractionPathForFile(fileName) {
       if (fileName.endsWith(".csv")) return "/extract-csv";
       if (fileName.endsWith(".xlsx")) return "/extract-xlsx";
@@ -307,18 +352,104 @@
       }
     });
 
-    function setResult(text) {
-      const result = document.getElementById("result");
-      const hasText = Boolean(text.trim());
-      result.textContent = text;
-      document.getElementById("downloadResult").disabled = !hasText;
-      document.getElementById("downloadTextResult").disabled = !hasText;
+    function setInputTab(tab) {
+      const config = inputTabs[tab] || inputTabs.textarea;
+      currentInputTab = tab;
+      currentSourceFormat = config.sourceFormat;
+      currentOriginalExtension = config.sourceFormat;
+      document.querySelectorAll("[data-input-tab]").forEach((button) => {
+        button.classList.toggle("active", button.dataset.inputTab === tab);
+      });
+      document.querySelectorAll(".tab-panel").forEach((panel) => {
+        panel.classList.toggle("active", panel.id === config.panel);
+      });
+      if (config.panel === "filePanel") {
+        const fileInput = document.getElementById("textFile");
+        fileInput.accept = config.accept;
+        fileInput.value = "";
+        document.getElementById("textFileLabel").textContent = config.label;
+      }
+      const showSheet = tab === "csv";
+      document.querySelectorAll(".file-extra").forEach((input) => {
+        input.classList.toggle("visible", showSheet);
+      });
     }
 
-    function downloadResult(extension, contentType) {
-      const text = document.getElementById("result").textContent;
-      if (!text.trim()) return;
-      const blob = new Blob([text], {type: contentType + ";charset=utf-8"});
+    document.querySelectorAll("[data-input-tab]").forEach((button) => {
+      button.addEventListener("click", () => setInputTab(button.dataset.inputTab));
+    });
+
+    document.getElementById("historyToggle").addEventListener("click", () => {
+      document.getElementById("historySection").classList.toggle("hidden");
+    });
+
+    function syncOverlayControls() {
+      const cover = document.getElementById("coverPdfText");
+      cover.disabled = !document.getElementById("usePdfOverlay").checked;
+      if (cover.disabled) {
+        cover.checked = false;
+      }
+    }
+
+    document.getElementById("usePdfOverlay").addEventListener("change", syncOverlayControls);
+
+    function previewText(text, limit) {
+      if (text.length <= limit) {
+        return {text, truncated: false};
+      }
+      return {
+        text: text.slice(0, limit).replace(/\s+\S*$/, "").trimEnd(),
+        truncated: true
+      };
+    }
+
+    function previewLimitForOptions(options) {
+      if (options && options.excerpt) return EXCERPT_MAX_CHARS;
+      return PREVIEW_MAX_CHARS;
+    }
+
+    function setResult(text, options = {}) {
+      const result = document.getElementById("result");
+      const notice = document.getElementById("previewNotice");
+      fullResultText = text;
+      setPreview(text, options);
+      const hasText = Boolean(text.trim());
+      document.getElementById("downloadResult").disabled = !hasText;
+    }
+
+    function setPreview(text, options = {}) {
+      const result = document.getElementById("result");
+      const notice = document.getElementById("previewNotice");
+      const hasText = Boolean(text.trim());
+      const preview = previewText(text, previewLimitForOptions(options));
+      result.textContent = preview.text;
+      notice.classList.toggle("visible", hasText && (preview.truncated || options.excerpt));
+      if (hasText && options.excerpt) {
+        notice.textContent = preview.truncated
+          ? "Vorschau zeigt nur einen uebersetzten Auszug. Der Download enthaelt den vollstaendigen Export."
+          : "Vorschau zeigt einen uebersetzten Auszug fuer diesen Dateityp. Der Download enthaelt den vollstaendigen Export.";
+      } else if (hasText && preview.truncated) {
+        notice.textContent = "Vorschau gekuerzt. Der Download enthaelt den vollstaendigen Export.";
+      } else {
+        notice.textContent = "";
+      }
+    }
+
+    function outputFormatDetails(format) {
+      if (format === "original") {
+        if (["docx", "odt", "csv", "xlsx"].includes(currentOriginalExtension)) {
+          return {extension: currentOriginalExtension, originalFile: true};
+        }
+        if (currentSourceFormat === "pdf") return {extension: "pdf", contentType: "application/pdf", pdf: true};
+        if (currentSourceFormat === "md") return {extension: "md", contentType: "text/markdown"};
+        return {extension: "txt", contentType: "text/plain"};
+      }
+      if (format === "pdf") return {extension: "pdf", contentType: "application/pdf", pdf: true};
+      if (format === "md") return {extension: "md", contentType: "text/markdown"};
+      return {extension: "txt", contentType: "text/plain"};
+    }
+
+    function saveBlob(blob, extension) {
       const link = document.createElement("a");
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
       const url = URL.createObjectURL(blob);
@@ -328,6 +459,85 @@
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
+    }
+
+    async function downloadOverlayPdf(text, details) {
+      const file = document.getElementById("pdf").files[0];
+      const form = new FormData();
+      form.append("file", file);
+      form.append("text", text);
+      form.append("cover_original", document.getElementById("coverPdfText").checked ? "true" : "false");
+      const response = await fetch("/export-pdf-overlay", {method: "POST", body: form});
+      if (!response.ok) {
+        const error = await response.text();
+        setPreview(errorTextFromResponse(error));
+        return;
+      }
+      saveBlob(await response.blob(), details.extension);
+    }
+
+    function originalExportPath(extension) {
+      return {
+        docx: "/export-docx",
+        odt: "/export-odt",
+        csv: "/export-csv",
+        xlsx: "/export-xlsx"
+      }[extension];
+    }
+
+    async function downloadOriginalFile(text, details) {
+      const file = document.getElementById("textFile").files[0];
+      const path = originalExportPath(details.extension);
+      if (!file || !path) {
+        setPreview("Originalformat-Export braucht die geladene Originaldatei im Eingabe-Reiter.");
+        return;
+      }
+      const form = new FormData();
+      form.append("file", file);
+      form.append("text", text);
+      if (details.extension === "csv" || details.extension === "xlsx") {
+        form.append("columns", document.getElementById("csvColumns").value);
+      }
+      if (details.extension === "xlsx") {
+        form.append("sheet_name", document.getElementById("sheetName").value);
+      }
+      const response = await fetch(path, {method: "POST", body: form});
+      if (!response.ok) {
+        const error = await response.text();
+        setPreview(errorTextFromResponse(error));
+        return;
+      }
+      saveBlob(await response.blob(), details.extension);
+    }
+
+    async function downloadResult() {
+      const text = fullResultText;
+      if (!text.trim()) return;
+      const details = outputFormatDetails(document.getElementById("outputFormat").value);
+      if (details.originalFile) {
+        await downloadOriginalFile(text, details);
+        return;
+      }
+      if (details.pdf) {
+        const pdfFile = document.getElementById("pdf").files[0];
+        if (currentSourceFormat === "pdf" && document.getElementById("usePdfOverlay").checked && pdfFile) {
+          await downloadOverlayPdf(text, details);
+          return;
+        }
+        const response = await fetch("/export-pdf", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({text})
+        });
+        if (!response.ok) {
+          const error = await response.text();
+          setPreview(errorTextFromResponse(error));
+          return;
+        }
+        saveBlob(await response.blob(), details.extension);
+        return;
+      }
+      saveBlob(new Blob([text], {type: details.contentType + ";charset=utf-8"}), details.extension);
     }
 
     async function loadTextFile() {
@@ -340,6 +550,7 @@
       const isCsv = lowerName.endsWith(".csv");
       const isXlsx = lowerName.endsWith(".xlsx");
       const isOfficeFile = lowerName.endsWith(".docx") || lowerName.endsWith(".odt");
+      currentOriginalExtension = lowerName.split(".").pop() || currentOriginalExtension;
       if (isCsv || isXlsx || isOfficeFile) {
         const form = new FormData();
         form.append("file", file);
@@ -358,16 +569,18 @@
           return;
         }
         document.getElementById("text").value = text;
+        currentSourceFormat = isCsv || isXlsx || isOfficeFile ? "md" : currentSourceFormat;
       } else {
         document.getElementById("text").value = await file.text();
+        currentSourceFormat = lowerName.endsWith(".md") ? "md" : "txt";
+        currentOriginalExtension = currentSourceFormat;
       }
       updateCounter();
       setResult("");
       clearProgress();
     }
 
-    document.getElementById("downloadResult").addEventListener("click", () => downloadResult("md", "text/markdown"));
-    document.getElementById("downloadTextResult").addEventListener("click", () => downloadResult("txt", "text/plain"));
+    document.getElementById("downloadResult").addEventListener("click", downloadResult);
     document.getElementById("loadTextFile").addEventListener("click", loadTextFile);
 
     function errorTextFromResponse(text) {
@@ -466,7 +679,12 @@
         const job = await response.json();
         updateProgress(job);
         if (job.status === "complete") {
-          setResult(job.result || "");
+          if (job.kind === "translate-pdf") {
+            document.getElementById("outputFormat").value = "pdf";
+          }
+          setResult(job.result || "", {
+            excerpt: job.kind === "translate-pdf" || currentInputTab === "office"
+          });
           loadHistory();
           activeJobId = null;
           return;
@@ -489,6 +707,10 @@
       saveRecent("target", target);
       renderSelect("source", source);
       renderSelect("target", target);
+      if (currentInputTab === "textarea") {
+        currentSourceFormat = "txt";
+        currentOriginalExtension = "txt";
+      }
       setResult("");
       showProgress("queued", 0, chunks > 1 ? "Starting " + chunks + " chunks..." : "Starting...");
       const response = await fetch("/jobs/translate", {
@@ -528,6 +750,9 @@
       const response = await fetch(path, {method: "POST", body: form});
       const text = await response.text();
       setResult(response.ok ? text : errorTextFromResponse(text));
+      if (response.ok) {
+        currentSourceFormat = "pdf";
+      }
     }
 
     async function postPdfJob() {
@@ -542,6 +767,7 @@
       saveRecent("target", target);
       renderSelect("source", source);
       renderSelect("target", target);
+      currentSourceFormat = "pdf";
       const form = new FormData();
       form.append("file", file);
       form.append("source", source);
@@ -639,3 +865,5 @@
     loadHistory().catch((error) => {
       document.getElementById("history").textContent = error.toString();
     });
+    setInputTab("textarea");
+    syncOverlayControls();

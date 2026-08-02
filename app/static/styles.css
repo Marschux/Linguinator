@@ -239,6 +239,33 @@
     .row { display: grid; gap: 1rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
     .section { margin-top: 1.4rem; }
+    .hidden { display: none; }
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .5rem;
+    }
+
+    .tab {
+      background: transparent;
+      border-color: var(--line);
+      color: var(--muted);
+      min-height: 2.35rem;
+      padding: .5rem .8rem;
+    }
+
+    .tab.active,
+    .tab:hover {
+      background: rgba(47, 125, 246, .16);
+      border-color: var(--accent);
+      color: var(--text);
+      transform: none;
+    }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+    .file-extra { display: none; }
+    .file-extra.visible { display: block; }
     .section-heading {
       align-items: center;
       display: flex;
@@ -250,6 +277,12 @@
     .section-heading label { margin-bottom: 0; }
     .section-heading button { min-height: 2.25rem; padding: .4rem .75rem; }
     .section-heading .actions { margin-top: 0; }
+    .export-actions select {
+      min-height: 2.25rem;
+      padding-bottom: .4rem;
+      padding-top: .4rem;
+      width: auto;
+    }
 
     .counter {
       color: var(--muted);
@@ -338,6 +371,15 @@
       padding: 1rem;
       white-space: pre-wrap;
     }
+
+    .preview-notice {
+      color: var(--warn);
+      display: none;
+      font-size: .9rem;
+      margin-top: .55rem;
+    }
+
+    .preview-notice.visible { display: block; }
 
     footer {
       color: var(--muted);

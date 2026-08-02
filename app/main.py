@@ -18,10 +18,10 @@ from xml.etree import ElementTree
 
 import torch
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
 
@@ -30,6 +30,7 @@ DEVICE_SETTING = os.getenv("NLLB_DEVICE", "cpu")
 MAX_CHARS = int(os.getenv("NLLB_MAX_CHARS", "6000"))
 MAX_FILE_MB = int(os.getenv("NLLB_MAX_FILE_MB", "50"))
 MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
+MAX_ZIP_UNCOMPRESSED_BYTES = MAX_FILE_BYTES * 10
 HISTORY_DAYS = int(os.getenv("NLLB_HISTORY_DAYS", "7"))
 HISTORY_DIR = Path(os.getenv("NLLB_HISTORY_DIR", "/data/history"))
 DEFAULT_SOURCE = os.getenv("NLLB_DEFAULT_SOURCE", "eng_Latn")
@@ -37,6 +38,13 @@ DEFAULT_TARGET = os.getenv("NLLB_DEFAULT_TARGET", "deu_Latn")
 OCR_ENABLED = os.getenv("NLLB_ENABLE_OCR", "false").lower() in ("1", "true", "yes", "on")
 OCR_LANGUAGE = os.getenv("NLLB_OCR_LANGUAGE", "deu+eng")
 PDF_LOW_TEXT_CHARS = 20
+PDF_PAGE_WIDTH = 595
+PDF_PAGE_HEIGHT = 842
+PDF_MARGIN = 54
+PDF_LINE_HEIGHT = 14
+PDF_FONT_SIZE = 11
+PDF_HEADING_FONT_SIZE = 15
+PDF_FOOTER_FONT_SIZE = 9
 
 APP_DIR = Path(__file__).resolve().parent
 
@@ -50,6 +58,10 @@ class TranslateRequest(BaseModel):
     q: Union[str, List[str]]
     source: str = DEFAULT_SOURCE
     target: str = DEFAULT_TARGET
+
+
+class PdfExportRequest(BaseModel):
+    text: str
 
 
 def selected_device():
@@ -136,6 +148,200 @@ def translate_text(text: str, source: str, target: str) -> str:
     chunks = split_long_text(text, MAX_CHARS)
     translated = [translate_one(chunk, source, target) for chunk in chunks]
     return "\n\n".join(translated)
+
+
+def pdf_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def pdf_text_object(text: str) -> str:
+    try:
+        text.encode("ascii")
+    except UnicodeEncodeError:
+        return "<" + (bytes.fromhex("FEFF") + text.encode("utf-16-be")).hex().upper() + ">"
+    return f"({pdf_escape(text)})"
+
+
+def wrap_pdf_line(text: str, max_chars: int = 88) -> List[str]:
+    if not text:
+        return [""]
+    lines = []
+    remaining = text
+    while len(remaining) > max_chars:
+        cut = remaining.rfind(" ", 0, max_chars + 1)
+        if cut <= 0:
+            cut = max_chars
+        lines.append(remaining[:cut].strip())
+        remaining = remaining[cut:].strip()
+    lines.append(remaining)
+    return lines
+
+
+def pdf_line_command(text: str, x: int, y: int, font: str = "F1", size: int = PDF_FONT_SIZE) -> str:
+    return f"BT /{font} {size} Tf {x} {y} Td {pdf_text_object(text)} Tj ET"
+
+
+def markdown_page_sections(text: str) -> List[Dict[str, str]]:
+    sections = pdf_sections(text)
+    if not sections:
+        return [{"page_number": "", "text": text.strip()}]
+    return [{"page_number": page_number, "text": page_text} for page_number, page_text in sections]
+
+
+def pdf_render_lines(text: str) -> List[Dict[str, Any]]:
+    lines = []
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    for paragraph in normalized.split("\n"):
+        stripped = paragraph.strip()
+        if stripped.startswith("#"):
+            heading = stripped.lstrip("#").strip()
+            if heading:
+                for line in wrap_pdf_line(heading, 68):
+                    lines.append({"text": line, "font": "F2", "size": PDF_HEADING_FONT_SIZE, "line_height": 18})
+                lines.append({"text": "", "font": "F1", "size": PDF_FONT_SIZE, "line_height": 8})
+                continue
+        wrapped = wrap_pdf_line(stripped)
+        for line in wrapped:
+            lines.append({"text": line, "font": "F1", "size": PDF_FONT_SIZE, "line_height": PDF_LINE_HEIGHT})
+    return lines
+
+
+def paginate_pdf_lines(lines: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+    pages = [[]]
+    usable_height = PDF_PAGE_HEIGHT - (2 * PDF_MARGIN) - 26
+    used_height = 0
+    for line in lines:
+        line_height = line["line_height"]
+        if pages[-1] and used_height + line_height > usable_height:
+            pages.append([])
+            used_height = 0
+        pages[-1].append(line)
+        used_height += line_height
+    return pages or [[]]
+
+
+def pdf_document_pages(text: str) -> List[Dict[str, Any]]:
+    document_pages = []
+    for section in markdown_page_sections(text):
+        content_pages = paginate_pdf_lines(pdf_render_lines(section["text"]))
+        for index, lines in enumerate(content_pages, start=1):
+            document_pages.append({
+                "source_page": section["page_number"],
+                "continuation": index > 1,
+                "lines": lines,
+            })
+    return document_pages or [{"source_page": "", "continuation": False, "lines": []}]
+
+
+def page_size_from_pdf_page(page) -> tuple[float, float]:
+    box = page.mediabox
+    return float(box.width), float(box.height)
+
+
+def create_pdf_from_pages(pages: List[Dict[str, Any]], cover_original: bool = False) -> bytes:
+    objects = ["<< /Type /Catalog /Pages 2 0 R >>"]
+    page_refs = []
+    next_object_id = 3
+
+    for output_page_number, page in enumerate(pages, start=1):
+        width = page.get("width", PDF_PAGE_WIDTH)
+        height = page.get("height", PDF_PAGE_HEIGHT)
+        margin = page.get("margin", PDF_MARGIN)
+        page_id = next_object_id
+        content_id = next_object_id + 1
+        next_object_id += 2
+        page_refs.append(f"{page_id} 0 R")
+        commands = []
+        if cover_original:
+            cover_x = margin * 0.7
+            cover_y = margin * 0.9
+            cover_width = max(1, width - (2 * cover_x))
+            cover_height = max(1, height - (cover_y + margin * 0.8))
+            commands.append(f"1 1 1 rg {cover_x:.2f} {cover_y:.2f} {cover_width:.2f} {cover_height:.2f} re f")
+        y = height - margin
+        if page["source_page"]:
+            heading = "Page " + page["source_page"]
+            if page["continuation"]:
+                heading += " continued"
+            commands.append(pdf_line_command(heading, margin, y, "F2", PDF_HEADING_FONT_SIZE))
+            y -= 24
+        for line in page["lines"]:
+            if line["text"]:
+                commands.append(pdf_line_command(line["text"], margin, y, line["font"], line["size"]))
+            y -= line["line_height"]
+        commands.append(
+            pdf_line_command(
+                f"{output_page_number}",
+                int(width - margin),
+                margin // 2,
+                "F1",
+                PDF_FOOTER_FONT_SIZE,
+            )
+        )
+        stream = "\n".join(commands).encode("utf-8")
+        objects.append(
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width:.2f} {height:.2f}] "
+            f"/Resources << /Font << "
+            f"/F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> "
+            f"/F2 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> "
+            f">> >> "
+            f"/Contents {content_id} 0 R >>"
+        )
+        objects.append(f"<< /Length {len(stream)} >>\nstream\n{stream.decode('utf-8')}\nendstream")
+
+    objects.insert(1, f"<< /Type /Pages /Kids [{' '.join(page_refs)}] /Count {len(page_refs)} >>")
+    data = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for index, obj in enumerate(objects, start=1):
+        offsets.append(len(data))
+        data.extend(f"{index} 0 obj\n{obj}\nendobj\n".encode("utf-8"))
+    xref_offset = len(data)
+    data.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode("ascii"))
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    data.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
+        f"startxref\n{xref_offset}\n%%EOF\n".encode("ascii")
+    )
+    return bytes(data)
+
+
+def create_text_pdf(text: str) -> bytes:
+    return create_pdf_from_pages(pdf_document_pages(text))
+
+
+def create_overlay_pdf(original_content: bytes, translated_text: str, cover_original: bool = False) -> bytes:
+    try:
+        original_reader = PdfReader(BytesIO(original_content))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read original PDF: {exc}") from exc
+    if not original_reader.pages:
+        raise HTTPException(status_code=422, detail="Original PDF has no pages")
+
+    sections = markdown_page_sections(translated_text)
+    overlay_pages = []
+    for index, original_page in enumerate(original_reader.pages):
+        width, height = page_size_from_pdf_page(original_page)
+        section = sections[index] if index < len(sections) else {"page_number": str(index + 1), "text": ""}
+        content_pages = paginate_pdf_lines(pdf_render_lines(section["text"]))
+        lines = content_pages[0] if content_pages else []
+        overlay_pages.append({
+            "source_page": section["page_number"] or str(index + 1),
+            "continuation": False,
+            "lines": lines,
+            "width": width,
+            "height": height,
+            "margin": PDF_MARGIN,
+        })
+
+    overlay_reader = PdfReader(BytesIO(create_pdf_from_pages(overlay_pages, cover_original=cover_original)))
+    writer = PdfWriter()
+    for original_page, overlay_page in zip(original_reader.pages, overlay_reader.pages):
+        original_page.merge_page(overlay_page)
+        writer.add_page(original_page)
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
 
 
 def cleanup_history():
@@ -412,7 +618,10 @@ def exception_message(exc: Exception) -> str:
 def extract_docx_text_from_bytes(content: bytes) -> str:
     try:
         with zipfile.ZipFile(BytesIO(content)) as docx:
+            ensure_zip_size(docx)
             document = docx.read("word/document.xml")
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read DOCX: {exc}") from exc
 
@@ -435,10 +644,64 @@ def extract_docx_text_from_bytes(content: bytes) -> str:
     return result
 
 
+def translated_blocks(text: str) -> List[str]:
+    return [block.strip() for block in re.split(r"\n\s*\n", text.strip()) if block.strip()]
+
+
+def ensure_zip_size(workbook: zipfile.ZipFile):
+    uncompressed_size = sum(item.file_size for item in workbook.infolist())
+    if uncompressed_size > MAX_ZIP_UNCOMPRESSED_BYTES:
+        raise HTTPException(status_code=413, detail=f"Archive expands beyond {MAX_ZIP_UNCOMPRESSED_BYTES // 1024 // 1024} MB")
+
+
+def write_zip_with_replacement(content: bytes, replacements: Dict[str, bytes]) -> bytes:
+    output = BytesIO()
+    with zipfile.ZipFile(BytesIO(content)) as source:
+        ensure_zip_size(source)
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as target:
+            for item in source.infolist():
+                data = replacements.get(item.filename)
+                if data is None:
+                    data = source.read(item.filename)
+                target.writestr(item, data)
+    return output.getvalue()
+
+
+def export_docx_with_translated_text(content: bytes, translated_text: str) -> bytes:
+    blocks = translated_blocks(translated_text)
+    if not blocks:
+        raise HTTPException(status_code=400, detail="No translated text to export")
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as docx:
+            ensure_zip_size(docx)
+            document = docx.read("word/document.xml")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read DOCX: {exc}") from exc
+
+    namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    root = ElementTree.fromstring(document)
+    block_index = 0
+    for paragraph in root.findall(".//w:p", namespaces):
+        text_nodes = paragraph.findall(".//w:t", namespaces)
+        if not "".join(node.text or "" for node in text_nodes).strip():
+            continue
+        if block_index >= len(blocks):
+            break
+        for node_index, node in enumerate(text_nodes):
+            node.text = blocks[block_index] if node_index == 0 else ""
+        block_index += 1
+    return write_zip_with_replacement(content, {"word/document.xml": ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)})
+
+
 def extract_odt_text_from_bytes(content: bytes) -> str:
     try:
         with zipfile.ZipFile(BytesIO(content)) as odt:
+            ensure_zip_size(odt)
             document = odt.read("content.xml")
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read ODT: {exc}") from exc
 
@@ -458,6 +721,34 @@ def extract_odt_text_from_bytes(content: bytes) -> str:
     if not result:
         raise HTTPException(status_code=422, detail="No text found in ODT")
     return result
+
+
+def export_odt_with_translated_text(content: bytes, translated_text: str) -> bytes:
+    blocks = translated_blocks(translated_text)
+    if not blocks:
+        raise HTTPException(status_code=400, detail="No translated text to export")
+    try:
+        with zipfile.ZipFile(BytesIO(content)) as odt:
+            ensure_zip_size(odt)
+            document = odt.read("content.xml")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read ODT: {exc}") from exc
+
+    namespaces = {"text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0"}
+    root = ElementTree.fromstring(document)
+    block_index = 0
+    for paragraph in root.findall(".//text:p", namespaces):
+        if not "".join(paragraph.itertext()).strip():
+            continue
+        if block_index >= len(blocks):
+            break
+        for child in list(paragraph):
+            paragraph.remove(child)
+        paragraph.text = blocks[block_index]
+        block_index += 1
+    return write_zip_with_replacement(content, {"content.xml": ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)})
 
 
 def parse_column_names(columns: str) -> List[str]:
@@ -493,6 +784,35 @@ def extract_csv_text_from_bytes(content: bytes, columns: str) -> str:
     if not result:
         raise HTTPException(status_code=422, detail="No text found in selected CSV columns")
     return result
+
+
+def export_csv_with_translated_text(content: bytes, columns: str, translated_text: str) -> bytes:
+    selected_columns = parse_column_names(columns)
+    if not selected_columns:
+        raise HTTPException(status_code=400, detail="Select at least one CSV column")
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not decode CSV as UTF-8: {exc}") from exc
+    reader = csv.DictReader(StringIO(text))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=422, detail="CSV has no header row")
+    missing = [column for column in selected_columns if column not in reader.fieldnames]
+    if missing:
+        raise HTTPException(status_code=400, detail="CSV columns not found: " + ", ".join(missing))
+
+    rows = list(reader)
+    blocks = translated_blocks(translated_text)
+    for row, block in zip(rows, blocks):
+        values = [value.strip() for value in block.split(" | ")]
+        for column, value in zip(selected_columns, values):
+            row[column] = value
+
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=reader.fieldnames, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue().encode("utf-8")
 
 
 def xlsx_column_name(cell_ref: str) -> str:
@@ -554,6 +874,48 @@ def xlsx_sheet_path(workbook: zipfile.ZipFile, sheet_name: str) -> str:
     return xlsx_relationship_target(target)
 
 
+def xlsx_cell_text(cell, shared: List[str], namespace: Dict[str, str]) -> str:
+    cell_type = cell.attrib.get("t")
+    value_node = cell.find("s:v", namespace)
+    inline_node = cell.find(".//s:t", namespace)
+    if cell_type == "s" and value_node is not None:
+        try:
+            return shared[int(value_node.text or "0")]
+        except (ValueError, IndexError) as exc:
+            raise HTTPException(status_code=400, detail="Invalid XLSX shared string reference") from exc
+    if inline_node is not None:
+        return inline_node.text or ""
+    if value_node is not None:
+        return value_node.text or ""
+    return ""
+
+
+def xlsx_rows_with_values(root, shared: List[str], namespace: Dict[str, str]) -> List[Dict[str, Any]]:
+    rows = []
+    for row in root.findall(".//s:row", namespace):
+        values = {}
+        cells = {}
+        for cell in row.findall("s:c", namespace):
+            ref = cell.attrib.get("r", "")
+            column = xlsx_column_name(ref)
+            cells[column] = cell
+            values[column] = xlsx_cell_text(cell, shared, namespace).strip()
+        if values:
+            rows.append({"row": row, "values": values, "cells": cells})
+    return rows
+
+
+def resolve_xlsx_columns(rows: List[Dict[str, Any]], selected_columns: List[str]) -> List[str]:
+    if not rows:
+        raise HTTPException(status_code=422, detail="XLSX sheet has no rows")
+    header = {value: column for column, value in rows[0]["values"].items() if value}
+    resolved_columns = [header.get(column, column.upper()) for column in selected_columns]
+    missing = [column for column in resolved_columns if all(not row["values"].get(column) for row in rows)]
+    if missing:
+        raise HTTPException(status_code=400, detail="XLSX columns not found: " + ", ".join(missing))
+    return resolved_columns
+
+
 def extract_xlsx_text_from_bytes(content: bytes, sheet_name: str, columns: str) -> str:
     selected_columns = parse_column_names(columns)
     if not selected_columns:
@@ -561,6 +923,9 @@ def extract_xlsx_text_from_bytes(content: bytes, sheet_name: str, columns: str) 
 
     try:
         workbook = zipfile.ZipFile(BytesIO(content))
+        ensure_zip_size(workbook)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read XLSX: {exc}") from exc
 
@@ -575,41 +940,12 @@ def extract_xlsx_text_from_bytes(content: bytes, sheet_name: str, columns: str) 
         raise HTTPException(status_code=400, detail=f"Could not parse XLSX: {exc}") from exc
 
     namespace = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
-    rows = []
-    for row in root.findall(".//s:row", namespace):
-        values = {}
-        for cell in row.findall("s:c", namespace):
-            ref = cell.attrib.get("r", "")
-            column = xlsx_column_name(ref)
-            cell_type = cell.attrib.get("t")
-            value_node = cell.find("s:v", namespace)
-            inline_node = cell.find(".//s:t", namespace)
-            value = ""
-            if cell_type == "s" and value_node is not None:
-                try:
-                    value = shared[int(value_node.text or "0")]
-                except (ValueError, IndexError) as exc:
-                    raise HTTPException(status_code=400, detail="Invalid XLSX shared string reference") from exc
-            elif inline_node is not None:
-                value = inline_node.text or ""
-            elif value_node is not None:
-                value = value_node.text or ""
-            values[column] = value.strip()
-        if values:
-            rows.append(values)
-
-    if not rows:
-        raise HTTPException(status_code=422, detail="XLSX sheet has no rows")
-
-    header = {value: column for column, value in rows[0].items() if value}
-    resolved_columns = [header.get(column, column.upper()) for column in selected_columns]
-    missing = [column for column in resolved_columns if all(not row.get(column) for row in rows)]
-    if missing:
-        raise HTTPException(status_code=400, detail="XLSX columns not found: " + ", ".join(missing))
+    rows = xlsx_rows_with_values(root, shared, namespace)
+    resolved_columns = resolve_xlsx_columns(rows, selected_columns)
 
     output_rows = []
     for row in rows[1:]:
-        values = [row.get(column, "").strip() for column in resolved_columns]
+        values = [row["values"].get(column, "").strip() for column in resolved_columns]
         line = " | ".join(value for value in values if value)
         if line:
             output_rows.append(line)
@@ -618,6 +954,52 @@ def extract_xlsx_text_from_bytes(content: bytes, sheet_name: str, columns: str) 
     if not result:
         raise HTTPException(status_code=422, detail="No text found in selected XLSX columns")
     return result
+
+
+def xlsx_set_cell_text(cell, text: str):
+    cell.attrib["t"] = "inlineStr"
+    for child in list(cell):
+        cell.remove(child)
+    inline = ElementTree.SubElement(cell, "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}is")
+    node = ElementTree.SubElement(inline, "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}t")
+    node.text = text
+
+
+def export_xlsx_with_translated_text(content: bytes, sheet_name: str, columns: str, translated_text: str) -> bytes:
+    selected_columns = parse_column_names(columns)
+    if not selected_columns:
+        raise HTTPException(status_code=400, detail="Select at least one XLSX column")
+    try:
+        workbook = zipfile.ZipFile(BytesIO(content))
+        ensure_zip_size(workbook)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read XLSX: {exc}") from exc
+
+    try:
+        with workbook:
+            shared = xlsx_shared_strings(workbook)
+            sheet_path = xlsx_sheet_path(workbook, sheet_name)
+            sheet_xml = workbook.read(sheet_path)
+            root = ElementTree.fromstring(sheet_xml)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not parse XLSX: {exc}") from exc
+
+    namespace = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    rows = xlsx_rows_with_values(root, shared, namespace)
+    resolved_columns = resolve_xlsx_columns(rows, selected_columns)
+    blocks = translated_blocks(translated_text)
+    for row_info, block in zip(rows[1:], blocks):
+        values = [value.strip() for value in block.split(" | ")]
+        for column, value in zip(resolved_columns, values):
+            cell = row_info["cells"].get(column)
+            if cell is not None:
+                xlsx_set_cell_text(cell, value)
+
+    return write_zip_with_replacement(content, {sheet_path: ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)})
 
 
 async def extract_pdf_markdown(file: UploadFile, page_range: str = "") -> str:
@@ -775,6 +1157,88 @@ def download_history(item_id: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="History item not found")
     return FileResponse(path, media_type="text/markdown", filename=path.name)
+
+
+@app.post("/export-pdf")
+def export_pdf(request: PdfExportRequest):
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="No text to export")
+    return Response(
+        create_text_pdf(request.text),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="nllb-translation.pdf"'},
+    )
+
+
+@app.post("/export-pdf-overlay")
+async def export_pdf_overlay(
+    file: UploadFile = File(...),
+    text: str = Form(""),
+    cover_original: bool = Form(False),
+):
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="No text to export")
+    content = await read_upload_bytes(file, "PDF")
+    return Response(
+        create_overlay_pdf(content, text, cover_original),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="nllb-overlay-translation.pdf"'},
+    )
+
+
+@app.post("/export-docx")
+async def export_docx(
+    file: UploadFile = File(...),
+    text: str = Form(""),
+):
+    content = await read_upload_bytes(file, "DOCX")
+    return Response(
+        export_docx_with_translated_text(content, text),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": 'attachment; filename="nllb-translation.docx"'},
+    )
+
+
+@app.post("/export-odt")
+async def export_odt(
+    file: UploadFile = File(...),
+    text: str = Form(""),
+):
+    content = await read_upload_bytes(file, "ODT")
+    return Response(
+        export_odt_with_translated_text(content, text),
+        media_type="application/vnd.oasis.opendocument.text",
+        headers={"Content-Disposition": 'attachment; filename="nllb-translation.odt"'},
+    )
+
+
+@app.post("/export-csv")
+async def export_csv(
+    file: UploadFile = File(...),
+    text: str = Form(""),
+    columns: str = Form(""),
+):
+    content = await read_upload_bytes(file, "CSV")
+    return Response(
+        export_csv_with_translated_text(content, columns, text),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="nllb-translation.csv"'},
+    )
+
+
+@app.post("/export-xlsx")
+async def export_xlsx(
+    file: UploadFile = File(...),
+    text: str = Form(""),
+    sheet_name: str = Form(""),
+    columns: str = Form(""),
+):
+    content = await read_upload_bytes(file, "XLSX")
+    return Response(
+        export_xlsx_with_translated_text(content, sheet_name, columns, text),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": 'attachment; filename="nllb-translation.xlsx"'},
+    )
 
 
 @app.delete("/history/{item_id}")

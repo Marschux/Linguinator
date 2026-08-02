@@ -157,6 +157,53 @@ class MainTests(unittest.TestCase):
 
         self.assertIn("OCR text", markdown)
 
+    def test_create_text_pdf_returns_pdf_document(self):
+        content = main.create_text_pdf("Translated text\n\nSecond paragraph")
+
+        self.assertTrue(content.startswith(b"%PDF-1.4"))
+        self.assertIn(b"/Type /Page", content)
+        self.assertIn(b"Translated text", content)
+        self.assertIn(b"/Helvetica-Bold", content)
+
+    def test_create_text_pdf_preserves_markdown_page_breaks(self):
+        content = main.create_text_pdf("# Page 1\n\nFirst\n\n# Page 2\n\nSecond")
+
+        self.assertIn(b"/Count 2", content)
+        self.assertIn(b"Page 1", content)
+        self.assertIn(b"Page 2", content)
+
+    def test_create_text_pdf_formats_markdown_headings(self):
+        content = main.create_text_pdf("# Title\n\nBody")
+
+        self.assertIn(b"/F2 15 Tf", content)
+        self.assertIn(b"Title", content)
+
+    def test_create_pdf_from_pages_can_add_cover_rectangle(self):
+        content = main.create_pdf_from_pages(
+            [{
+                "source_page": "1",
+                "continuation": False,
+                "lines": [{"text": "Translated", "font": "F1", "size": 11, "line_height": 14}],
+            }],
+            cover_original=True,
+        )
+
+        self.assertIn(b" re f", content)
+        self.assertIn(b"Translated", content)
+
+    def test_create_overlay_pdf_preserves_original_page_count(self):
+        original = main.create_text_pdf("# Page 1\n\nOriginal\n\n# Page 2\n\nSecond")
+
+        overlay = main.create_overlay_pdf(original, "# Page 1\n\nTranslated\n\n# Page 2\n\nSecond translated")
+
+        reader = main.PdfReader(BytesIO(overlay))
+        self.assertEqual(len(reader.pages), 2)
+
+    def test_pdf_text_object_encodes_unicode(self):
+        self.assertEqual(main.pdf_text_object("Grusse"), "(Grusse)")
+        self.assertEqual(main.pdf_text_object("Gruesse aeoeue"), "(Gruesse aeoeue)")
+        self.assertTrue(main.pdf_text_object("Gruesse: " + chr(228)).startswith("<FEFF"))
+
     def test_cleanup_history_removes_old_files(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             old_file = Path(temp_dir) / "old.md"
@@ -199,6 +246,22 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(text, "First paragraph\n\nSecond paragraph")
 
+    def test_docx_export_replaces_paragraph_text(self):
+        content = minimal_docx(["First paragraph", "Second paragraph"])
+
+        updated = main.export_docx_with_translated_text(content, "Erster Absatz\n\nZweiter Absatz")
+
+        self.assertEqual(main.extract_docx_text_from_bytes(updated), "Erster Absatz\n\nZweiter Absatz")
+
+    def test_zip_size_limit_rejects_large_uncompressed_archives(self):
+        content = minimal_docx(["First paragraph"])
+
+        with patch.object(main, "MAX_ZIP_UNCOMPRESSED_BYTES", 1):
+            with self.assertRaises(HTTPException) as raised:
+                main.extract_docx_text_from_bytes(content)
+
+        self.assertEqual(raised.exception.status_code, 413)
+
     def test_odt_extraction_preserves_paragraphs(self):
         content = minimal_odt(["First paragraph", "Second paragraph"])
 
@@ -206,12 +269,27 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(text, "First paragraph\n\nSecond paragraph")
 
+    def test_odt_export_replaces_paragraph_text(self):
+        content = minimal_odt(["First paragraph", "Second paragraph"])
+
+        updated = main.export_odt_with_translated_text(content, "Erster Absatz\n\nZweiter Absatz")
+
+        self.assertEqual(main.extract_odt_text_from_bytes(updated), "Erster Absatz\n\nZweiter Absatz")
+
     def test_csv_extraction_uses_selected_columns(self):
         content = b"title,description,ignore\nHello,World,Nope\nSecond,Row,Skip\n"
 
         text = main.extract_csv_text_from_bytes(content, "title, description")
 
         self.assertEqual(text, "Hello | World\n\nSecond | Row")
+
+    def test_csv_export_replaces_selected_columns(self):
+        content = b"title,description,ignore\nHello,World,Nope\nSecond,Row,Skip\n"
+
+        updated = main.export_csv_with_translated_text(content, "title, description", "Hallo | Welt\n\nZweite | Zeile")
+
+        self.assertIn(b"Hallo,Welt,Nope", updated)
+        self.assertIn(b"Zweite,Zeile,Skip", updated)
 
     def test_csv_extraction_reports_missing_columns(self):
         content = b"title,description\nHello,World\n"
@@ -226,6 +304,12 @@ class MainTests(unittest.TestCase):
         text = main.extract_xlsx_text_from_bytes(minimal_xlsx(), "Sheet1", "title,description")
 
         self.assertEqual(text, "Hello | World")
+
+    def test_xlsx_export_replaces_selected_columns(self):
+        updated = main.export_xlsx_with_translated_text(minimal_xlsx(), "Sheet1", "title,description", "Hallo | Welt")
+
+        text = main.extract_xlsx_text_from_bytes(updated, "Sheet1", "title,description")
+        self.assertEqual(text, "Hallo | Welt")
 
     def test_xlsx_extraction_resolves_absolute_sheet_target(self):
         text = main.extract_xlsx_text_from_bytes(minimal_xlsx("/xl/worksheets/sheet1.xml"), "Sheet1", "title")
