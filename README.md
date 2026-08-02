@@ -1,6 +1,6 @@
-# NLLB Translate UI
+# Lingumachina
 
-Local translation UI and API based on Meta NLLB.
+Local document translation workbench based on Meta NLLB.
 
 ## Features
 
@@ -10,6 +10,7 @@ Local translation UI and API based on Meta NLLB.
 - Text-PDF translation to Markdown
 - Progress, ETA, pause, resume, and stop for background jobs
 - Local conversion history with configurable retention
+- Optional HTTP Basic password protection
 
 ## Run
 
@@ -68,7 +69,22 @@ NLLB_DEFAULT_SOURCE=eng_Latn
 NLLB_DEFAULT_TARGET=deu_Latn
 NLLB_ENABLE_OCR=false
 NLLB_OCR_LANGUAGE=deu+eng
+NLLB_AUTH_ENABLED=false
+NLLB_AUTH_USERNAME=admin
+NLLB_AUTH_PASSWORD=
 ```
+
+## Password Protection
+
+Password protection is disabled by default. To protect the web UI, API, and history endpoints with HTTP Basic auth, set:
+
+```env
+NLLB_AUTH_ENABLED=true
+NLLB_AUTH_USERNAME=admin
+NLLB_AUTH_PASSWORD=change-me
+```
+
+`GET /health` stays public so Docker healthchecks continue to work.
 
 ## OCR
 

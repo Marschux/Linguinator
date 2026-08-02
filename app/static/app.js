@@ -283,6 +283,7 @@
       option.type = "button";
       option.className = "language-option";
       option.dataset.code = language.code;
+      option.title = "Sprache " + formatLanguageLabel(language.code) + " auswaehlen.";
       option.innerHTML =
         '<span class="language-name">' + escapeHtml(formatLanguageLabel(language.code)) + '</span>' +
         '<span class="language-code">' + escapeHtml(language.code) + '</span>';
@@ -379,8 +380,18 @@
       button.addEventListener("click", () => setInputTab(button.dataset.inputTab));
     });
 
-    document.getElementById("historyToggle").addEventListener("click", () => {
-      document.getElementById("historySection").classList.toggle("hidden");
+    document.getElementById("historyToggle").addEventListener("click", async () => {
+      const app = document.querySelector(".app");
+      const historySection = document.getElementById("historySection");
+      const historyButton = document.getElementById("historyToggle");
+      const historyMode = !app.classList.contains("history-mode");
+      app.classList.toggle("history-mode", historyMode);
+      historySection.classList.toggle("hidden", !historyMode);
+      historyButton.textContent = historyMode ? "Zurueck" : "History";
+      historyButton.title = historyMode ? "Zur Arbeitsansicht zurueckkehren." : "Zur History-Ansicht wechseln.";
+      if (historyMode) {
+        await loadHistory();
+      }
     });
 
     function syncOverlayControls() {
@@ -733,27 +744,15 @@
       await pollJob(data.job_id);
     }
 
-    document.getElementById("translate").addEventListener("click", startTextJob);
-
-    async function postPdf(path) {
-      const file = document.getElementById("pdf").files[0];
-      if (!file) {
-        setResult("Select a PDF first.");
+    async function startCurrentJob() {
+      if (currentInputTab === "pdf") {
+        await postPdfJob();
         return;
       }
-      const form = new FormData();
-      form.append("file", file);
-      form.append("source", document.getElementById("source").value);
-      form.append("target", document.getElementById("target").value);
-      form.append("page_range", document.getElementById("pageRange").value);
-      setResult(path === "/translate-pdf" ? "Extracting and translating PDF..." : "Extracting PDF...");
-      const response = await fetch(path, {method: "POST", body: form});
-      const text = await response.text();
-      setResult(response.ok ? text : errorTextFromResponse(text));
-      if (response.ok) {
-        currentSourceFormat = "pdf";
-      }
+      await startTextJob();
     }
+
+    document.getElementById("translate").addEventListener("click", startCurrentJob);
 
     async function postPdfJob() {
       const file = document.getElementById("pdf").files[0];
@@ -841,6 +840,7 @@
         remove.type = "button";
         remove.className = "secondary history-delete";
         remove.textContent = "Delete";
+        remove.title = "Diesen History-Eintrag loeschen.";
         remove.addEventListener("click", () => deleteHistoryItem(item.id));
         main.appendChild(link);
         main.appendChild(meta);
@@ -850,8 +850,6 @@
       }
     }
 
-    document.getElementById("extractPdf").addEventListener("click", () => postPdf("/extract-pdf"));
-    document.getElementById("translatePdf").addEventListener("click", postPdfJob);
     document.getElementById("pauseJob").addEventListener("click", () => controlActiveJob("pause"));
     document.getElementById("resumeJob").addEventListener("click", () => controlActiveJob("resume"));
     document.getElementById("stopJob").addEventListener("click", () => controlActiveJob("cancel"));

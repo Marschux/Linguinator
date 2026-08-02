@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import shutil
@@ -10,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 
 import app.main as main
 
@@ -222,6 +224,10 @@ def xlsx_with_formula_cell():
 
 
 class MainTests(unittest.TestCase):
+    def auth_header(self, username="admin", password="secret"):
+        token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+        return {"Authorization": "Basic " + token}
+
     def test_split_long_text_keeps_chunks_under_limit(self):
         text = "One two three four five six seven eight"
 
@@ -230,6 +236,43 @@ class MainTests(unittest.TestCase):
         self.assertGreater(len(chunks), 1)
         self.assertTrue(all(len(chunk) <= 12 for chunk in chunks))
         self.assertEqual(" ".join(chunks), text)
+
+    def test_basic_auth_allows_requests_when_disabled(self):
+        with patch.object(main, "AUTH_ENABLED", False):
+            response = TestClient(main.app).get("/")
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_basic_auth_rejects_missing_credentials_when_enabled(self):
+        with patch.object(main, "AUTH_ENABLED", True):
+            with patch.object(main, "AUTH_PASSWORD", "secret"):
+                response = TestClient(main.app).get("/")
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.headers["www-authenticate"], 'Basic realm="Lingumachina"')
+
+    def test_basic_auth_rejects_wrong_credentials(self):
+        with patch.object(main, "AUTH_ENABLED", True):
+            with patch.object(main, "AUTH_USERNAME", "admin"):
+                with patch.object(main, "AUTH_PASSWORD", "secret"):
+                    response = TestClient(main.app).get("/", headers=self.auth_header(password="wrong"))
+
+        self.assertEqual(response.status_code, 401)
+
+    def test_basic_auth_accepts_configured_credentials(self):
+        with patch.object(main, "AUTH_ENABLED", True):
+            with patch.object(main, "AUTH_USERNAME", "admin"):
+                with patch.object(main, "AUTH_PASSWORD", "secret"):
+                    response = TestClient(main.app).get("/", headers=self.auth_header())
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_health_stays_public_when_basic_auth_is_enabled(self):
+        with patch.object(main, "AUTH_ENABLED", True):
+            with patch.object(main, "AUTH_PASSWORD", "secret"):
+                response = TestClient(main.app).get("/health")
+
+        self.assertEqual(response.status_code, 200)
 
     def test_translate_one_uses_lazy_loaded_torch_module(self):
         with patch.object(main, "load_model", return_value=(FakeTokenizer(), FakeModel(), "cpu", FakeTorch())):

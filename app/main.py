@@ -1,5 +1,7 @@
+import base64
 import os
 import re
+import secrets
 import csv
 import json
 import shutil
@@ -16,7 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Union
 from xml.etree import ElementTree
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -35,6 +37,9 @@ DEFAULT_SOURCE = os.getenv("NLLB_DEFAULT_SOURCE", "eng_Latn")
 DEFAULT_TARGET = os.getenv("NLLB_DEFAULT_TARGET", "deu_Latn")
 OCR_ENABLED = os.getenv("NLLB_ENABLE_OCR", "false").lower() in ("1", "true", "yes", "on")
 OCR_LANGUAGE = os.getenv("NLLB_OCR_LANGUAGE", "deu+eng")
+AUTH_ENABLED = os.getenv("NLLB_AUTH_ENABLED", "false").lower() in ("1", "true", "yes", "on")
+AUTH_USERNAME = os.getenv("NLLB_AUTH_USERNAME", "admin")
+AUTH_PASSWORD = os.getenv("NLLB_AUTH_PASSWORD", "")
 PDF_LOW_TEXT_CHARS = 20
 PDF_PAGE_WIDTH = 595
 PDF_PAGE_HEIGHT = 842
@@ -51,7 +56,7 @@ ElementTree.register_namespace("s", "http://schemas.openxmlformats.org/spreadshe
 
 APP_DIR = Path(__file__).resolve().parent
 
-app = FastAPI(title="NLLB Translate", version="0.1.0")
+app = FastAPI(title="Lingumachina", version="0.1.0")
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOBS_LOCK = threading.Lock()
@@ -65,6 +70,39 @@ class TranslateRequest(BaseModel):
 
 class PdfExportRequest(BaseModel):
     text: str
+
+
+def unauthorized_response() -> Response:
+    return Response(
+        "Authentication required",
+        status_code=401,
+        headers={"WWW-Authenticate": 'Basic realm="Lingumachina"'},
+    )
+
+
+def basic_auth_valid(header: str) -> bool:
+    scheme, _, encoded = header.partition(" ")
+    if scheme.lower() != "basic" or not encoded:
+        return False
+    try:
+        decoded = base64.b64decode(encoded, validate=True).decode("utf-8")
+    except Exception:
+        return False
+    username, separator, password = decoded.partition(":")
+    if not separator:
+        return False
+    return secrets.compare_digest(username, AUTH_USERNAME) and secrets.compare_digest(password, AUTH_PASSWORD)
+
+
+@app.middleware("http")
+async def require_basic_auth(request: Request, call_next):
+    if not AUTH_ENABLED or request.url.path == "/health":
+        return await call_next(request)
+    if not AUTH_PASSWORD:
+        return Response("Authentication is enabled but NLLB_AUTH_PASSWORD is not set", status_code=500)
+    if not basic_auth_valid(request.headers.get("authorization", "")):
+        return unauthorized_response()
+    return await call_next(request)
 
 
 def selected_device():

@@ -240,6 +240,8 @@
     .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
     .section { margin-top: 1.4rem; }
     .hidden { display: none; }
+    .app.history-mode .workspace-section { display: none; }
+    .app.history-mode #historySection { display: block; }
     .tabs {
       display: flex;
       flex-wrap: wrap;
@@ -263,7 +265,11 @@
     }
 
     .tab-panel { display: none; }
-    .tab-panel.active { display: block; }
+    .tab-panel.active {
+      display: block;
+      min-height: 16.2rem;
+    }
+    .section.tab-panel { margin-top: 1rem; }
     .file-extra { display: none; }
     .file-extra.visible { display: block; }
     .section-heading {
@@ -277,6 +283,14 @@
     .section-heading label { margin-bottom: 0; }
     .section-heading button { min-height: 2.25rem; padding: .4rem .75rem; }
     .section-heading .actions { margin-top: 0; }
+    .download-row {
+      align-items: end;
+      display: flex;
+      gap: 1rem;
+      justify-content: flex-end;
+      margin-top: .8rem;
+    }
+    .download-row label { margin-bottom: .45rem; }
     .export-actions select {
       min-height: 2.25rem;
       padding-bottom: .4rem;
@@ -394,6 +408,7 @@
       header { align-items: start; display: block; }
       .row { grid-template-columns: 1fr; }
       .section-heading { align-items: stretch; flex-direction: column; gap: .6rem; }
+      .download-row { align-items: stretch; flex-direction: column; gap: .2rem; }
       .history-row { align-items: stretch; flex-direction: column; }
       button { width: 100%; }
     }
