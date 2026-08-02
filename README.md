@@ -1,6 +1,6 @@
 # Lingumachina
 
-Lokale Dokument-Uebersetzung mit Meta NLLB und Browser-UI.
+Local document translation workbench powered by Meta NLLB.
 
 ## Start
 
@@ -10,55 +10,47 @@ docker network create proxy-net
 docker compose up -d --build
 ```
 
-Danach im Browser oeffnen:
+Open:
 
 ```text
 http://localhost:5051/
 ```
 
-## Funktionen
+## Features
 
-- Text- und Dokumentuebersetzung mit Fortschritt, Pause, Fortsetzen und Stop.
-- PDF-Extraktion, PDF-Uebersetzung und PDF-Download.
-- Originalformat-Export fuer DOCX, ODT, PPTX, CSV, XLSX, HTML, SRT/VTT, JSON/YAML, PO und XLIFF.
-- Lokale History mit einstellbarer Aufbewahrung.
-- Optionaler Passwortschutz per HTTP Basic Auth.
-- Optionales OCR fuer gescannte PDFs.
+- Text and document translation with progress, pause, resume, and stop.
+- PDF extraction, PDF translation, and PDF download.
+- Original-format export for DOCX, ODT, PPTX, CSV, XLSX, HTML, SRT/VTT, JSON/YAML, PO, and XLIFF.
+- Local history with configurable retention.
+- Optional HTTP Basic Auth.
+- Optional OCR for scanned PDFs.
 
-## Konfiguration
+## Environment
 
-Wichtige Variablen in `.env`:
+`.env.example` is grouped by topic:
 
-```env
-NLLB_MODEL=facebook/nllb-200-distilled-600M
-NLLB_DEVICE=cpu
-NLLB_MAX_CHARS=6000
-NLLB_MAX_FILE_MB=50
-NLLB_HISTORY_DAYS=7
-NLLB_HISTORY_DIR=/data/history
-NLLB_DEFAULT_SOURCE=eng_Latn
-NLLB_DEFAULT_TARGET=deu_Latn
-NLLB_ENABLE_OCR=false
-NLLB_OCR_LANGUAGE=deu+eng
-LINGUMACHINA_AUTH_ENABLED=false
-LINGUMACHINA_AUTH_USERNAME=admin
-LINGUMACHINA_AUTH_PASSWORD=
-LINGUMACHINA_UNLOAD_MODEL_AFTER_IDLE=true
-LINGUMACHINA_MODEL_IDLE_SECONDS=1200
-```
+- Model and runtime: model id, device, chunk size, upload limit.
+- History: retention and storage path.
+- Default languages: source and target language.
+- OCR: enable flag and OCR language.
+- Basic auth: login protection for the UI and API.
+- Idle memory handling: unload the cached model after inactivity.
 
-Wenn `LINGUMACHINA_AUTH_ENABLED=true` gesetzt ist, muss `LINGUMACHINA_AUTH_PASSWORD` gefuellt sein. `/health` bleibt ohne Login erreichbar.
+Planned environment-based features:
 
-## Hinweise
+- HTTPS support.
+- Reverse proxy support.
 
-- Standardport: `5051`
-- GPU-Testprofil: `docker compose --profile gpu up -d lingumachina-gpu`
-- OCR-Build: `docker compose build --build-arg INSTALL_OCR=true`
-- Docker-Image: `registry.gitlab.com/marschu/lingumachina:latest`
+## Notes
+
+- Default port: `5051`
+- GPU test profile: `docker compose --profile gpu up -d lingumachina-gpu`
+- OCR build: `docker compose build --build-arg INSTALL_OCR=true`
+- Docker image: `registry.gitlab.com/marschu/lingumachina:latest`
 
 ## API
 
-Die wichtigsten Endpunkte:
+Main endpoints:
 
 - `GET /health`
 - `GET /languages`
@@ -72,6 +64,6 @@ Die wichtigsten Endpunkte:
 - `POST /export-pdf`
 - `POST /export-pdf-overlay`
 
-## Lizenz
+## License
 
-AGPL-3.0-or-later. Siehe `LICENSE`.
+AGPL-3.0-or-later. See `LICENSE`.

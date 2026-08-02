@@ -215,7 +215,7 @@
       textarea: {
         panel: "textareaPanel",
         accept: "",
-        label: "Textfeld",
+        label: "Text Field",
         sourceFormat: "txt"
       },
       text: {
@@ -290,7 +290,7 @@
       option.type = "button";
       option.className = "language-option";
       option.dataset.code = language.code;
-      option.title = "Sprache " + formatLanguageLabel(language.code) + " auswaehlen.";
+      option.title = "Select " + formatLanguageLabel(language.code) + ".";
       option.innerHTML =
         '<span class="language-name">' + escapeHtml(formatLanguageLabel(language.code)) + '</span>' +
         '<span class="language-code">' + escapeHtml(language.code) + '</span>';
@@ -394,8 +394,8 @@
       const historyMode = !app.classList.contains("history-mode");
       app.classList.toggle("history-mode", historyMode);
       historySection.classList.toggle("hidden", !historyMode);
-      historyButton.textContent = historyMode ? "Zurueck" : "History";
-      historyButton.title = historyMode ? "Zur Arbeitsansicht zurueckkehren." : "Zur History-Ansicht wechseln.";
+      historyButton.textContent = historyMode ? "Back" : "History";
+      historyButton.title = historyMode ? "Return to the workspace." : "Open the history view.";
       if (historyMode) {
         await loadHistory();
       }
@@ -444,10 +444,10 @@
       notice.classList.toggle("visible", hasText && (preview.truncated || options.excerpt));
       if (hasText && options.excerpt) {
         notice.textContent = preview.truncated
-          ? "Vorschau zeigt nur einen uebersetzten Auszug. Der Download enthaelt den vollstaendigen Export."
-          : "Vorschau zeigt einen uebersetzten Auszug fuer diesen Dateityp. Der Download enthaelt den vollstaendigen Export.";
+          ? "Preview shows only a translated excerpt. The download contains the full export."
+          : "Preview shows a translated excerpt for this file type. The download contains the full export.";
       } else if (hasText && preview.truncated) {
-        notice.textContent = "Vorschau gekuerzt. Der Download enthaelt den vollstaendigen Export.";
+        notice.textContent = "Preview truncated. The download contains the full export.";
       } else {
         notice.textContent = "";
       }
@@ -518,7 +518,7 @@
       const file = document.getElementById("textFile").files[0];
       const path = originalExportPath(details.extension);
       if (!file || !path) {
-        setPreview("Originalformat-Export braucht die geladene Originaldatei im Eingabe-Reiter.");
+        setPreview("Original format export needs the loaded source file in the input tab.");
         return;
       }
       const form = new FormData();
@@ -859,7 +859,7 @@
         remove.type = "button";
         remove.className = "secondary history-delete";
         remove.textContent = "Delete";
-        remove.title = "Diesen History-Eintrag loeschen.";
+        remove.title = "Delete this history item.";
         remove.addEventListener("click", () => deleteHistoryItem(item.id));
         main.appendChild(link);
         main.appendChild(meta);

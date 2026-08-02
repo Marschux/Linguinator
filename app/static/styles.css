@@ -73,7 +73,7 @@
     }
 
     textarea {
-      min-height: 210px;
+      min-height: 14.75rem;
       padding: .9rem 1rem;
       resize: vertical;
     }
@@ -267,7 +267,7 @@
     .tab-panel { display: none; }
     .tab-panel.active {
       display: block;
-      min-height: 16.2rem;
+      min-height: 18.25rem;
     }
     .section.tab-panel { margin-top: 1rem; }
     .file-extra { display: none; }
