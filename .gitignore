@@ -1,6 +1,8 @@
 .env
 .env.*
 !.env.example
+TODO.md
+Routine.md
 __pycache__/
 *.pyc
 *.pyo

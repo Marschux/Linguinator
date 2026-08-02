@@ -91,3 +91,18 @@ Basic Auth still accepts the older `NLLB_AUTH_*` variables as fallback, but new 
 ## License
 
 AGPL-3.0-or-later. See `LICENSE`.
+
+The default model `facebook/nllb-200-distilled-600M` is provided by Meta under CC-BY-NC-4.0. It is intended for non-commercial research use. Commercial use, paid services, or production deployments need a different model or separate permission from the model rights holder.
+
+Model license and card:
+
+- https://huggingface.co/facebook/nllb-200-distilled-600M
+- https://creativecommons.org/licenses/by-nc/4.0/
+
+For commercial use, keep `NLLB_MODEL` configurable and replace the default model with one that explicitly allows the intended use. Practical options are:
+
+- use an existing translation model with a suitable commercial license,
+- fine-tune a commercially usable base model on properly licensed parallel texts,
+- train a dedicated translation model from licensed data if the required quality, domain, or language pair justifies the cost.
+
+Always check both the model license and the training data rights before offering hosted, paid, or customer-facing translation.
