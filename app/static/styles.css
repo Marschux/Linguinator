@@ -57,13 +57,16 @@
     h1, h2 { line-height: 1.1; margin: 0; }
     h1 {
       align-items: center;
-      color: #00bfff;
+      color: var(--text);
       display: flex;
       font-size: clamp(2.15rem, 5vw, 3.65rem);
       font-weight: 850;
-      font-style: italic;
       gap: .18em;
-      text-shadow: 0 2px 0 rgba(0, 191, 255, .42);
+    }
+
+    h1 .brand-bracket {
+      color: var(--muted);
+      font-weight: 400;
     }
     h2 { font-size: 1.05rem; margin-top: .25rem; }
     .subtle { color: var(--muted); margin: .5rem 0 0; }
