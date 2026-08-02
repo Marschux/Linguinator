@@ -785,6 +785,17 @@ class MainTests(unittest.TestCase):
         self.assertEqual(torch_module.threads, 3)
         self.assertEqual(torch_module.interop_threads, 2)
 
+    def test_languages_uses_static_nllb_codes_without_tokenizer(self):
+        client = TestClient(main.app)
+
+        with patch.object(main, "load_tokenizer", side_effect=RuntimeError("missing tokenizer")):
+            response = client.get("/languages")
+
+        self.assertEqual(response.status_code, 200)
+        codes = [item["code"] for item in response.json()["languages"]]
+        self.assertIn("eng_Latn", codes)
+        self.assertIn("deu_Latn", codes)
+
     def test_docx_extraction_preserves_paragraphs(self):
         content = minimal_docx(["First paragraph", "Second paragraph"])
 

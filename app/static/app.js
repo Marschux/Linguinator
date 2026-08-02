@@ -644,6 +644,9 @@
 
     async function loadLanguages() {
       const response = await fetch("languages");
+      if (!response.ok) {
+        throw new Error("Could not load languages: " + response.status);
+      }
       languageData = await response.json();
       renderSelect("source", getRecent("source")[0] || languageData.source_default);
       renderSelect("target", getRecent("target")[0] || languageData.target_default);
