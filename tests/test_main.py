@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 import app.main as main
+import app.server as server
 
 
 class FakePage:
@@ -330,6 +331,55 @@ class MainTests(unittest.TestCase):
                 response = TestClient(main.app).get("/health")
 
         self.assertEqual(response.status_code, 200)
+
+    def test_health_reports_proxy_configuration(self):
+        with patch.object(main, "ROOT_PATH", "/lingumachina"):
+            with patch.object(main, "PUBLIC_URL", "https://example.test/lingumachina"):
+                with patch.object(main, "TRUST_PROXY_HEADERS", True):
+                    response = TestClient(main.app).get("/health")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["root_path"], "/lingumachina")
+        self.assertEqual(response.json()["public_url"], "https://example.test/lingumachina")
+        self.assertTrue(response.json()["trust_proxy_headers"])
+
+    def test_root_path_is_normalized_for_reverse_proxy_prefixes(self):
+        self.assertEqual(main.normalized_root_path("lingumachina"), "/lingumachina")
+        self.assertEqual(main.normalized_root_path("/lingumachina/"), "/lingumachina")
+        self.assertEqual(main.normalized_root_path(""), "")
+
+    def test_server_reads_proxy_and_https_env(self):
+        env = {
+            "LINGUMACHINA_HOST": "127.0.0.1",
+            "LINGUMACHINA_PORT": "5443",
+            "LINGUMACHINA_TRUST_PROXY_HEADERS": "true",
+            "LINGUMACHINA_FORWARDED_ALLOW_IPS": "10.0.0.1",
+            "LINGUMACHINA_SSL_CERTFILE": "/certs/fullchain.pem",
+            "LINGUMACHINA_SSL_KEYFILE": "/certs/privkey.pem",
+        }
+
+        with patch.dict(os.environ, env, clear=False):
+            with patch.object(server.uvicorn, "run") as run:
+                server.main()
+
+        run.assert_called_once()
+        options = run.call_args.kwargs
+        self.assertEqual(options["app"], "app.main:app")
+        self.assertEqual(options["host"], "127.0.0.1")
+        self.assertEqual(options["port"], 5443)
+        self.assertTrue(options["proxy_headers"])
+        self.assertEqual(options["forwarded_allow_ips"], "10.0.0.1")
+        self.assertEqual(options["ssl_certfile"], "/certs/fullchain.pem")
+        self.assertEqual(options["ssl_keyfile"], "/certs/privkey.pem")
+
+    def test_frontend_uses_relative_paths_for_reverse_proxy_prefixes(self):
+        template = (Path(main.APP_DIR) / "templates" / "index.html").read_text(encoding="utf-8")
+        script = (Path(main.APP_DIR) / "static" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn('href="static/styles.css"', template)
+        self.assertIn('src="static/app.js"', template)
+        self.assertNotIn('fetch("/', script)
+        self.assertNotIn('href = "/history/', script)
 
     def test_translate_one_uses_lazy_loaded_torch_module(self):
         with patch.object(main, "load_model", return_value=(FakeTokenizer(), FakeModel(), "cpu", FakeTorch())):

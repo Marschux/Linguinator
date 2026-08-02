@@ -4,16 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Lingumachina</title>
-  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="icon" type="image/svg+xml" href="static/favicon.svg">
+  <link rel="stylesheet" href="static/styles.css">
 </head>
 <body>
   <main class="app">
     <header>
-      <div>
-        <h1>Lingumachina</h1>
+      <div class="brand">
+        <h1><img class="brand-logo" src="static/favicon.svg" alt="L">ingumachina</h1>
         <p class="subtle">Local translation workbench for text and document workflows.</p>
       </div>
-      <button id="historyToggle" class="secondary" type="button" title="Open the history view.">History</button>
     </header>
 
     <div id="progress" class="progress workspace-section"></div>
@@ -46,7 +46,7 @@
       <div id="textareaPanel" class="tab-panel active">
         <label for="text">Text Field</label>
         <textarea id="text" title="Enter text or load it from a file.">The default translation quality should be better.</textarea>
-        <div id="counter" class="counter">0 / 0</div>
+        <div id="counter" class="counter" title="Characters used, character limit, and estimated translation chunks.">0 / 0</div>
       </div>
     </section>
 
@@ -88,32 +88,36 @@
     <section class="section workspace-section">
       <div class="section-heading">
         <label for="result">Preview</label>
-      </div>
-      <pre id="result"></pre>
-      <div id="previewNotice" class="preview-notice"></div>
-      <div class="download-row">
-        <label for="outputFormat">Download Format</label>
-        <div class="actions export-actions">
-          <select id="outputFormat" aria-label="Output format" title="Select the download format.">
-            <option value="txt">TXT</option>
-            <option value="md">Markdown</option>
-            <option value="pdf">PDF</option>
-            <option value="original">Original Format</option>
-          </select>
-          <button id="downloadResult" class="secondary" type="button" disabled title="Download the current result in the selected format.">Download</button>
+        <div class="view-tabs" role="tablist" aria-label="Result view">
+          <button id="previewToggle" class="view-tab active" type="button" title="Show the translation preview.">Preview</button>
+          <button id="historyToggle" class="view-tab" type="button" title="Show translation history.">History</button>
         </div>
       </div>
-    </section>
-
-    <section id="historySection" class="section hidden">
-      <h2>History</h2>
-      <div id="history" class="history"></div>
+      <div id="previewPanel" class="result-panel active">
+        <pre id="result"></pre>
+        <div id="previewNotice" class="preview-notice"></div>
+        <div class="download-row">
+          <label for="outputFormat">Download Format</label>
+          <div class="actions export-actions">
+            <select id="outputFormat" aria-label="Output format" title="Select the download format.">
+              <option value="txt">TXT</option>
+              <option value="md">Markdown</option>
+              <option value="pdf">PDF</option>
+              <option value="original">Original Format</option>
+            </select>
+            <button id="downloadResult" class="secondary" type="button" disabled title="Download the current result in the selected format.">Download</button>
+          </div>
+        </div>
+      </div>
+      <div id="historyPanel" class="result-panel">
+        <div id="history" class="history"></div>
+      </div>
     </section>
 
     <footer>
       Lingumachina - AGPL-3.0-or-later - by Marschux
     </footer>
   </main>
-  <script src="/static/app.js"></script>
+  <script src="static/app.js"></script>
 </body>
 </html>
