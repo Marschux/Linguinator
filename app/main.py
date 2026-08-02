@@ -17,7 +17,7 @@ from functools import lru_cache
 from html.parser import HTMLParser
 from io import BytesIO, StringIO
 from pathlib import Path
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from xml.etree import ElementTree
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -27,23 +27,35 @@ from pydantic import BaseModel
 from pypdf import PdfReader, PdfWriter
 
 
-MODEL_ID = os.getenv("NLLB_MODEL", "facebook/nllb-200-distilled-600M")
-DEVICE_SETTING = os.getenv("NLLB_DEVICE", "cpu")
-MAX_CHARS = int(os.getenv("NLLB_MAX_CHARS", "6000"))
-MAX_FILE_MB = int(os.getenv("NLLB_MAX_FILE_MB", "50"))
+def env_value(name: str, default: str, legacy_name: str = "") -> str:
+    if name in os.environ:
+        return os.environ[name]
+    if legacy_name and legacy_name in os.environ:
+        return os.environ[legacy_name]
+    return default
+
+
+MODEL_ID = env_value("LINGUMACHINA_MODEL", "facebook/nllb-200-distilled-600M", "NLLB_MODEL")
+DEVICE_SETTING = env_value("LINGUMACHINA_DEVICE", "cpu", "NLLB_DEVICE")
+MAX_CHARS = int(env_value("LINGUMACHINA_MAX_CHARS", "6000", "NLLB_MAX_CHARS"))
+MAX_FILE_MB = int(env_value("LINGUMACHINA_MAX_FILE_MB", "50", "NLLB_MAX_FILE_MB"))
 MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
 MAX_ZIP_UNCOMPRESSED_BYTES = MAX_FILE_BYTES * 10
-HISTORY_DAYS = int(os.getenv("NLLB_HISTORY_DAYS", "7"))
-HISTORY_DIR = Path(os.getenv("NLLB_HISTORY_DIR", "/data/history"))
-DEFAULT_SOURCE = os.getenv("NLLB_DEFAULT_SOURCE", "eng_Latn")
-DEFAULT_TARGET = os.getenv("NLLB_DEFAULT_TARGET", "deu_Latn")
-OCR_ENABLED = os.getenv("NLLB_ENABLE_OCR", "false").lower() in ("1", "true", "yes", "on")
-OCR_LANGUAGE = os.getenv("NLLB_OCR_LANGUAGE", "deu+eng")
-AUTH_ENABLED = os.getenv("LINGUMACHINA_AUTH_ENABLED", os.getenv("NLLB_AUTH_ENABLED", "false")).lower() in ("1", "true", "yes", "on")
-AUTH_USERNAME = os.getenv("LINGUMACHINA_AUTH_USERNAME", os.getenv("NLLB_AUTH_USERNAME", "admin"))
-AUTH_PASSWORD = os.getenv("LINGUMACHINA_AUTH_PASSWORD", os.getenv("NLLB_AUTH_PASSWORD", ""))
-MODEL_IDLE_UNLOAD_ENABLED = os.getenv("LINGUMACHINA_UNLOAD_MODEL_AFTER_IDLE", "true").lower() in ("1", "true", "yes", "on")
-MODEL_IDLE_SECONDS = int(os.getenv("LINGUMACHINA_MODEL_IDLE_SECONDS", "1200"))
+HISTORY_DAYS = int(env_value("LINGUMACHINA_HISTORY_DAYS", "7", "NLLB_HISTORY_DAYS"))
+HISTORY_DIR = Path(env_value("LINGUMACHINA_HISTORY_DIR", "/data/history", "NLLB_HISTORY_DIR"))
+JOB_WORKERS = max(1, int(env_value("LINGUMACHINA_JOB_WORKERS", "1", "NLLB_JOB_WORKERS")))
+JOBS_DIR = Path(env_value("LINGUMACHINA_JOBS_DIR", str(HISTORY_DIR / "jobs"), "NLLB_JOBS_DIR"))
+CPU_THREADS = int(env_value("LINGUMACHINA_CPU_THREADS", "0", "NLLB_CPU_THREADS"))
+CPU_INTEROP_THREADS = int(env_value("LINGUMACHINA_CPU_INTEROP_THREADS", "0", "NLLB_CPU_INTEROP_THREADS"))
+DEFAULT_SOURCE = env_value("LINGUMACHINA_DEFAULT_SOURCE", "eng_Latn", "NLLB_DEFAULT_SOURCE")
+DEFAULT_TARGET = env_value("LINGUMACHINA_DEFAULT_TARGET", "deu_Latn", "NLLB_DEFAULT_TARGET")
+OCR_ENABLED = env_value("LINGUMACHINA_ENABLE_OCR", "false", "NLLB_ENABLE_OCR").lower() in ("1", "true", "yes", "on")
+OCR_LANGUAGE = env_value("LINGUMACHINA_OCR_LANGUAGE", "deu+eng", "NLLB_OCR_LANGUAGE")
+AUTH_ENABLED = env_value("LINGUMACHINA_AUTH_ENABLED", "false", "NLLB_AUTH_ENABLED").lower() in ("1", "true", "yes", "on")
+AUTH_USERNAME = env_value("LINGUMACHINA_AUTH_USERNAME", "admin", "NLLB_AUTH_USERNAME")
+AUTH_PASSWORD = env_value("LINGUMACHINA_AUTH_PASSWORD", "", "NLLB_AUTH_PASSWORD")
+MODEL_IDLE_UNLOAD_ENABLED = env_value("LINGUMACHINA_UNLOAD_MODEL_AFTER_IDLE", "true").lower() in ("1", "true", "yes", "on")
+MODEL_IDLE_SECONDS = int(env_value("LINGUMACHINA_MODEL_IDLE_SECONDS", "1200"))
 PUBLIC_URL = os.getenv("LINGUMACHINA_PUBLIC_URL", "").rstrip("/")
 TRUST_PROXY_HEADERS = os.getenv("LINGUMACHINA_TRUST_PROXY_HEADERS", "true").lower() in ("1", "true", "yes", "on")
 PDF_LOW_TEXT_CHARS = 20
@@ -54,6 +66,10 @@ PDF_LINE_HEIGHT = 14
 PDF_FONT_SIZE = 11
 PDF_HEADING_FONT_SIZE = 15
 PDF_FOOTER_FONT_SIZE = 9
+
+if CPU_THREADS > 0:
+    os.environ.setdefault("OMP_NUM_THREADS", str(CPU_THREADS))
+    os.environ.setdefault("MKL_NUM_THREADS", str(CPU_THREADS))
 
 ElementTree.register_namespace("w", "http://schemas.openxmlformats.org/wordprocessingml/2006/main")
 ElementTree.register_namespace("office", "urn:oasis:names:tc:opendocument:xmlns:office:1.0")
@@ -75,7 +91,10 @@ ROOT_PATH = normalized_root_path(os.getenv("LINGUMACHINA_ROOT_PATH", ""))
 app = FastAPI(title="Lingumachina", version="0.1.0", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
-JOBS_LOCK = threading.Lock()
+JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
+JOBS_LOCK = threading.RLock()
+JOBS_CONDITION = threading.Condition(JOBS_LOCK)
+QUEUE_WORKERS_STARTED = False
 MODEL_LOCK = threading.RLock()
 MODEL_ACTIVE_USERS = 0
 MODEL_LAST_USED = 0.0
@@ -136,6 +155,16 @@ def selected_device():
     return "cpu"
 
 
+def configure_torch_threads(torch_module):
+    if CPU_THREADS > 0 and hasattr(torch_module, "set_num_threads"):
+        torch_module.set_num_threads(CPU_THREADS)
+    if CPU_INTEROP_THREADS > 0 and hasattr(torch_module, "set_num_interop_threads"):
+        try:
+            torch_module.set_num_interop_threads(CPU_INTEROP_THREADS)
+        except RuntimeError:
+            pass
+
+
 @lru_cache(maxsize=1)
 def load_tokenizer():
     try:
@@ -152,6 +181,7 @@ def load_model():
         from transformers import AutoModelForSeq2SeqLM
     except ImportError as exc:
         raise RuntimeError("torch and transformers are required for translation") from exc
+    configure_torch_threads(torch)
     device = selected_device()
     tokenizer = load_tokenizer()
     model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_ID)
@@ -497,22 +527,50 @@ def history_safe_name(name: str) -> str:
     return safe[:80] or "translation"
 
 
-def save_history(kind: str, result: str, source: str, target: str, original_name: str = "translation") -> str:
+def file_extension(name: str) -> str:
+    extension = Path(name or "").suffix.lower().lstrip(".")
+    return re.sub(r"[^a-z0-9]+", "", extension)[:12]
+
+
+def history_source_path(item_id: str, extension: str) -> Path:
+    safe_extension = file_extension("x." + extension)
+    return HISTORY_DIR / f"{item_id}.source.{safe_extension}"
+
+
+def save_history(
+    kind: str,
+    result: str,
+    source: str,
+    target: str,
+    original_name: str = "translation",
+    source_content: bytes = b"",
+    source_extension: str = "",
+    source_meta: Optional[Dict[str, str]] = None,
+) -> str:
     cleanup_history()
     item_id = str(uuid.uuid4())
     created_at = datetime.now(timezone.utc).isoformat()
     base = f"{created_at[:10]}-{history_safe_name(original_name)}-{item_id[:8]}"
     md_path = HISTORY_DIR / f"{base}.md"
     json_path = HISTORY_DIR / f"{base}.json"
+    source_ext = file_extension("x." + source_extension) or file_extension(original_name)
     md_path.write_text(result, encoding="utf-8")
-    json_path.write_text(json.dumps({
+    metadata = {
         "id": base,
         "kind": kind,
         "source": source,
         "target": target,
         "created_at": created_at,
         "filename": md_path.name,
-    }), encoding="utf-8")
+        "original_name": original_name,
+        "source_extension": source_ext,
+        "source_meta": source_meta or {},
+    }
+    if source_content and source_ext:
+        source_path = history_source_path(base, source_ext)
+        source_path.write_bytes(source_content)
+        metadata["source_filename"] = source_path.name
+    json_path.write_text(json.dumps(metadata), encoding="utf-8")
     return base
 
 
@@ -523,7 +581,10 @@ def history_items():
         try:
             item = json.loads(meta_path.read_text(encoding="utf-8"))
             md_path = HISTORY_DIR / f"{item['id']}.md"
+            source_ext = item.get("source_extension", "")
+            source_file = history_source_path(item["id"], source_ext) if source_ext else None
             item["size_bytes"] = md_path.stat().st_size if md_path.exists() else 0
+            item["has_source_file"] = bool(source_file and source_file.exists())
             items.append(item)
         except Exception:
             continue
@@ -536,6 +597,13 @@ def history_paths(item_id: str):
     return HISTORY_DIR / f"{item_id}.md", HISTORY_DIR / f"{item_id}.json"
 
 
+def history_item(item_id: str) -> Dict[str, Any]:
+    _, json_path = history_paths(item_id)
+    if not json_path.exists():
+        raise HTTPException(status_code=404, detail="History item not found")
+    return json.loads(json_path.read_text(encoding="utf-8"))
+
+
 async def read_upload_bytes(file: UploadFile, label: str = "File") -> bytes:
     content = await file.read()
     if len(content) > MAX_FILE_BYTES:
@@ -543,7 +611,81 @@ async def read_upload_bytes(file: UploadFile, label: str = "File") -> bytes:
     return content
 
 
-def create_job(kind: str) -> str:
+def job_json_path(job_id: str) -> Path:
+    return JOBS_DIR / f"{job_id}.json"
+
+
+def job_payload_path(job_id: str) -> Path:
+    return JOBS_DIR / f"{job_id}.payload"
+
+
+def persisted_job(job: Dict[str, Any]) -> Dict[str, Any]:
+    return {key: value for key, value in job.items() if key != "result"}
+
+
+def public_job(job: Dict[str, Any]) -> Dict[str, Any]:
+    visible = dict(job)
+    visible.pop("text", None)
+    visible.pop("payload_path", None)
+    visible.pop("source_payload_path", None)
+    return visible
+
+
+def job_with_recovered_result(job: Dict[str, Any]) -> Dict[str, Any]:
+    visible = public_job(job)
+    if visible.get("status") == "complete" and not visible.get("result") and visible.get("history_id"):
+        history_path, _ = history_paths(visible["history_id"])
+        if history_path.exists():
+            visible["result"] = history_path.read_text(encoding="utf-8")
+    return visible
+
+
+def persist_job(job: Dict[str, Any]):
+    JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    job_json_path(job["id"]).write_text(json.dumps(persisted_job(job)), encoding="utf-8")
+
+
+def persist_all_jobs():
+    with JOBS_LOCK:
+        for job in JOBS.values():
+            persist_job(job)
+
+
+def load_persisted_jobs():
+    JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    with JOBS_LOCK:
+        for meta_path in JOBS_DIR.glob("*.json"):
+            try:
+                job = json.loads(meta_path.read_text(encoding="utf-8"))
+                if job.get("status") == "running":
+                    job["status"] = "queued"
+                    job["message"] = "Requeued after restart"
+                    job["started_at"] = None
+                job.setdefault("result", None)
+                job.setdefault("error", None)
+                JOBS[job["id"]] = job
+            except Exception:
+                continue
+
+
+def job_sort_key(job: Dict[str, Any]):
+    return job.get("queued_at") or job.get("started_at") or job.get("finished_at") or 0
+
+
+def list_jobs():
+    with JOBS_LOCK:
+        jobs = [public_job(job) for job in sorted(JOBS.values(), key=job_sort_key)]
+        queued_position = 0
+        for job in jobs:
+            if job.get("status") == "queued":
+                queued_position += 1
+                job["position"] = queued_position
+            else:
+                job["position"] = None
+        return jobs
+
+
+def create_job(kind: str, source: str = "", target: str = "", label: str = "") -> str:
     job_id = str(uuid.uuid4())
     with JOBS_LOCK:
         JOBS[job_id] = {
@@ -551,6 +693,10 @@ def create_job(kind: str) -> str:
             "kind": kind,
             "status": "queued",
             "message": "Queued",
+            "source": source,
+            "target": target,
+            "label": label,
+            "queued_at": time.time(),
             "current": 0,
             "total": 0,
             "percent": 0,
@@ -562,6 +708,7 @@ def create_job(kind: str) -> str:
             "pause_requested": False,
             "cancel_requested": False,
         }
+        persist_job(JOBS[job_id])
     return job_id
 
 
@@ -579,6 +726,8 @@ def update_job(job_id: str, **values):
             job["eta_seconds"] = round((elapsed / current) * (total - current))
         elif current and total and current >= total:
             job["eta_seconds"] = 0
+        persist_job(job)
+        JOBS_CONDITION.notify_all()
 
 
 def get_job(job_id: str):
@@ -586,7 +735,7 @@ def get_job(job_id: str):
         job = JOBS.get(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
-        return dict(job)
+        return job_with_recovered_result(job)
 
 
 def control_job(job_id: str, action: str):
@@ -595,10 +744,113 @@ def control_job(job_id: str, action: str):
     elif action == "resume":
         update_job(job_id, pause_requested=False, message="Resuming")
     elif action == "cancel":
-        update_job(job_id, cancel_requested=True, pause_requested=False, message="Stop requested")
+        current = get_job(job_id)
+        if current.get("status") == "queued":
+            update_job(
+                job_id,
+                status="cancelled",
+                cancel_requested=True,
+                pause_requested=False,
+                message="Cancelled",
+                finished_at=time.time(),
+            )
+            cleanup_job_payload(job_id)
+        else:
+            update_job(job_id, cancel_requested=True, pause_requested=False, message="Stop requested")
     else:
         raise HTTPException(status_code=400, detail="Unknown job action")
     return get_job(job_id)
+
+
+def register_job_runner(job_id: str, runner: Callable[..., None], args: Tuple[Any, ...]):
+    with JOBS_LOCK:
+        JOB_RUNNERS[job_id] = (runner, args)
+        persist_job(JOBS[job_id])
+        JOBS_CONDITION.notify_all()
+
+
+def queued_job_without_active_worker(active_jobs: set) -> Optional[Dict[str, Any]]:
+    for job in sorted(JOBS.values(), key=job_sort_key):
+        if job.get("status") == "queued" and not job.get("cancel_requested") and job["id"] not in active_jobs:
+            return job
+    return None
+
+
+def rebuild_runner_for_job(job: Dict[str, Any]) -> Optional[Tuple[Callable[..., None], Tuple[Any, ...]]]:
+    job_id = job["id"]
+    if job.get("kind") == "translate":
+        source_payload_path = job.get("source_payload_path")
+        source_content = b""
+        if source_payload_path and Path(source_payload_path).exists():
+            source_content = Path(source_payload_path).read_bytes()
+        return run_text_job, (
+            job_id,
+            job.get("text", ""),
+            job.get("source", DEFAULT_SOURCE),
+            job.get("target", DEFAULT_TARGET),
+            job.get("original_name", "text"),
+            source_content,
+            job.get("source_extension", ""),
+            job.get("source_meta", {}),
+        )
+    if job.get("kind") == "translate-pdf":
+        payload_path = job.get("payload_path")
+        if not payload_path or not Path(payload_path).exists():
+            update_job(job_id, status="failed", message="Failed", error="Queued PDF payload is missing", finished_at=time.time())
+            return None
+        return run_pdf_translate_job, (
+            job_id,
+            Path(payload_path).read_bytes(),
+            job.get("content_type", "application/pdf"),
+            job.get("source", DEFAULT_SOURCE),
+            job.get("target", DEFAULT_TARGET),
+            job.get("filename", "pdf"),
+            job.get("page_range", ""),
+        )
+    return None
+
+
+def job_worker_loop():
+    active_jobs = set()
+    while True:
+        with JOBS_CONDITION:
+            while True:
+                active_jobs = {
+                    job_id for job_id, job in JOBS.items()
+                    if job.get("status") == "running" and job_id in JOB_RUNNERS
+                }
+                if len(active_jobs) < JOB_WORKERS:
+                    job = queued_job_without_active_worker(active_jobs)
+                    if job:
+                        break
+                JOBS_CONDITION.wait()
+            job_id = job["id"]
+            runner_data = JOB_RUNNERS.get(job_id) or rebuild_runner_for_job(job)
+            if not runner_data:
+                continue
+            JOB_RUNNERS[job_id] = runner_data
+            job["status"] = "running"
+            job["message"] = "Starting"
+            if not job.get("started_at"):
+                job["started_at"] = time.time()
+            persist_job(job)
+        runner, args = runner_data
+        runner(*args)
+        with JOBS_CONDITION:
+            JOB_RUNNERS.pop(job["id"], None)
+            JOBS_CONDITION.notify_all()
+
+
+def ensure_queue_workers():
+    global QUEUE_WORKERS_STARTED
+    with JOBS_LOCK:
+        if QUEUE_WORKERS_STARTED:
+            return
+        load_persisted_jobs()
+        QUEUE_WORKERS_STARTED = True
+        for _ in range(JOB_WORKERS):
+            threading.Thread(target=job_worker_loop, daemon=True).start()
+        JOBS_CONDITION.notify_all()
 
 
 def wait_if_paused_or_cancelled(job_id: str):
@@ -610,6 +862,20 @@ def wait_if_paused_or_cancelled(job_id: str):
             return
         update_job(job_id, status="paused", message="Paused")
         time.sleep(1)
+
+
+def cleanup_job_payload(job_id: str):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id, {})
+        payload_path = job.get("payload_path")
+        if payload_path:
+            Path(payload_path).unlink(missing_ok=True)
+        source_payload_path = job.get("source_payload_path")
+        if source_payload_path:
+            Path(source_payload_path).unlink(missing_ok=True)
+        if "text" in job:
+            job["text"] = ""
+        persist_job(job)
 
 
 def translate_chunks(chunks: List[str], source: str, target: str, job_id: str, offset: int = 0) -> List[str]:
@@ -740,7 +1006,7 @@ def extract_pdf_markdown_from_bytes(
         ocr_detail = (
             f"OCR is configured for {OCR_LANGUAGE}, but no readable text was produced."
             if OCR_ENABLED
-            else "OCR is disabled. Set NLLB_ENABLE_OCR=true to use OCR fallback."
+            else "OCR is disabled. Set LINGUMACHINA_ENABLE_OCR=true to use OCR fallback."
         )
         raise HTTPException(
             status_code=422,
@@ -1576,7 +1842,16 @@ async def extract_pdf_markdown(file: UploadFile, page_range: str = "") -> str:
     return extract_pdf_markdown_from_bytes(content, file.content_type or "application/pdf", page_range)
 
 
-def run_text_job(job_id: str, text: str, source: str, target: str):
+def run_text_job(
+    job_id: str,
+    text: str,
+    source: str,
+    target: str,
+    original_name: str = "text",
+    source_content: bytes = b"",
+    source_extension: str = "",
+    source_meta: Optional[Dict[str, str]] = None,
+):
     try:
         chunks = split_long_text(text, MAX_CHARS)
         update_job(
@@ -1587,7 +1862,16 @@ def run_text_job(job_id: str, text: str, source: str, target: str):
             started_at=time.time(),
         )
         result = "\n\n".join(translate_chunks(chunks, source, target, job_id))
-        history_id = save_history("text", result, source, target, "text")
+        history_id = save_history(
+            "text",
+            result,
+            source,
+            target,
+            original_name,
+            source_content,
+            source_extension,
+            source_meta,
+        )
         update_job(
             job_id,
             status="complete",
@@ -1597,8 +1881,13 @@ def run_text_job(job_id: str, text: str, source: str, target: str):
             history_id=history_id,
             finished_at=time.time(),
         )
+        cleanup_job_payload(job_id)
     except Exception as exc:
-        update_job(job_id, status="failed", message="Failed", error=exception_message(exc), finished_at=time.time())
+        if str(exc) == "Job stopped by user":
+            update_job(job_id, status="cancelled", message="Cancelled", error=None, finished_at=time.time())
+        else:
+            update_job(job_id, status="failed", message="Failed", error=exception_message(exc), finished_at=time.time())
+        cleanup_job_payload(job_id)
 
 
 def pdf_sections(markdown: str):
@@ -1638,7 +1927,7 @@ def run_pdf_translate_job(
             pages.append(f"# Page {page_number}\n\n" + "\n\n".join(translated_chunks))
 
         result = "\n\n".join(pages)
-        history_id = save_history("pdf", result, source, target, filename)
+        history_id = save_history("pdf", result, source, target, filename, content, "pdf")
         update_job(
             job_id,
             status="complete",
@@ -1648,8 +1937,13 @@ def run_pdf_translate_job(
             history_id=history_id,
             finished_at=time.time(),
         )
+        cleanup_job_payload(job_id)
     except Exception as exc:
-        update_job(job_id, status="failed", message="Failed", error=exception_message(exc), finished_at=time.time())
+        if str(exc) == "Job stopped by user":
+            update_job(job_id, status="cancelled", message="Cancelled", error=None, finished_at=time.time())
+        else:
+            update_job(job_id, status="failed", message="Failed", error=exception_message(exc), finished_at=time.time())
+        cleanup_job_payload(job_id)
 
 
 @app.get("/health")
@@ -1664,6 +1958,9 @@ def health():
         "ocr_language": OCR_LANGUAGE,
         "model_idle_unload_enabled": MODEL_IDLE_UNLOAD_ENABLED,
         "model_idle_seconds": MODEL_IDLE_SECONDS,
+        "job_workers": JOB_WORKERS,
+        "cpu_threads": CPU_THREADS,
+        "cpu_interop_threads": CPU_INTEROP_THREADS,
         "model_loaded": model_cache_loaded(),
         "root_path": ROOT_PATH,
         "public_url": PUBLIC_URL,
@@ -1680,6 +1977,12 @@ def languages():
     }
 
 
+@app.get("/jobs")
+def jobs_status():
+    ensure_queue_workers()
+    return {"workers": JOB_WORKERS, "items": list_jobs()}
+
+
 @app.get("/jobs/{job_id}")
 def job_status(job_id: str):
     return get_job(job_id)
@@ -1692,14 +1995,45 @@ def job_control(job_id: str, action: str):
 
 @app.post("/jobs/translate")
 def start_translate_job(request: TranslateRequest):
-    job_id = create_job("translate")
+    ensure_queue_workers()
     text = "\n\n".join(str(item) for item in request.q) if isinstance(request.q, list) else str(request.q)
-    thread = threading.Thread(
-        target=run_text_job,
-        args=(job_id, text, request.source, request.target),
-        daemon=True,
+    job_id = create_job("translate", request.source, request.target, "Text")
+    update_job(job_id, text=text)
+    register_job_runner(job_id, run_text_job, (job_id, text, request.source, request.target))
+    return {"job_id": job_id}
+
+
+@app.post("/jobs/translate-file")
+async def start_translate_file_job(
+    file: UploadFile = File(...),
+    text: str = Form(""),
+    source: str = Form(DEFAULT_SOURCE),
+    target: str = Form(DEFAULT_TARGET),
+    columns: str = Form(""),
+    sheet_name: str = Form(""),
+):
+    ensure_queue_workers()
+    content = await read_upload_bytes(file, "Source file")
+    filename = file.filename or "source"
+    extension = file_extension(filename)
+    job_id = create_job("translate", source, target, filename)
+    JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    source_payload_path = job_payload_path(job_id).with_suffix(".source")
+    source_payload_path.write_bytes(content)
+    source_meta = {"columns": columns, "sheet_name": sheet_name}
+    update_job(
+        job_id,
+        text=text,
+        original_name=filename,
+        source_extension=extension,
+        source_payload_path=str(source_payload_path),
+        source_meta=source_meta,
     )
-    thread.start()
+    register_job_runner(
+        job_id,
+        run_text_job,
+        (job_id, text, source, target, filename, content, extension, source_meta),
+    )
     return {"job_id": job_id}
 
 
@@ -1710,14 +2044,25 @@ async def start_translate_pdf_job(
     target: str = Form(DEFAULT_TARGET),
     page_range: str = Form(""),
 ):
+    ensure_queue_workers()
     content = await read_upload_bytes(file, "PDF")
-    job_id = create_job("translate-pdf")
-    thread = threading.Thread(
-        target=run_pdf_translate_job,
-        args=(job_id, content, file.content_type or "application/pdf", source, target, file.filename or "pdf", page_range),
-        daemon=True,
+    filename = file.filename or "pdf"
+    job_id = create_job("translate-pdf", source, target, filename)
+    JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    payload_path = job_payload_path(job_id)
+    payload_path.write_bytes(content)
+    update_job(
+        job_id,
+        payload_path=str(payload_path),
+        content_type=file.content_type or "application/pdf",
+        filename=filename,
+        page_range=page_range,
     )
-    thread.start()
+    register_job_runner(
+        job_id,
+        run_pdf_translate_job,
+        (job_id, content, file.content_type or "application/pdf", source, target, filename, page_range),
+    )
     return {"job_id": job_id}
 
 
@@ -1734,6 +2079,102 @@ def download_history(item_id: str):
     return FileResponse(path, media_type="text/markdown", filename=path.name)
 
 
+def original_export_media_type(extension: str) -> str:
+    return {
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "odt": "application/vnd.oasis.opendocument.text",
+        "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "csv": "text/csv",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "html": "text/html",
+        "htm": "text/html",
+        "srt": "text/plain",
+        "vtt": "text/plain",
+        "json": "application/json",
+        "yaml": "text/yaml",
+        "yml": "text/yaml",
+        "po": "text/plain",
+        "xlf": "application/xml",
+        "xliff": "application/xml",
+        "pdf": "application/pdf",
+        "md": "text/markdown",
+        "txt": "text/plain",
+    }.get(extension, "application/octet-stream")
+
+
+def export_original_history_content(extension: str, content: bytes, text: str, source_meta: Dict[str, str]) -> bytes:
+    if extension == "docx":
+        return export_docx_with_translated_text(content, text)
+    if extension == "odt":
+        return export_odt_with_translated_text(content, text)
+    if extension == "pptx":
+        return export_pptx_with_translated_text(content, text)
+    if extension == "csv":
+        return export_csv_with_translated_text(content, source_meta.get("columns", ""), text)
+    if extension == "xlsx":
+        return export_xlsx_with_translated_text(content, source_meta.get("sheet_name", ""), source_meta.get("columns", ""), text)
+    if extension in ("html", "htm"):
+        return export_html_with_translated_text(content, text)
+    if extension in ("srt", "vtt"):
+        return export_subtitle_with_translated_text(content, text)
+    if extension == "json":
+        return export_json_with_translated_text(content, text)
+    if extension in ("yaml", "yml"):
+        return export_yaml_with_translated_text(content, text)
+    if extension == "po":
+        return export_po_with_translated_text(content, text)
+    if extension in ("xlf", "xliff"):
+        return export_xliff_with_translated_text(content, text)
+    if extension == "pdf":
+        return create_overlay_pdf(content, text, False)
+    if extension in ("md", "txt"):
+        return text.encode("utf-8")
+    raise HTTPException(status_code=400, detail="Unsupported history original format")
+
+
+@app.get("/history/{item_id}/export")
+def export_history(item_id: str, format: str = "md"):
+    path, _ = history_paths(item_id)
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="History item not found")
+    text = path.read_text(encoding="utf-8")
+    safe_format = format.lower()
+    filename_base = path.stem
+    if safe_format == "md":
+        return FileResponse(path, media_type="text/markdown", filename=path.name)
+    if safe_format == "txt":
+        return Response(
+            text,
+            media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename_base}.txt"'},
+        )
+    if safe_format == "pdf":
+        return Response(
+            create_text_pdf(text),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{filename_base}.pdf"'},
+        )
+    item = history_item(item_id)
+    source_extension = file_extension("x." + item.get("source_extension", ""))
+    requested_extension = source_extension if safe_format == "original" else file_extension("x." + safe_format)
+    source_path = history_source_path(item_id, source_extension) if source_extension else None
+    if not source_path or not source_path.exists():
+        raise HTTPException(status_code=404, detail="History source file not found")
+    if requested_extension != source_extension:
+        raise HTTPException(status_code=400, detail="History source can only be exported in its original format")
+    content = export_original_history_content(
+        source_extension,
+        source_path.read_bytes(),
+        text,
+        item.get("source_meta", {}),
+    )
+    return Response(
+        content,
+        media_type=original_export_media_type(source_extension),
+        headers={"Content-Disposition": f'attachment; filename="{filename_base}.{source_extension}"'},
+    )
+
+
 @app.post("/export-pdf")
 def export_pdf(request: PdfExportRequest):
     if not request.text.strip():
@@ -1741,7 +2182,7 @@ def export_pdf(request: PdfExportRequest):
     return Response(
         create_text_pdf(request.text),
         media_type="application/pdf",
-        headers={"Content-Disposition": 'attachment; filename="nllb-translation.pdf"'},
+        headers={"Content-Disposition": 'attachment; filename="lingumachina-translation.pdf"'},
     )
 
 
@@ -1757,7 +2198,7 @@ async def export_pdf_overlay(
     return Response(
         create_overlay_pdf(content, text, cover_original),
         media_type="application/pdf",
-        headers={"Content-Disposition": 'attachment; filename="nllb-overlay-translation.pdf"'},
+        headers={"Content-Disposition": 'attachment; filename="lingumachina-overlay-translation.pdf"'},
     )
 
 
@@ -1770,7 +2211,7 @@ async def export_docx(
     return Response(
         export_docx_with_translated_text(content, text),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": 'attachment; filename="nllb-translation.docx"'},
+        headers={"Content-Disposition": 'attachment; filename="lingumachina-translation.docx"'},
     )
 
 
@@ -1783,7 +2224,7 @@ async def export_odt(
     return Response(
         export_odt_with_translated_text(content, text),
         media_type="application/vnd.oasis.opendocument.text",
-        headers={"Content-Disposition": 'attachment; filename="nllb-translation.odt"'},
+        headers={"Content-Disposition": 'attachment; filename="lingumachina-translation.odt"'},
     )
 
 
@@ -1796,7 +2237,7 @@ async def export_pptx(
     return Response(
         export_pptx_with_translated_text(content, text),
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        headers={"Content-Disposition": 'attachment; filename="nllb-translation.pptx"'},
+        headers={"Content-Disposition": 'attachment; filename="lingumachina-translation.pptx"'},
     )
 
 
@@ -1810,7 +2251,7 @@ async def export_csv(
     return Response(
         export_csv_with_translated_text(content, columns, text),
         media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="nllb-translation.csv"'},
+        headers={"Content-Disposition": 'attachment; filename="lingumachina-translation.csv"'},
     )
 
 
@@ -1825,7 +2266,7 @@ async def export_xlsx(
     return Response(
         export_xlsx_with_translated_text(content, sheet_name, columns, text),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="nllb-translation.xlsx"'},
+        headers={"Content-Disposition": 'attachment; filename="lingumachina-translation.xlsx"'},
     )
 
 
@@ -1870,8 +2311,19 @@ def delete_history(item_id: str):
     md_path, json_path = history_paths(item_id)
     if not md_path.exists() and not json_path.exists():
         raise HTTPException(status_code=404, detail="History item not found")
+    source_path = None
+    if json_path.exists():
+        try:
+            item = json.loads(json_path.read_text(encoding="utf-8"))
+            source_extension = file_extension("x." + item.get("source_extension", ""))
+            if source_extension:
+                source_path = history_source_path(item_id, source_extension)
+        except Exception:
+            source_path = None
     md_path.unlink(missing_ok=True)
     json_path.unlink(missing_ok=True)
+    if source_path:
+        source_path.unlink(missing_ok=True)
     return {"deleted": item_id}
 
 

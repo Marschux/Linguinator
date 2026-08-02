@@ -21,7 +21,9 @@ http://localhost:5051/
 - Text and document translation with progress, pause, resume, and stop.
 - PDF extraction, PDF translation, and PDF download.
 - Original-format export for DOCX, ODT, PPTX, CSV, XLSX, HTML, SRT/VTT, JSON/YAML, PO, and XLIFF.
-- Local history with configurable retention.
+- Local history with configurable retention, retained source files, and Markdown, TXT, PDF, or original-format downloads.
+- Persistent global job queue with configurable worker count.
+- Interface language selector for English, German, Spanish, and French.
 - Optional HTTP Basic Auth.
 - Optional OCR for scanned PDFs.
 
@@ -38,11 +40,12 @@ http://localhost:5051/
 3. For file inputs, select the file and click `Load File` if the tab uses the shared text input.
 4. Click `Translate Input`.
 5. Use `Pause`, `Resume`, or `Stop` for running jobs.
-6. Review the preview or open `History`.
+6. Review the preview and the history below it.
 7. Choose a download format and click `Download`.
 
 For large jobs, the browser tab title shows the current progress and job status.
-History entries are stored locally in the configured history directory and are cleaned up after the configured retention time.
+History entries and retained source files are stored locally in the configured history directory and are cleaned up after the configured retention time.
+For supported file inputs, `Original Format` is selected as the default download format after loading the file.
 
 ## Environment
 
@@ -56,16 +59,20 @@ The `.env` file is grouped by topic:
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `NLLB_MODEL` | `facebook/nllb-200-distilled-600M` | Hugging Face model id used for translation. |
-| `NLLB_DEVICE` | `cpu` | Runtime device. Use `cuda` with the GPU compose profile and a CUDA-capable host. |
-| `NLLB_MAX_CHARS` | `6000` | Maximum characters per translation chunk. Longer input is split into multiple chunks. |
-| `NLLB_MAX_FILE_MB` | `50` | Maximum upload size in megabytes. |
-| `NLLB_HISTORY_DAYS` | `7` | Number of days to keep saved translation history. |
-| `NLLB_HISTORY_DIR` | `/data/history` | Directory for saved history files and metadata inside the container. |
-| `NLLB_DEFAULT_SOURCE` | `eng_Latn` | Default source language code. |
-| `NLLB_DEFAULT_TARGET` | `deu_Latn` | Default target language code. |
-| `NLLB_ENABLE_OCR` | `false` | Enables OCR fallback for scanned PDFs when the image dependencies are installed. |
-| `NLLB_OCR_LANGUAGE` | `deu+eng` | OCR language setting passed to Tesseract. |
+| `LINGUMACHINA_MODEL` | `facebook/nllb-200-distilled-600M` | Hugging Face model id used for translation. |
+| `LINGUMACHINA_DEVICE` | `cpu` | Runtime device. Use `cuda` with the GPU compose profile and a CUDA-capable host. |
+| `LINGUMACHINA_MAX_CHARS` | `6000` | Maximum characters per translation chunk. Longer input is split into multiple chunks. |
+| `LINGUMACHINA_MAX_FILE_MB` | `50` | Maximum upload size in megabytes. |
+| `LINGUMACHINA_CPU_THREADS` | `0` | Optional Torch, OMP, and MKL thread count for CPU translation. `0` keeps library defaults. |
+| `LINGUMACHINA_CPU_INTEROP_THREADS` | `0` | Optional Torch inter-op thread count. `0` keeps library defaults. |
+| `LINGUMACHINA_HISTORY_DAYS` | `7` | Number of days to keep saved translation history, including retained source files. |
+| `LINGUMACHINA_HISTORY_DIR` | `/data/history` | Directory for saved history files, source files, and metadata inside the container. |
+| `LINGUMACHINA_JOB_WORKERS` | `1` | Number of queued translation jobs that may run in parallel. Higher values can use more CPU/RAM. |
+| `LINGUMACHINA_JOBS_DIR` | `/data/history/jobs` | Directory for persisted queue metadata and pending PDF payloads. |
+| `LINGUMACHINA_DEFAULT_SOURCE` | `eng_Latn` | Default source language code. |
+| `LINGUMACHINA_DEFAULT_TARGET` | `deu_Latn` | Default target language code. |
+| `LINGUMACHINA_ENABLE_OCR` | `false` | Enables OCR fallback for scanned PDFs when the image dependencies are installed. |
+| `LINGUMACHINA_OCR_LANGUAGE` | `deu+eng` | OCR language setting passed to Tesseract. |
 | `LINGUMACHINA_AUTH_ENABLED` | `false` | Enables HTTP Basic Auth for the UI and API. `/health` stays public for health checks. |
 | `LINGUMACHINA_AUTH_USERNAME` | `admin` | Basic Auth username. |
 | `LINGUMACHINA_AUTH_PASSWORD` | `changeme` | Basic Auth password. Change this before enabling auth. |
@@ -78,7 +85,8 @@ The `.env` file is grouped by topic:
 | `LINGUMACHINA_UNLOAD_MODEL_AFTER_IDLE` | `true` | Unloads cached model objects after an idle period. |
 | `LINGUMACHINA_MODEL_IDLE_SECONDS` | `1200` | Idle time in seconds before unloading the model cache. |
 
-Basic Auth still accepts the older `NLLB_AUTH_*` variables as fallback, but new setups should use the `LINGUMACHINA_AUTH_*` names.
+Older `NLLB_*` variables are still accepted as fallback, but new setups should use the `LINGUMACHINA_*` names.
+Queue worker count defaults to one because multiple simultaneous model jobs can increase memory usage sharply, especially with larger models.
 
 ## Notes
 
@@ -99,7 +107,7 @@ Model license and card:
 - https://huggingface.co/facebook/nllb-200-distilled-600M
 - https://creativecommons.org/licenses/by-nc/4.0/
 
-For commercial use, keep `NLLB_MODEL` configurable and replace the default model with one that explicitly allows the intended use. Practical options are:
+For commercial use, keep `LINGUMACHINA_MODEL` configurable and replace the default model with one that explicitly allows the intended use. Practical options are:
 
 - use an existing translation model with a suitable commercial license,
 - fine-tune a commercially usable base model on properly licensed parallel texts,

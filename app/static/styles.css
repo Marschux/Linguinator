@@ -55,7 +55,7 @@
       display: flex;
       font-size: clamp(2.15rem, 5vw, 3.65rem);
       font-weight: 850;
-      gap: .15em;
+      gap: .18em;
       text-shadow: 0 2px 0 rgba(47, 125, 246, .42);
     }
     h2 { font-size: 1.05rem; margin-top: .25rem; }
@@ -63,8 +63,18 @@
 
     .brand-logo {
       flex: 0 0 auto;
-      height: .95em;
-      width: .95em;
+      height: .92em;
+      width: .92em;
+    }
+
+    .header-controls {
+      flex: 0 0 13rem;
+    }
+
+    .header-controls label {
+      color: var(--muted);
+      font-size: .78rem;
+      margin-bottom: .35rem;
     }
 
     label {
@@ -297,29 +307,7 @@
     .section-heading label { margin-bottom: 0; }
     .section-heading button { min-height: 2.25rem; padding: .4rem .75rem; }
     .section-heading .actions { margin-top: 0; }
-    .view-tabs {
-      display: flex;
-      gap: .45rem;
-    }
-
-    .view-tab {
-      background: transparent;
-      border-color: var(--line);
-      color: var(--muted);
-      min-height: 2.25rem;
-      padding: .4rem .75rem;
-    }
-
-    .view-tab.active,
-    .view-tab:hover {
-      background: rgba(47, 125, 246, .16);
-      border-color: var(--accent);
-      color: var(--text);
-      transform: none;
-    }
-
-    .result-panel { display: none; }
-    .result-panel.active { display: block; }
+    .section-meta { color: var(--muted); font-size: .85rem; }
     .download-row {
       align-items: end;
       display: flex;
@@ -391,6 +379,50 @@
     .progress.failed .progress-status,
     .progress.cancelled .progress-status { color: #fca5a5; }
 
+    .queue {
+      display: grid;
+      gap: .55rem;
+      margin-top: .8rem;
+    }
+
+    .queue:empty { display: none; }
+
+    .queue-row {
+      align-items: center;
+      background: rgba(255, 255, 255, .04);
+      border: 1px solid rgba(255, 255, 255, .07);
+      border-radius: 8px;
+      color: var(--muted);
+      display: grid;
+      gap: .75rem;
+      grid-template-columns: minmax(0, 1fr) auto;
+      padding: .7rem .85rem;
+    }
+
+    .queue-title {
+      color: var(--text);
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+
+    .queue-meta,
+    .queue-progress {
+      color: var(--muted);
+      font-size: .85rem;
+      margin-top: .15rem;
+      overflow-wrap: anywhere;
+    }
+
+    .queue-actions {
+      display: flex;
+      gap: .5rem;
+    }
+
+    .queue-actions button {
+      min-height: 2.25rem;
+      padding: .4rem .7rem;
+    }
+
     .history {
       display: grid;
       gap: .55rem;
@@ -413,6 +445,33 @@
 
     .history-main { min-width: 0; }
     .history-meta { color: var(--muted); font-size: .85rem; margin-top: .15rem; overflow-wrap: anywhere; }
+    .history-actions {
+      align-items: center;
+      display: flex;
+      flex: 0 0 auto;
+      gap: .5rem;
+    }
+    .history-format {
+      min-height: 2.25rem;
+      padding-bottom: .4rem;
+      padding-top: .4rem;
+      width: auto;
+    }
+    .secondary-link {
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--text);
+      display: inline-flex;
+      font-weight: 700;
+      min-height: 2.25rem;
+      padding: .4rem .7rem;
+    }
+    .secondary-link:hover {
+      background: var(--panel-soft);
+      border-color: #4b5565;
+      text-decoration: none;
+    }
     .history-delete { min-height: 2.25rem; padding: .4rem .7rem; }
 
     pre {
@@ -454,10 +513,14 @@
 
       header {
         align-items: start;
-        display: block;
+        display: grid;
+        gap: .85rem;
+        grid-template-columns: 1fr;
         margin-bottom: 1rem;
         padding-bottom: .9rem;
       }
+
+      .header-controls { width: 100%; }
 
       h1 { font-size: 2rem; }
       .subtle { font-size: .92rem; }
@@ -512,8 +575,6 @@
         gap: .55rem;
       }
 
-      .view-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-
       .download-row {
         align-items: stretch;
         display: grid;
@@ -535,6 +596,23 @@
         flex-direction: column;
         gap: .55rem;
       }
+
+      .queue-row {
+        align-items: stretch;
+        grid-template-columns: 1fr;
+      }
+
+      .queue-actions {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .history-actions {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, auto) minmax(0, auto);
+      }
+
+      .history-format { width: 100%; }
 
       .history a {
         display: block;
@@ -571,5 +649,6 @@
       }
 
       .export-actions { grid-template-columns: 1fr; }
+      .history-actions { grid-template-columns: 1fr; }
       pre { min-height: 120px; padding: .75rem; }
     }

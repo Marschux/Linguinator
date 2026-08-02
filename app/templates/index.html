@@ -11,12 +11,29 @@
   <main class="app">
     <header>
       <div class="brand">
-        <h1><img class="brand-logo" src="static/favicon.svg" alt="L">ingumachina</h1>
+        <h1><img class="brand-logo" src="static/favicon.svg" alt="">Lingumachina</h1>
         <p class="subtle">Local translation workbench for text and document workflows.</p>
+      </div>
+      <div class="header-controls">
+        <label for="uiLanguage">UI Language</label>
+        <select id="uiLanguage" title="Select the interface language.">
+          <option value="en">English</option>
+          <option value="de">Deutsch</option>
+          <option value="es">Español</option>
+          <option value="fr">Français</option>
+        </select>
       </div>
     </header>
 
     <div id="progress" class="progress workspace-section"></div>
+
+    <section id="queuePanel" class="section workspace-section">
+      <div class="section-heading">
+        <label for="queue">Queue</label>
+        <span id="queueWorkers" class="section-meta"></span>
+      </div>
+      <div id="queue" class="queue"></div>
+    </section>
 
     <section class="grid workspace-section">
       <div class="row">
@@ -88,12 +105,8 @@
     <section class="section workspace-section">
       <div class="section-heading">
         <label for="result">Preview</label>
-        <div class="view-tabs" role="tablist" aria-label="Result view">
-          <button id="previewToggle" class="view-tab active" type="button" title="Show the translation preview.">Preview</button>
-          <button id="historyToggle" class="view-tab" type="button" title="Show translation history.">History</button>
-        </div>
       </div>
-      <div id="previewPanel" class="result-panel active">
+      <div id="previewPanel">
         <pre id="result"></pre>
         <div id="previewNotice" class="preview-notice"></div>
         <div class="download-row">
@@ -109,9 +122,13 @@
           </div>
         </div>
       </div>
-      <div id="historyPanel" class="result-panel">
-        <div id="history" class="history"></div>
+    </section>
+
+    <section id="historyPanel" class="section workspace-section">
+      <div class="section-heading">
+        <label for="history">History</label>
       </div>
+      <div id="history" class="history"></div>
     </section>
 
     <footer>

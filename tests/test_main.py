@@ -84,6 +84,18 @@ class FakeTorchWithCuda(FakeTorch):
         self.cuda = FakeCuda()
 
 
+class FakeTorchWithThreads(FakeTorch):
+    def __init__(self):
+        self.threads = None
+        self.interop_threads = None
+
+    def set_num_threads(self, threads):
+        self.threads = threads
+
+    def set_num_interop_threads(self, threads):
+        self.interop_threads = threads
+
+
 class FakeCacheInfo:
     def __init__(self, currsize):
         self.currsize = currsize
@@ -348,6 +360,14 @@ class MainTests(unittest.TestCase):
         self.assertEqual(main.normalized_root_path("/lingumachina/"), "/lingumachina")
         self.assertEqual(main.normalized_root_path(""), "")
 
+    def test_env_value_prefers_lingumachina_and_falls_back_to_legacy_nllb(self):
+        with patch.dict(os.environ, {"LINGUMACHINA_MODEL": "new", "NLLB_MODEL": "old"}, clear=False):
+            self.assertEqual(main.env_value("LINGUMACHINA_MODEL", "default", "NLLB_MODEL"), "new")
+        with patch.dict(os.environ, {"NLLB_MODEL": "old"}, clear=True):
+            self.assertEqual(main.env_value("LINGUMACHINA_MODEL", "default", "NLLB_MODEL"), "old")
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(main.env_value("LINGUMACHINA_MODEL", "default", "NLLB_MODEL"), "default")
+
     def test_server_reads_proxy_and_https_env(self):
         env = {
             "LINGUMACHINA_HOST": "127.0.0.1",
@@ -378,8 +398,16 @@ class MainTests(unittest.TestCase):
 
         self.assertIn('href="static/styles.css"', template)
         self.assertIn('src="static/app.js"', template)
+        self.assertIn('id="uiLanguage"', template)
+        self.assertIn('value="de">Deutsch', template)
+        self.assertNotIn("previewToggle", template)
+        self.assertNotIn("historyToggle", template)
         self.assertNotIn('fetch("/', script)
         self.assertNotIn('href = "/history/', script)
+        self.assertIn('fetch("jobs/translate-file"', script)
+        self.assertIn('download.href = "history/" + item.id + "/export?format="', script)
+        self.assertIn('historyFormats.push("original")', script)
+        self.assertIn("lingumachina_ui_language", script)
 
     def test_translate_one_uses_lazy_loaded_torch_module(self):
         with patch.object(main, "load_model", return_value=(FakeTokenizer(), FakeModel(), "cpu", FakeTorch())):
@@ -574,6 +602,188 @@ class MainTests(unittest.TestCase):
             self.assertEqual(items[0]["size_bytes"], len("result"))
         finally:
             shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
+    def test_history_export_supports_text_and_pdf(self):
+        temp_dir = test_temp_dir()
+        try:
+            item_id = "2026-08-02-text-abc123"
+            md_path = temp_dir / f"{item_id}.md"
+            md_path.write_text("Translated result", encoding="utf-8")
+
+            with patch.object(main, "HISTORY_DIR", temp_dir):
+                client = TestClient(main.app)
+                text_response = client.get(f"/history/{item_id}/export?format=txt")
+                pdf_response = client.get(f"/history/{item_id}/export?format=pdf")
+                bad_response = client.get(f"/history/{item_id}/export?format=docx")
+
+            self.assertEqual(text_response.status_code, 200)
+            self.assertIn("text/plain", text_response.headers["content-type"])
+            self.assertEqual(text_response.text, "Translated result")
+            self.assertEqual(pdf_response.status_code, 200)
+            self.assertEqual(pdf_response.headers["content-type"], "application/pdf")
+            self.assertTrue(pdf_response.content.startswith(b"%PDF-1.4"))
+            self.assertEqual(bad_response.status_code, 404)
+        finally:
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
+    def test_history_export_uses_stored_source_file_for_original_format(self):
+        temp_dir = test_temp_dir()
+        try:
+            source = minimal_docx(["Hello"])
+            with patch.object(main, "HISTORY_DIR", temp_dir):
+                item_id = main.save_history(
+                    "text",
+                    "Hallo",
+                    "eng_Latn",
+                    "deu_Latn",
+                    "source.docx",
+                    source,
+                    "docx",
+                )
+                client = TestClient(main.app)
+                response = client.get(f"/history/{item_id}/export?format=original")
+                items = main.history_items()
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                response.headers["content-type"],
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+            self.assertEqual(main.extract_docx_text_from_bytes(response.content), "Hallo")
+            self.assertTrue(items[0]["has_source_file"])
+            self.assertEqual(items[0]["source_extension"], "docx")
+        finally:
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
+    def test_delete_history_removes_stored_source_file(self):
+        temp_dir = test_temp_dir()
+        try:
+            with patch.object(main, "HISTORY_DIR", temp_dir):
+                item_id = main.save_history(
+                    "text",
+                    "Hallo",
+                    "eng_Latn",
+                    "deu_Latn",
+                    "source.docx",
+                    minimal_docx(["Hello"]),
+                    "docx",
+                )
+                source_path = main.history_source_path(item_id, "docx")
+                response = TestClient(main.app).delete(f"/history/{item_id}")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(source_path.exists())
+        finally:
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
+    def test_list_jobs_hides_payloads_and_adds_queue_positions(self):
+        temp_dir = test_temp_dir()
+        try:
+            with patch.object(main, "JOBS_DIR", temp_dir):
+                with main.JOBS_LOCK:
+                    main.JOBS.clear()
+                    main.JOB_RUNNERS.clear()
+                first = main.create_job("translate", "eng_Latn", "deu_Latn", "Text")
+                second = main.create_job("translate-pdf", "eng_Latn", "deu_Latn", "file.pdf")
+                main.update_job(first, text="secret source")
+                main.update_job(second, payload_path=str(temp_dir / "payload.bin"), source_payload_path=str(temp_dir / "source.bin"))
+
+                items = main.list_jobs()
+
+            self.assertEqual([item["position"] for item in items], [1, 2])
+            self.assertNotIn("text", items[0])
+            self.assertNotIn("payload_path", items[1])
+            self.assertNotIn("source_payload_path", items[1])
+        finally:
+            with main.JOBS_LOCK:
+                main.JOBS.clear()
+                main.JOB_RUNNERS.clear()
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
+    def test_get_job_recovers_completed_result_from_history(self):
+        temp_dir = test_temp_dir()
+        try:
+            with patch.object(main, "HISTORY_DIR", temp_dir):
+                with patch.object(main, "JOBS_DIR", temp_dir / "jobs"):
+                    with main.JOBS_LOCK:
+                        main.JOBS.clear()
+                        main.JOB_RUNNERS.clear()
+                    history_id = main.save_history("text", "Recovered", "eng_Latn", "deu_Latn", "text")
+                    job_id = main.create_job("translate", "eng_Latn", "deu_Latn", "Text")
+                    main.update_job(job_id, status="complete", result=None, history_id=history_id)
+
+                    job = main.get_job(job_id)
+
+            self.assertEqual(job["result"], "Recovered")
+        finally:
+            with main.JOBS_LOCK:
+                main.JOBS.clear()
+                main.JOB_RUNNERS.clear()
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
+    def test_control_queued_job_cancels_without_worker(self):
+        temp_dir = test_temp_dir()
+        try:
+            with patch.object(main, "JOBS_DIR", temp_dir):
+                with main.JOBS_LOCK:
+                    main.JOBS.clear()
+                    main.JOB_RUNNERS.clear()
+                job_id = main.create_job("translate", "eng_Latn", "deu_Latn", "Text")
+                payload_path = temp_dir / "queued.source"
+                payload_path.write_text("source", encoding="utf-8")
+                main.update_job(job_id, source_payload_path=str(payload_path), text="secret")
+
+                job = main.control_job(job_id, "cancel")
+
+            self.assertEqual(job["status"], "cancelled")
+            self.assertTrue(job["cancel_requested"])
+            self.assertFalse(payload_path.exists())
+        finally:
+            with main.JOBS_LOCK:
+                main.JOBS.clear()
+                main.JOB_RUNNERS.clear()
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
+    def test_load_persisted_jobs_requeues_running_jobs(self):
+        temp_dir = test_temp_dir()
+        try:
+            job_id = "job-1"
+            (temp_dir / f"{job_id}.json").write_text(json.dumps({
+                "id": job_id,
+                "kind": "translate",
+                "status": "running",
+                "message": "Running",
+                "source": "eng_Latn",
+                "target": "deu_Latn",
+                "queued_at": 100.0,
+                "started_at": 101.0,
+            }), encoding="utf-8")
+
+            with patch.object(main, "JOBS_DIR", temp_dir):
+                with main.JOBS_LOCK:
+                    main.JOBS.clear()
+                    main.JOB_RUNNERS.clear()
+                main.load_persisted_jobs()
+                loaded = main.JOBS[job_id]
+
+            self.assertEqual(loaded["status"], "queued")
+            self.assertEqual(loaded["message"], "Requeued after restart")
+            self.assertIsNone(loaded["started_at"])
+        finally:
+            with main.JOBS_LOCK:
+                main.JOBS.clear()
+                main.JOB_RUNNERS.clear()
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
+    def test_configure_torch_threads_uses_env_values(self):
+        torch_module = FakeTorchWithThreads()
+
+        with patch.object(main, "CPU_THREADS", 3):
+            with patch.object(main, "CPU_INTEROP_THREADS", 2):
+                main.configure_torch_threads(torch_module)
+
+        self.assertEqual(torch_module.threads, 3)
+        self.assertEqual(torch_module.interop_threads, 2)
 
     def test_docx_extraction_preserves_paragraphs(self):
         content = minimal_docx(["First paragraph", "Second paragraph"])

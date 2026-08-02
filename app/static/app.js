@@ -5,9 +5,228 @@
     let currentSourceFormat = "txt";
     let currentOriginalExtension = "txt";
     let fullResultText = "";
+    let currentUiLanguage = localStorage.getItem("lingumachina_ui_language") || "en";
+    let ocrEnabled = false;
+    let ocrLanguage = "";
     const baseTitle = document.title || "Lingumachina";
     const PREVIEW_MAX_CHARS = 12000;
     const EXCERPT_MAX_CHARS = 4000;
+    const originalExportExtensions = ["docx", "odt", "pptx", "csv", "xlsx", "html", "htm", "srt", "vtt", "json", "yaml", "yml", "po", "xlf", "xliff"];
+    const outputFormatKeys = {txt: "formatTxt", md: "formatMarkdown", pdf: "formatPdf", original: "formatOriginal"};
+    const uiText = {
+      en: {
+        uiLanguage: "UI Language",
+        subtitle: "Local translation workbench for text and document workflows.",
+        queue: "Queue",
+        source: "Source",
+        target: "Target",
+        loading: "Loading...",
+        textField: "Text Field",
+        text: "Text",
+        markdown: "Markdown",
+        officeDoc: "Office Doc",
+        csvFile: "CSV File",
+        pdf: "PDF",
+        textFile: "Text File",
+        markdownFile: "Markdown File",
+        loadFile: "Load File",
+        overlayPdf: "Overlay PDF",
+        coverOldText: "Cover old text",
+        translateInput: "Translate Input",
+        pause: "Pause",
+        resume: "Resume",
+        stop: "Stop",
+        preview: "Preview",
+        downloadFormat: "Download Format",
+        download: "Download",
+        delete: "Delete",
+        history: "History",
+        noQueuedJobs: "No queued jobs.",
+        noHistory: "No saved translations yet.",
+        queued: "Queued",
+        started: "Started",
+        chunks: "chunks",
+        workerSingular: "worker",
+        workerPlural: "workers",
+        jobCancelled: "Job cancelled.",
+        jobFailed: "Job failed.",
+        selectFileFirst: "Select a supported text, document, table, subtitle, or localization file first.",
+        selectPdfFirst: "Select a PDF first.",
+        originalNeedsFile: "Original format export needs the loaded source file in the input tab.",
+        extracting: "Extracting",
+        starting: "Starting...",
+        startingChunks: "Starting {count} chunks...",
+        uploadingPdf: "Uploading PDF...",
+        ocrConfigured: "OCR configured: {language}",
+        ocrDisabled: "OCR disabled",
+        previewExcerptTruncated: "Preview shows only a translated excerpt. The download contains the full export.",
+        previewExcerpt: "Preview shows a translated excerpt for this file type. The download contains the full export.",
+        previewTruncated: "Preview truncated. The download contains the full export.",
+        formatTxt: "TXT",
+        formatMarkdown: "Markdown",
+        formatPdf: "PDF",
+        formatOriginal: "Original Format"
+      },
+      de: {
+        uiLanguage: "UI-Sprache",
+        subtitle: "Lokale Uebersetzungsoberflaeche fuer Text- und Dokument-Workflows.",
+        queue: "Warteschlange",
+        source: "Quelle",
+        target: "Ziel",
+        loading: "Laedt...",
+        textField: "Textfeld",
+        text: "Text",
+        markdown: "Markdown",
+        officeDoc: "Office-Dokument",
+        csvFile: "CSV-Datei",
+        pdf: "PDF",
+        textFile: "Textdatei",
+        markdownFile: "Markdown-Datei",
+        loadFile: "Datei laden",
+        overlayPdf: "PDF ueberlagern",
+        coverOldText: "Alten Text abdecken",
+        translateInput: "Eingabe uebersetzen",
+        pause: "Pause",
+        resume: "Fortsetzen",
+        stop: "Stoppen",
+        preview: "Vorschau",
+        downloadFormat: "Download-Format",
+        download: "Download",
+        delete: "Loeschen",
+        history: "History",
+        noQueuedJobs: "Keine wartenden Jobs.",
+        noHistory: "Noch keine gespeicherten Uebersetzungen.",
+        queued: "Eingereiht",
+        started: "Gestartet",
+        chunks: "Chunks",
+        workerSingular: "Worker",
+        workerPlural: "Worker",
+        jobCancelled: "Job abgebrochen.",
+        jobFailed: "Job fehlgeschlagen.",
+        selectFileFirst: "Waehle zuerst eine unterstuetzte Text-, Dokument-, Tabellen-, Untertitel- oder Lokalisierungsdatei.",
+        selectPdfFirst: "Waehle zuerst eine PDF aus.",
+        originalNeedsFile: "Originalformat-Export braucht die geladene Quelldatei im Eingabe-Tab.",
+        extracting: "Extrahiere",
+        starting: "Starte...",
+        startingChunks: "Starte {count} Chunks...",
+        uploadingPdf: "Lade PDF hoch...",
+        ocrConfigured: "OCR konfiguriert: {language}",
+        ocrDisabled: "OCR deaktiviert",
+        previewExcerptTruncated: "Die Vorschau zeigt nur einen uebersetzten Auszug. Der Download enthaelt den kompletten Export.",
+        previewExcerpt: "Die Vorschau zeigt fuer diesen Dateityp einen uebersetzten Auszug. Der Download enthaelt den kompletten Export.",
+        previewTruncated: "Vorschau gekuerzt. Der Download enthaelt den kompletten Export.",
+        formatTxt: "TXT",
+        formatMarkdown: "Markdown",
+        formatPdf: "PDF",
+        formatOriginal: "Originalformat"
+      },
+      es: {
+        uiLanguage: "Idioma de UI",
+        subtitle: "Banco local de traduccion para flujos de texto y documentos.",
+        queue: "Cola",
+        source: "Origen",
+        target: "Destino",
+        loading: "Cargando...",
+        textField: "Campo de texto",
+        text: "Texto",
+        markdown: "Markdown",
+        officeDoc: "Documento Office",
+        csvFile: "Archivo CSV",
+        pdf: "PDF",
+        textFile: "Archivo de texto",
+        markdownFile: "Archivo Markdown",
+        loadFile: "Cargar archivo",
+        overlayPdf: "Superponer PDF",
+        coverOldText: "Cubrir texto anterior",
+        translateInput: "Traducir entrada",
+        pause: "Pausar",
+        resume: "Continuar",
+        stop: "Detener",
+        preview: "Vista previa",
+        downloadFormat: "Formato de descarga",
+        download: "Descargar",
+        delete: "Eliminar",
+        history: "Historial",
+        noQueuedJobs: "No hay trabajos en cola.",
+        noHistory: "Aun no hay traducciones guardadas.",
+        queued: "En cola",
+        started: "Iniciado",
+        chunks: "fragmentos",
+        workerSingular: "worker",
+        workerPlural: "workers",
+        jobCancelled: "Trabajo cancelado.",
+        jobFailed: "El trabajo fallo.",
+        selectFileFirst: "Selecciona primero un archivo compatible de texto, documento, tabla, subtitulos o localizacion.",
+        selectPdfFirst: "Selecciona primero un PDF.",
+        originalNeedsFile: "La exportacion en formato original necesita el archivo fuente cargado en la pestana de entrada.",
+        extracting: "Extrayendo",
+        starting: "Iniciando...",
+        startingChunks: "Iniciando {count} fragmentos...",
+        uploadingPdf: "Subiendo PDF...",
+        ocrConfigured: "OCR configurado: {language}",
+        ocrDisabled: "OCR desactivado",
+        previewExcerptTruncated: "La vista previa muestra solo un extracto traducido. La descarga contiene la exportacion completa.",
+        previewExcerpt: "La vista previa muestra un extracto traducido para este tipo de archivo. La descarga contiene la exportacion completa.",
+        previewTruncated: "Vista previa recortada. La descarga contiene la exportacion completa.",
+        formatTxt: "TXT",
+        formatMarkdown: "Markdown",
+        formatPdf: "PDF",
+        formatOriginal: "Formato original"
+      },
+      fr: {
+        uiLanguage: "Langue UI",
+        subtitle: "Atelier local de traduction pour les workflows texte et documents.",
+        queue: "File d'attente",
+        source: "Source",
+        target: "Cible",
+        loading: "Chargement...",
+        textField: "Champ texte",
+        text: "Texte",
+        markdown: "Markdown",
+        officeDoc: "Document Office",
+        csvFile: "Fichier CSV",
+        pdf: "PDF",
+        textFile: "Fichier texte",
+        markdownFile: "Fichier Markdown",
+        loadFile: "Charger le fichier",
+        overlayPdf: "Superposer PDF",
+        coverOldText: "Masquer l'ancien texte",
+        translateInput: "Traduire l'entree",
+        pause: "Pause",
+        resume: "Reprendre",
+        stop: "Arreter",
+        preview: "Apercu",
+        downloadFormat: "Format de telechargement",
+        download: "Telecharger",
+        delete: "Supprimer",
+        history: "Historique",
+        noQueuedJobs: "Aucun job en file.",
+        noHistory: "Aucune traduction enregistree.",
+        queued: "En file",
+        started: "Demarre",
+        chunks: "segments",
+        workerSingular: "worker",
+        workerPlural: "workers",
+        jobCancelled: "Job annule.",
+        jobFailed: "Le job a echoue.",
+        selectFileFirst: "Selectionne d'abord un fichier compatible texte, document, tableau, sous-titres ou localisation.",
+        selectPdfFirst: "Selectionne d'abord un PDF.",
+        originalNeedsFile: "L'export au format original a besoin du fichier source charge dans l'onglet d'entree.",
+        extracting: "Extraction",
+        starting: "Demarrage...",
+        startingChunks: "Demarrage de {count} segments...",
+        uploadingPdf: "Televersement du PDF...",
+        ocrConfigured: "OCR configure: {language}",
+        ocrDisabled: "OCR desactive",
+        previewExcerptTruncated: "L'apercu affiche seulement un extrait traduit. Le telechargement contient l'export complet.",
+        previewExcerpt: "L'apercu affiche un extrait traduit pour ce type de fichier. Le telechargement contient l'export complet.",
+        previewTruncated: "Apercu tronque. Le telechargement contient l'export complet.",
+        formatTxt: "TXT",
+        formatMarkdown: "Markdown",
+        formatPdf: "PDF",
+        formatOriginal: "Format original"
+      }
+    };
     const favoriteLanguages = ["deu_Latn", "eng_Latn", "fra_Latn", "spa_Latn", "ita_Latn"];
     const languageNames = new Intl.DisplayNames(["en"], {type: "language"});
     const scriptNames = {
@@ -155,13 +374,84 @@
       uzn: "UZ", vie: "VN", zho: "CN"
     };
 
+    function t(key, values = {}) {
+      let text = (uiText[currentUiLanguage] && uiText[currentUiLanguage][key]) || uiText.en[key] || key;
+      for (const [name, value] of Object.entries(values)) {
+        text = text.replace("{" + name + "}", value);
+      }
+      return text;
+    }
+
+    function setText(selector, key) {
+      const element = document.querySelector(selector);
+      if (element) element.textContent = t(key);
+    }
+
+    function setTitle(selector, key) {
+      const element = document.querySelector(selector);
+      if (element) element.title = t(key);
+    }
+
+    function applyUiLanguage() {
+      document.documentElement.lang = currentUiLanguage;
+      const uiLanguage = document.getElementById("uiLanguage");
+      if (uiLanguage) uiLanguage.value = currentUiLanguage;
+      setText(".subtle", "subtitle");
+      setText('label[for="uiLanguage"]', "uiLanguage");
+      setText('label[for="queue"]', "queue");
+      setText('label[for="source"]', "source");
+      setText('label[for="target"]', "target");
+      setText('[data-input-tab="textarea"]', "textField");
+      setText('[data-input-tab="text"]', "text");
+      setText('[data-input-tab="markdown"]', "markdown");
+      setText('[data-input-tab="office"]', "officeDoc");
+      setText('[data-input-tab="csv"]', "csvFile");
+      setText('[data-input-tab="pdf"]', "pdf");
+      setText('label[for="text"]', "textField");
+      setText('label[for="pdf"]', "pdf");
+      setText('label[for="usePdfOverlay"]', "overlayPdf");
+      setText('label[for="coverPdfText"]', "coverOldText");
+      setText("#loadTextFile", "loadFile");
+      setText("#translate", "translateInput");
+      setText("#pauseJob", "pause");
+      setText("#resumeJob", "resume");
+      setText("#stopJob", "stop");
+      setText('label[for="result"]', "preview");
+      setText('label[for="outputFormat"]', "downloadFormat");
+      setText("#downloadResult", "download");
+      setText('label[for="history"]', "history");
+      setTitle("#uiLanguage", "uiLanguage");
+      refreshInputLabels();
+      refreshOutputFormats(document.getElementById("outputFormat").value);
+      updateOcrLabel();
+      updateCounter();
+      loadQueue().catch(() => {});
+      loadHistory().catch(() => {});
+    }
+
+    function setupUiLanguagePicker() {
+      const select = document.getElementById("uiLanguage");
+      if (!select) return;
+      select.value = currentUiLanguage;
+      select.addEventListener("change", () => {
+        currentUiLanguage = select.value || "en";
+        localStorage.setItem("lingumachina_ui_language", currentUiLanguage);
+        applyUiLanguage();
+      });
+    }
+
     function recentKey(id) {
+      return "lingumachina_recent_" + id;
+    }
+
+    function legacyRecentKey(id) {
       return "nllb_recent_" + id;
     }
 
     function getRecent(id) {
       try {
-        return JSON.parse(localStorage.getItem(recentKey(id)) || "[]");
+        const value = localStorage.getItem(recentKey(id)) || localStorage.getItem(legacyRecentKey(id)) || "[]";
+        return JSON.parse(value);
       } catch {
         return [];
       }
@@ -216,40 +506,46 @@
       textarea: {
         panel: "textareaPanel",
         accept: "",
-        label: "Text Field",
+        labelKey: "textField",
         sourceFormat: "txt"
       },
       text: {
         panel: "filePanel",
         accept: ".txt,.html,.htm,.srt,.vtt,.json,.yaml,.yml,.po,.xlf,.xliff,text/plain,text/html,application/json,text/yaml,application/x-xliff+xml",
-        label: "Text File",
+        labelKey: "textFile",
         sourceFormat: "txt"
       },
       markdown: {
         panel: "filePanel",
         accept: ".md,text/markdown,text/plain",
-        label: "Markdown File",
+        labelKey: "markdownFile",
         sourceFormat: "md"
       },
       office: {
         panel: "filePanel",
         accept: ".docx,.odt,.pptx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.oasis.opendocument.text,application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        label: "Office Doc",
+        labelKey: "officeDoc",
         sourceFormat: "md"
       },
       csv: {
         panel: "filePanel",
         accept: ".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        label: "CSV File",
+        labelKey: "csvFile",
         sourceFormat: "md"
       },
       pdf: {
         panel: "pdfPanel",
         accept: "application/pdf",
-        label: "PDF",
+        labelKey: "pdf",
         sourceFormat: "pdf"
       }
     };
+
+    function refreshInputLabels() {
+      const config = inputTabs[currentInputTab] || inputTabs.textarea;
+      const textFileLabel = document.getElementById("textFileLabel");
+      if (textFileLabel) textFileLabel.textContent = t(config.labelKey);
+    }
 
     function extractionPathForFile(fileName) {
       if (fileName.endsWith(".csv")) return "extract-csv";
@@ -376,31 +672,18 @@
         const fileInput = document.getElementById("textFile");
         fileInput.accept = config.accept;
         fileInput.value = "";
-        document.getElementById("textFileLabel").textContent = config.label;
+        document.getElementById("textFileLabel").textContent = t(config.labelKey);
       }
       const showSheet = tab === "csv";
       document.querySelectorAll(".file-extra").forEach((input) => {
         input.classList.toggle("visible", showSheet);
       });
+      refreshOutputFormats();
     }
 
     document.querySelectorAll("[data-input-tab]").forEach((button) => {
       button.addEventListener("click", () => setInputTab(button.dataset.inputTab));
     });
-
-    function setResultView(view) {
-      const showHistory = view === "history";
-      document.getElementById("previewPanel").classList.toggle("active", !showHistory);
-      document.getElementById("historyPanel").classList.toggle("active", showHistory);
-      document.getElementById("previewToggle").classList.toggle("active", !showHistory);
-      document.getElementById("historyToggle").classList.toggle("active", showHistory);
-      if (showHistory) {
-        loadHistory();
-      }
-    }
-
-    document.getElementById("previewToggle").addEventListener("click", () => setResultView("preview"));
-    document.getElementById("historyToggle").addEventListener("click", () => setResultView("history"));
 
     function syncOverlayControls() {
       const cover = document.getElementById("coverPdfText");
@@ -445,10 +728,10 @@
       notice.classList.toggle("visible", hasText && (preview.truncated || options.excerpt));
       if (hasText && options.excerpt) {
         notice.textContent = preview.truncated
-          ? "Preview shows only a translated excerpt. The download contains the full export."
-          : "Preview shows a translated excerpt for this file type. The download contains the full export.";
+          ? t("previewExcerptTruncated")
+          : t("previewExcerpt");
       } else if (hasText && preview.truncated) {
-        notice.textContent = "Preview truncated. The download contains the full export.";
+        notice.textContent = t("previewTruncated");
       } else {
         notice.textContent = "";
       }
@@ -456,7 +739,7 @@
 
     function outputFormatDetails(format) {
       if (format === "original") {
-        if (["docx", "odt", "pptx", "csv", "xlsx", "html", "htm", "srt", "vtt", "json", "yaml", "yml", "po", "xlf", "xliff"].includes(currentOriginalExtension)) {
+        if (originalExportExtensions.includes(currentOriginalExtension)) {
           return {extension: currentOriginalExtension, originalFile: true};
         }
         if (currentSourceFormat === "pdf") return {extension: "pdf", contentType: "application/pdf", pdf: true};
@@ -466,6 +749,36 @@
       if (format === "pdf") return {extension: "pdf", contentType: "application/pdf", pdf: true};
       if (format === "md") return {extension: "md", contentType: "text/markdown"};
       return {extension: "txt", contentType: "text/plain"};
+    }
+
+    function canUseOriginalFormat() {
+      return currentSourceFormat === "pdf" ||
+        currentSourceFormat === "md" ||
+        originalExportExtensions.includes(currentOriginalExtension);
+    }
+
+    function defaultOutputFormat() {
+      if (currentInputTab !== "textarea" && canUseOriginalFormat()) return "original";
+      if (currentSourceFormat === "pdf") return "pdf";
+      if (currentSourceFormat === "md") return "md";
+      return "txt";
+    }
+
+    function refreshOutputFormats(preferred) {
+      const select = document.getElementById("outputFormat");
+      const current = preferred || select.value || defaultOutputFormat();
+      const formats = ["txt", "md", "pdf"];
+      if (canUseOriginalFormat()) {
+        formats.push("original");
+      }
+      select.innerHTML = "";
+      for (const format of formats) {
+        const option = document.createElement("option");
+        option.value = format;
+        option.textContent = t(outputFormatKeys[format]);
+        select.appendChild(option);
+      }
+      select.value = formats.includes(current) ? current : defaultOutputFormat();
     }
 
     function saveBlob(blob, extension) {
@@ -519,7 +832,7 @@
       const file = document.getElementById("textFile").files[0];
       const path = originalExportPath(details.extension);
       if (!file || !path) {
-        setPreview("Original format export needs the loaded source file in the input tab.");
+        setPreview(t("originalNeedsFile"));
         return;
       }
       const form = new FormData();
@@ -573,7 +886,7 @@
     async function loadTextFile() {
       const file = document.getElementById("textFile").files[0];
       if (!file) {
-        setResult("Select a supported text, document, table, subtitle, or localization file first.");
+        setResult(t("selectFileFirst"));
         return;
       }
       const lowerName = file.name.toLowerCase();
@@ -592,7 +905,7 @@
           form.append("sheet_name", document.getElementById("sheetName").value);
         }
         const path = extractionPathForFile(lowerName);
-        showProgress("queued", 0, "Extracting " + lowerName.split(".").pop().toUpperCase() + "...");
+        showProgress("queued", 0, t("extracting") + " " + lowerName.split(".").pop().toUpperCase() + "...");
         const response = await fetch(path, {method: "POST", body: form});
         const text = await response.text();
         if (!response.ok) {
@@ -607,6 +920,7 @@
         currentOriginalExtension = currentSourceFormat;
       }
       updateCounter();
+      refreshOutputFormats(defaultOutputFormat());
       setResult("");
       clearProgress();
     }
@@ -659,20 +973,27 @@
       const data = await response.json();
       maxChars = data.max_chars || 0;
       const ocr = document.getElementById("useOcr");
-      const ocrLabel = document.getElementById("ocrLabel");
-      ocr.checked = Boolean(data.ocr_enabled);
+      ocrEnabled = Boolean(data.ocr_enabled);
+      ocrLanguage = data.ocr_language || "";
+      ocr.checked = ocrEnabled;
       ocr.disabled = true;
-      ocrLabel.textContent = data.ocr_enabled
-        ? "OCR configured: " + data.ocr_language
-        : "OCR disabled";
+      updateOcrLabel();
       updateCounter();
+    }
+
+    function updateOcrLabel() {
+      const ocrLabel = document.getElementById("ocrLabel");
+      if (!ocrLabel) return;
+      ocrLabel.textContent = ocrEnabled
+        ? t("ocrConfigured", {language: ocrLanguage})
+        : t("ocrDisabled");
     }
 
     function updateCounter() {
       const counter = document.getElementById("counter");
       const length = document.getElementById("text").value.length;
       const chunks = maxChars > 0 ? Math.max(1, Math.ceil(length / maxChars)) : 1;
-      counter.textContent = length + " / " + maxChars + " (" + chunks + " chunk" + (chunks === 1 ? "" : "s") + ")";
+      counter.textContent = length + " / " + maxChars + " (" + chunks + " " + t("chunks") + ")";
       counter.title = length + " characters used out of " + maxChars + ". Estimated translation chunks: " + chunks + ".";
       counter.classList.toggle("over", maxChars > 0 && length > maxChars);
     }
@@ -685,6 +1006,82 @@
       const minutes = Math.floor(seconds / 60);
       const rest = seconds % 60;
       return minutes + "m " + rest + "s";
+    }
+
+    function formatJobTime(timestamp) {
+      if (!timestamp) return "";
+      return new Date(timestamp * 1000).toLocaleString();
+    }
+
+    async function controlJob(jobId, action) {
+      const response = await fetch("jobs/" + jobId + "/" + action, {method: "POST"});
+      if (!response.ok) {
+        const text = await response.text();
+        setResult(errorTextFromResponse(text));
+        return null;
+      }
+      const job = await response.json();
+      await loadQueue();
+      return job;
+    }
+
+    function queueActionButton(job, action, label, enabledStatuses) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary";
+      button.textContent = label;
+      button.title = label;
+      button.disabled = !enabledStatuses.includes(job.status);
+      button.addEventListener("click", async () => {
+        const updated = await controlJob(job.id, action);
+        if (updated && activeJobId === job.id) {
+          updateProgress(updated);
+        }
+      });
+      return button;
+    }
+
+    async function loadQueue() {
+      const response = await fetch("jobs");
+      if (!response.ok) return;
+      const data = await response.json();
+      const queue = document.getElementById("queue");
+      const workers = document.getElementById("queueWorkers");
+      queue.innerHTML = "";
+      workers.textContent = data.workers + " " + t(data.workers === 1 ? "workerSingular" : "workerPlural");
+      const visibleItems = data.items.filter((job) => !["complete", "failed", "cancelled"].includes(job.status));
+      if (!visibleItems.length) {
+        queue.textContent = t("noQueuedJobs");
+        return;
+      }
+      for (const job of visibleItems) {
+        const row = document.createElement("div");
+        row.className = "queue-row";
+        const main = document.createElement("div");
+        const title = document.createElement("div");
+        title.className = "queue-title";
+        const position = job.position ? "#" + job.position + " " : "";
+        title.textContent = position + (job.label || job.kind) + " - " + job.status;
+        const meta = document.createElement("div");
+        meta.className = "queue-meta";
+        const languages = [job.source, job.target].filter(Boolean).join(" -> ");
+        const started = job.started_at ? t("started") + " " + formatJobTime(job.started_at) : t("queued") + " " + formatJobTime(job.queued_at);
+        meta.textContent = [languages, started].filter(Boolean).join(" | ");
+        const progress = document.createElement("div");
+        progress.className = "queue-progress";
+        progress.textContent = (job.percent || 0) + "% | " + (job.current || 0) + " / " + (job.total || 0) + " " + t("chunks") + " | " + (job.message || "");
+        const actions = document.createElement("div");
+        actions.className = "queue-actions";
+        actions.appendChild(queueActionButton(job, "pause", t("pause"), ["queued", "running"]));
+        actions.appendChild(queueActionButton(job, "resume", t("resume"), ["paused"]));
+        actions.appendChild(queueActionButton(job, "cancel", t("stop"), ["queued", "running", "paused"]));
+        main.appendChild(title);
+        main.appendChild(meta);
+        main.appendChild(progress);
+        row.appendChild(main);
+        row.appendChild(actions);
+        queue.appendChild(row);
+      }
     }
 
     function updateProgress(job) {
@@ -721,11 +1118,19 @@
             excerpt: job.kind === "translate-pdf" || currentInputTab === "office"
           });
           loadHistory();
+          loadQueue();
+          activeJobId = null;
+          return;
+        }
+        if (job.status === "cancelled") {
+          setResult(t("jobCancelled"));
+          loadQueue();
           activeJobId = null;
           return;
         }
         if (job.status === "failed") {
-          setResult(job.error || "Job failed.");
+          setResult(job.error || t("jobFailed"));
+          loadQueue();
           activeJobId = null;
           return;
         }
@@ -738,6 +1143,7 @@
       const target = document.getElementById("target").value;
       const length = document.getElementById("text").value.length;
       const chunks = maxChars > 0 ? Math.max(1, Math.ceil(length / maxChars)) : 1;
+      const sourceFile = currentInputTab !== "textarea" ? document.getElementById("textFile").files[0] : null;
       saveRecent("source", source);
       saveRecent("target", target);
       renderSelect("source", source);
@@ -747,16 +1153,28 @@
         currentOriginalExtension = "txt";
       }
       setResult("");
-      showProgress("queued", 0, chunks > 1 ? "Starting " + chunks + " chunks..." : "Starting...");
-      const response = await fetch("jobs/translate", {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
-          q: document.getElementById("text").value,
-          source: source,
-          target: target
-        })
-      });
+      showProgress("queued", 0, chunks > 1 ? t("startingChunks", {count: chunks}) : t("starting"));
+      let response;
+      if (sourceFile) {
+        const form = new FormData();
+        form.append("file", sourceFile);
+        form.append("text", document.getElementById("text").value);
+        form.append("source", source);
+        form.append("target", target);
+        form.append("columns", document.getElementById("csvColumns").value);
+        form.append("sheet_name", document.getElementById("sheetName").value);
+        response = await fetch("jobs/translate-file", {method: "POST", body: form});
+      } else {
+        response = await fetch("jobs/translate", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            q: document.getElementById("text").value,
+            source: source,
+            target: target
+          })
+        });
+      }
       if (!response.ok) {
         const text = await response.text();
         setResult(errorTextFromResponse(text));
@@ -765,6 +1183,7 @@
       }
       const data = await response.json();
       activeJobId = data.job_id;
+      loadQueue();
       await pollJob(data.job_id);
     }
 
@@ -781,7 +1200,7 @@
     async function postPdfJob() {
       const file = document.getElementById("pdf").files[0];
       if (!file) {
-        setResult("Select a PDF first.");
+        setResult(t("selectPdfFirst"));
         return;
       }
       const source = document.getElementById("source").value;
@@ -797,7 +1216,7 @@
       form.append("target", target);
       form.append("page_range", document.getElementById("pageRange").value);
       setResult("");
-      showProgress("queued", 0, "Uploading PDF...");
+      showProgress("queued", 0, t("uploadingPdf"));
       const response = await fetch("jobs/translate-pdf", {method: "POST", body: form});
       if (!response.ok) {
         const text = await response.text();
@@ -807,19 +1226,14 @@
       }
       const data = await response.json();
       activeJobId = data.job_id;
+      loadQueue();
       await pollJob(data.job_id);
     }
 
     async function controlActiveJob(action) {
       if (!activeJobId) return;
-      const response = await fetch("jobs/" + activeJobId + "/" + action, {method: "POST"});
-      if (!response.ok) {
-        const text = await response.text();
-        setResult(errorTextFromResponse(text));
-        return;
-      }
-      const job = await response.json();
-      updateProgress(job);
+      const job = await controlJob(activeJobId, action);
+      if (job) updateProgress(job);
     }
 
     function formatBytes(bytes) {
@@ -845,7 +1259,7 @@
       const history = document.getElementById("history");
       history.innerHTML = "";
       if (!data.items.length) {
-        history.textContent = "No saved translations yet.";
+        history.textContent = t("noHistory");
         return;
       }
       for (const item of data.items) {
@@ -860,16 +1274,46 @@
         const meta = document.createElement("div");
         meta.className = "history-meta";
         meta.textContent = item.source + " -> " + item.target + " | " + formatBytes(item.size_bytes) + " | " + item.created_at;
+        const format = document.createElement("select");
+        format.className = "history-format";
+        format.title = "Select the history download format.";
+        const historyFormats = ["md", "txt", "pdf"];
+        if (item.has_source_file && item.source_extension) {
+          historyFormats.push("original");
+        }
+        for (const optionFormat of historyFormats) {
+          const option = document.createElement("option");
+          option.value = optionFormat;
+          option.textContent = optionFormat === "original"
+            ? t("formatOriginal") + " (." + item.source_extension + ")"
+            : t(outputFormatKeys[optionFormat]);
+          format.appendChild(option);
+        }
+        const download = document.createElement("a");
+        download.className = "history-download secondary-link";
+        download.href = "history/" + item.id;
+        download.textContent = t("download");
+        download.download = item.filename;
+        download.title = "Download this history item.";
+        format.addEventListener("change", () => {
+          download.href = "history/" + item.id + "/export?format=" + encodeURIComponent(format.value);
+          download.download = "";
+        });
         const remove = document.createElement("button");
         remove.type = "button";
         remove.className = "secondary history-delete";
-        remove.textContent = "Delete";
+        remove.textContent = t("delete");
         remove.title = "Delete this history item.";
         remove.addEventListener("click", () => deleteHistoryItem(item.id));
         main.appendChild(link);
         main.appendChild(meta);
+        const actions = document.createElement("div");
+        actions.className = "history-actions";
+        actions.appendChild(format);
+        actions.appendChild(download);
+        actions.appendChild(remove);
         row.appendChild(main);
-        row.appendChild(remove);
+        row.appendChild(actions);
         history.appendChild(row);
       }
     }
@@ -878,6 +1322,7 @@
     document.getElementById("resumeJob").addEventListener("click", () => controlActiveJob("resume"));
     document.getElementById("stopJob").addEventListener("click", () => controlActiveJob("cancel"));
 
+    setupUiLanguagePicker();
     loadLanguages().catch((error) => {
       setResult(error.toString());
     });
@@ -887,5 +1332,10 @@
     loadHistory().catch((error) => {
       document.getElementById("history").textContent = error.toString();
     });
+    loadQueue().catch(() => {});
+    setInterval(() => {
+      loadQueue().catch(() => {});
+    }, 3000);
     setInputTab("textarea");
+    applyUiLanguage();
     syncOverlayControls();

@@ -38,7 +38,7 @@ services:
       - history:/data/history
     environment:
       HF_HOME: /cache/huggingface
-      NLLB_DEVICE: cuda
+      LINGUMACHINA_DEVICE: cuda
     networks:
       - proxy-net
     deploy:
