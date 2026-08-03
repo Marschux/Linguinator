@@ -5,9 +5,9 @@ Local document translation workbench powered by Meta NLLB.
 ## Start
 
 ```bash
-cp .env.example .env
+cp docker/.env.example .env
 docker network create proxy-net
-docker compose up -d --build
+docker compose -f docker/compose.yml up -d --build
 ```
 
 Open:
@@ -49,10 +49,10 @@ For supported file inputs, `Original Format` is selected as the default download
 
 ## Environment
 
-Copy `.env.example` to `.env` before starting the container. Docker Compose reads this file automatically.
+Copy `docker/.env.example` to `.env` in the repo root before starting the container. Docker Compose reads this file automatically.
 
 ```bash
-cp .env.example .env
+cp docker/.env.example .env
 ```
 
 The `.env` file is grouped by topic:
@@ -92,7 +92,7 @@ Queue worker count defaults to one because multiple simultaneous model jobs can 
 
 - Default port: `5051`
 - HTTPS is best terminated by Caddy, Traefik, Nginx, or another reverse proxy.
-- GPU test profile: `docker compose --profile gpu up -d lingumachina-gpu`
+- GPU test profile: `docker compose -f docker/compose.yml --profile gpu up -d lingumachina-gpu`
 - OCR is installed by default in the container image; keep the service image current and restart after updates.
 - Docker image: `registry.gitlab.com/marschu/lingumachina:latest`
 

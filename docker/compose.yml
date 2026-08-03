@@ -2,10 +2,11 @@ services:
   lingumachina:
     image: registry.gitlab.com/marschu/lingumachina:latest
     build:
-      context: .
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: lingumachina
     restart: unless-stopped
-    env_file: .env
+    env_file: ../.env
     ports:
       - "5051:5051"
     volumes:
@@ -31,10 +32,11 @@ services:
     profiles: ["gpu"]
     image: registry.gitlab.com/marschu/lingumachina:latest
     build:
-      context: .
+      context: ..
+      dockerfile: docker/Dockerfile
     container_name: lingumachina-gpu
     restart: unless-stopped
-    env_file: .env
+    env_file: ../.env
     ports:
       - "5052:5051"
     volumes:
