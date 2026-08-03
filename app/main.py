@@ -1,4 +1,4 @@
-import base64
+# ... existing imports and setup code ...
 import gc
 import os
 import re
@@ -963,7 +963,14 @@ def parse_page_range(page_range: str, total_pages: int) -> List[int]:
 def ensure_ocr_tools():
     missing = [tool for tool in ("pdftoppm", "tesseract") if not shutil.which(tool)]
     if missing:
-        raise HTTPException(status_code=500, detail="OCR tools missing in image: " + ", ".join(missing))
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "OCR tools are unavailable in this container: "
+                + ", ".join(missing)
+                + ". Rebuild or restart from a current image that includes the OCR binaries."
+            ),
+        )
 
 
 def ocr_pdf_page(content: bytes, page_number: int) -> str:
@@ -1002,6 +1009,7 @@ def extract_pdf_markdown_from_bytes(
     content: bytes,
     content_type: str = "application/pdf",
     page_range: str = "",
+    use_ocr: bool = False,
 ) -> str:
     if content_type not in ("application/pdf", "application/octet-stream"):
         raise HTTPException(status_code=400, detail="Only PDF uploads are supported")
@@ -1025,14 +1033,14 @@ def extract_pdf_markdown_from_bytes(
         text = page.extract_text() or ""
         text = re.sub(r"[ \t]+\n", "\n", text).strip()
         needs_ocr = not text or len(text) < PDF_LOW_TEXT_CHARS
-        if needs_ocr and OCR_ENABLED:
+        if needs_ocr and use_ocr:
             ocr_text = ocr_pdf_page(content, index)
             if ocr_text:
                 text = ocr_text
 
         if text:
             pages_with_text += 1
-            if len(text) < PDF_LOW_TEXT_CHARS and not OCR_ENABLED:
+            if len(text) < PDF_LOW_TEXT_CHARS and not use_ocr:
                 text += "\n\n> Warning: This page has very little extractable text and may need OCR."
             pages.append(f"# Page {index}\n\n{text}".strip())
         else:
@@ -1042,8 +1050,8 @@ def extract_pdf_markdown_from_bytes(
     if not pages_with_text:
         ocr_detail = (
             f"OCR is configured for {OCR_LANGUAGE}, but no readable text was produced."
-            if OCR_ENABLED
-            else "OCR is disabled. Set LINGUMACHINA_ENABLE_OCR=true to use OCR fallback."
+            if use_ocr
+            else "OCR is disabled for this request. Enable the OCR checkbox in the web interface to use OCR fallback."
         )
         raise HTTPException(
             status_code=422,
@@ -1874,9 +1882,9 @@ def export_xliff_with_translated_text(content: bytes, translated_text: str) -> b
     return ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
-async def extract_pdf_markdown(file: UploadFile, page_range: str = "") -> str:
+async def extract_pdf_markdown(file: UploadFile, page_range: str = "", use_ocr: bool = False) -> str:
     content = await read_upload_bytes(file, "PDF")
-    return extract_pdf_markdown_from_bytes(content, file.content_type or "application/pdf", page_range)
+    return extract_pdf_markdown_from_bytes(content, file.content_type or "application/pdf", page_range, use_ocr=use_ocr)
 
 
 def run_text_job(
@@ -1946,10 +1954,11 @@ def run_pdf_translate_job(
     target: str,
     filename: str,
     page_range: str = "",
+    use_ocr: bool = False,
 ):
     try:
         update_job(job_id, status="running", message="Extracting PDF", started_at=time.time())
-        markdown = extract_pdf_markdown_from_bytes(content, content_type, page_range)
+        markdown = extract_pdf_markdown_from_bytes(content, content_type, page_range, use_ocr=use_ocr)
         sections = pdf_sections(markdown)
         planned = [(page_number, split_long_text(page_text, MAX_CHARS)) for page_number, page_text in sections]
         total = sum(len(chunks) for _, chunks in planned)
@@ -1985,6 +1994,7 @@ def run_pdf_translate_job(
 
 @app.get("/health")
 def health():
+    ocr_available = bool(shutil.which("pdftoppm") and shutil.which("tesseract"))
     return {
         "status": "ok",
         "model": MODEL_ID,
@@ -1992,6 +2002,7 @@ def health():
         "max_chars": MAX_CHARS,
         "max_file_mb": MAX_FILE_MB,
         "ocr_enabled": OCR_ENABLED,
+        "ocr_available": ocr_available,
         "ocr_language": OCR_LANGUAGE,
         "model_idle_unload_enabled": MODEL_IDLE_UNLOAD_ENABLED,
         "model_idle_seconds": MODEL_IDLE_SECONDS,
@@ -2080,6 +2091,7 @@ async def start_translate_pdf_job(
     source: str = Form(DEFAULT_SOURCE),
     target: str = Form(DEFAULT_TARGET),
     page_range: str = Form(""),
+    use_ocr: bool = Form(False),
 ):
     ensure_queue_workers()
     content = await read_upload_bytes(file, "PDF")
@@ -2094,11 +2106,12 @@ async def start_translate_pdf_job(
         content_type=file.content_type or "application/pdf",
         filename=filename,
         page_range=page_range,
+        use_ocr=use_ocr,
     )
     register_job_runner(
         job_id,
         run_pdf_translate_job,
-        (job_id, content, file.content_type or "application/pdf", source, target, filename, page_range),
+        (job_id, content, file.content_type or "application/pdf", source, target, filename, page_range, use_ocr),
     )
     return {"job_id": job_id}
 
@@ -2379,8 +2392,8 @@ def translate(request: TranslateRequest):
 
 
 @app.post("/extract-pdf", response_class=PlainTextResponse)
-async def extract_pdf(file: UploadFile = File(...), page_range: str = Form("")):
-    return await extract_pdf_markdown(file, page_range)
+async def extract_pdf(file: UploadFile = File(...), page_range: str = Form(""), use_ocr: bool = Form(False)):
+    return await extract_pdf_markdown(file, page_range, use_ocr)
 
 
 @app.post("/extract-docx", response_class=PlainTextResponse)
@@ -2459,8 +2472,9 @@ async def translate_pdf(
     source: str = Form(DEFAULT_SOURCE),
     target: str = Form(DEFAULT_TARGET),
     page_range: str = Form(""),
+    use_ocr: bool = Form(False),
 ):
-    markdown = await extract_pdf_markdown(file, page_range)
+    markdown = await extract_pdf_markdown(file, page_range, use_ocr)
     translated = []
     for section in re.split(r"(?m)^# Page ", markdown):
         section = section.strip()

@@ -413,6 +413,17 @@ class MainTests(unittest.TestCase):
         self.assertIn('historyFormats.push("original")', script)
         self.assertIn("lingumachina_ui_language", script)
 
+    def test_frontend_script_starts_with_valid_javascript(self):
+        script = (Path(main.APP_DIR) / "static" / "app.js").read_text(encoding="utf-8")
+
+        self.assertTrue(script.lstrip().startswith("let languageData = null;"))
+        self.assertNotIn("gerade    let languageData = null;", script)
+
+    def test_frontend_language_flags_fall_back_to_globe_for_unknown_languages(self):
+        script = (Path(main.APP_DIR) / "static" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn('if (!countryCode || countryCode === "UN") return "🌐";', script)
+
     def test_translate_one_uses_lazy_loaded_torch_module(self):
         with patch.object(main, "load_model", return_value=(FakeTokenizer(), FakeModel(), "cpu", FakeTorch())):
             translated = main.translate_one("Hello", "eng_Latn", "deu_Latn")
@@ -509,15 +520,34 @@ class MainTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 422)
         self.assertIn("OCR is disabled", raised.exception.detail)
 
+    def test_ensure_ocr_tools_reports_rebuild_hint_when_tools_are_missing(self):
+        with patch.object(main.shutil, "which", side_effect=lambda tool: None):
+            with self.assertRaises(HTTPException) as raised:
+                main.ensure_ocr_tools()
+
+        self.assertEqual(raised.exception.status_code, 500)
+        self.assertIn("Rebuild the image and restart the container", raised.exception.detail)
+
     def test_pdf_extraction_uses_ocr_for_empty_pages_when_enabled(self):
         reader = FakeReader([FakePage("")])
 
         with patch.object(main, "PdfReader", return_value=reader):
-            with patch.object(main, "OCR_ENABLED", True):
+            with patch.object(main, "OCR_ENABLED", False):
                 with patch.object(main, "ocr_pdf_page", return_value="OCR text"):
-                    markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
+                    markdown = main.extract_pdf_markdown_from_bytes(b"%PDF", use_ocr=True)
 
         self.assertIn("OCR text", markdown)
+
+    def test_pdf_extraction_respects_explicit_use_ocr_flag(self):
+        reader = FakeReader([FakePage("")])
+
+        with patch.object(main, "PdfReader", return_value=reader):
+            with patch.object(main, "OCR_ENABLED", False):
+                with patch.object(main, "ocr_pdf_page", return_value="OCR text") as mocked_ocr:
+                    markdown = main.extract_pdf_markdown_from_bytes(b"%PDF", use_ocr=True)
+
+        self.assertIn("OCR text", markdown)
+        mocked_ocr.assert_called_once_with(b"%PDF", 1)
 
     def test_create_text_pdf_returns_pdf_document(self):
         content = main.create_text_pdf("Translated text\n\nSecond paragraph")

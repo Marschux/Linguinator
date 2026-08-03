@@ -5,11 +5,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-ARG INSTALL_OCR=false
-
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates \
-    && if [ "$INSTALL_OCR" = "true" ]; then apt-get install -y --no-install-recommends poppler-utils tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng; fi \
+    && apt-get install -y --no-install-recommends ca-certificates poppler-utils tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

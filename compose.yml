@@ -3,8 +3,6 @@ services:
     image: registry.gitlab.com/marschu/lingumachina:latest
     build:
       context: .
-      args:
-        INSTALL_OCR: ${LINGUMACHINA_INSTALL_OCR:-false}
     container_name: lingumachina
     restart: unless-stopped
     env_file: .env
@@ -34,8 +32,6 @@ services:
     image: registry.gitlab.com/marschu/lingumachina:latest
     build:
       context: .
-      args:
-        INSTALL_OCR: ${LINGUMACHINA_INSTALL_OCR:-false}
     container_name: lingumachina-gpu
     restart: unless-stopped
     env_file: .env

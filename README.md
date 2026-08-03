@@ -71,8 +71,7 @@ The `.env` file is grouped by topic:
 | `LINGUMACHINA_JOBS_DIR` | `/data/history/jobs` | Directory for persisted queue metadata and pending PDF payloads. |
 | `LINGUMACHINA_DEFAULT_SOURCE` | `eng_Latn` | Default source language code. |
 | `LINGUMACHINA_DEFAULT_TARGET` | `deu_Latn` | Default target language code. |
-| `LINGUMACHINA_INSTALL_OCR` | `false` | Build-time switch for installing `pdftoppm` and Tesseract OCR tools into a locally built image. |
-| `LINGUMACHINA_ENABLE_OCR` | `false` | Enables OCR fallback for scanned PDFs when the image dependencies are installed. |
+| `LINGUMACHINA_ENABLE_OCR` | `false` | Enables OCR fallback for scanned PDFs when the image dependencies are available. |
 | `LINGUMACHINA_OCR_LANGUAGE` | `deu+eng` | OCR language setting passed to Tesseract. |
 | `LINGUMACHINA_AUTH_ENABLED` | `false` | Enables HTTP Basic Auth for the UI and API. `/health` stays public for health checks. |
 | `LINGUMACHINA_AUTH_USERNAME` | `admin` | Basic Auth username. |
@@ -94,7 +93,7 @@ Queue worker count defaults to one because multiple simultaneous model jobs can 
 - Default port: `5051`
 - HTTPS is best terminated by Caddy, Traefik, Nginx, or another reverse proxy.
 - GPU test profile: `docker compose --profile gpu up -d lingumachina-gpu`
-- OCR build: set `LINGUMACHINA_INSTALL_OCR=true`, then run `docker compose build lingumachina` and `docker compose up -d lingumachina`
+- OCR is installed by default in the container image; keep the service image current and restart after updates.
 - Docker image: `registry.gitlab.com/marschu/lingumachina:latest`
 
 ## License

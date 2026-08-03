@@ -1,4 +1,4 @@
-gerade    let languageData = null;
+let languageData = null;
     let maxChars = 0;
     let activeJobId = null;
     let currentInputTab = "textarea";
@@ -6,7 +6,7 @@ gerade    let languageData = null;
     let currentOriginalExtension = "txt";
     let fullResultText = "";
     let currentUiLanguage = localStorage.getItem("lingumachina_ui_language") || "en";
-    let ocrEnabled = false;
+    let ocrAvailable = false;
     let ocrLanguage = "";
     const baseTitle = document.title || "Lingumachina";
     const PREVIEW_MAX_CHARS = 12000;
@@ -59,7 +59,9 @@ gerade    let languageData = null;
         startingChunks: "Starting {count} chunks...",
         uploadingPdf: "Uploading PDF...",
         ocrConfigured: "OCR configured: {language}",
+        ocrEnabled: "OCR enabled for this request",
         ocrDisabled: "OCR disabled",
+        ocrUnavailable: "OCR unavailable in this container",
         previewExcerptTruncated: "Preview shows only a translated excerpt. The download contains the full export.",
         previewExcerpt: "Preview shows a translated excerpt for this file type. The download contains the full export.",
         previewTruncated: "Preview truncated. The download contains the full export.",
@@ -113,7 +115,9 @@ gerade    let languageData = null;
         startingChunks: "Starte {count} Chunks...",
         uploadingPdf: "Lade PDF hoch...",
         ocrConfigured: "OCR konfiguriert: {language}",
+        ocrEnabled: "OCR fuer diesen Auftrag aktiviert",
         ocrDisabled: "OCR deaktiviert",
+        ocrUnavailable: "OCR in diesem Container nicht verfuegbar",
         previewExcerptTruncated: "Die Vorschau zeigt nur einen uebersetzten Auszug. Der Download enthaelt den kompletten Export.",
         previewExcerpt: "Die Vorschau zeigt fuer diesen Dateityp einen uebersetzten Auszug. Der Download enthaelt den kompletten Export.",
         previewTruncated: "Vorschau gekuerzt. Der Download enthaelt den kompletten Export.",
@@ -167,7 +171,9 @@ gerade    let languageData = null;
         startingChunks: "Iniciando {count} fragmentos...",
         uploadingPdf: "Subiendo PDF...",
         ocrConfigured: "OCR configurado: {language}",
+        ocrEnabled: "OCR activado para esta solicitud",
         ocrDisabled: "OCR desactivado",
+        ocrUnavailable: "OCR no disponible en este contenedor",
         previewExcerptTruncated: "La vista previa muestra solo un extracto traducido. La descarga contiene la exportacion completa.",
         previewExcerpt: "La vista previa muestra un extracto traducido para este tipo de archivo. La descarga contiene la exportacion completa.",
         previewTruncated: "Vista previa recortada. La descarga contiene la exportacion completa.",
@@ -221,7 +227,9 @@ gerade    let languageData = null;
         startingChunks: "Demarrage de {count} segments...",
         uploadingPdf: "Televersement du PDF...",
         ocrConfigured: "OCR configure: {language}",
+        ocrEnabled: "OCR active pour cette demande",
         ocrDisabled: "OCR desactive",
+        ocrUnavailable: "OCR indisponible dans ce conteneur",
         previewExcerptTruncated: "L'apercu affiche seulement un extrait traduit. Le telechargement contient l'export complet.",
         previewExcerpt: "L'apercu affiche un extrait traduit pour ce type de fichier. Le telechargement contient l'export complet.",
         previewTruncated: "Apercu tronque. Le telechargement contient l'export complet.",
@@ -485,7 +493,7 @@ gerade    let languageData = null;
     }
 
     function countryFlag(countryCode) {
-      if (!countryCode || countryCode === "UN") return "";
+      if (!countryCode || countryCode === "UN") return "🌐";
       return countryCode
         .toUpperCase()
         .replace(/./g, (char) => String.fromCodePoint(127397 + char.charCodeAt(0)));
@@ -580,13 +588,21 @@ gerade    let languageData = null;
       return languageData.languages.find((language) => language.code === code);
     }
 
+    function languageCodeOrFallback(code, fallback) {
+      if (typeof code === "string" && code.trim()) {
+        return code;
+      }
+      return fallback || "eng_Latn";
+    }
+
     function setPickerValue(id, code) {
       const select = document.getElementById(id);
       const button = document.getElementById(id + "Button");
-      select.value = code;
-      button.textContent = formatLanguageLabel(code);
+      const languageCode = languageCodeOrFallback(code, "eng_Latn");
+      select.value = languageCode;
+      button.textContent = formatLanguageLabel(languageCode);
       document.querySelectorAll("#" + id + "Menu .language-option").forEach((option) => {
-        option.classList.toggle("active", option.dataset.code === code);
+        option.classList.toggle("active", option.dataset.code === languageCode);
       });
       closeLanguageMenus();
     }
@@ -663,8 +679,13 @@ gerade    let languageData = null;
         throw new Error("Could not load languages: " + response.status);
       }
       languageData = await response.json();
-      renderSelect("source", getRecent("source")[0] || languageData.source_default);
-      renderSelect("target", getRecent("target")[0] || languageData.target_default);
+      if (!languageData || !Array.isArray(languageData.languages) || !languageData.languages.length) {
+        throw new Error("Language response was empty.");
+      }
+      const sourceFallback = languageCodeOrFallback(languageData.source_default, "eng_Latn");
+      const targetFallback = languageCodeOrFallback(languageData.target_default, "deu_Latn");
+      renderSelect("source", languageCodeOrFallback(getRecent("source")[0], sourceFallback));
+      renderSelect("target", languageCodeOrFallback(getRecent("target")[0], targetFallback));
     }
 
     setupLanguagePicker("source");
@@ -1024,19 +1045,24 @@ gerade    let languageData = null;
       const data = await response.json();
       maxChars = data.max_chars || 0;
       const ocr = document.getElementById("useOcr");
-      ocrEnabled = Boolean(data.ocr_enabled);
+      ocrAvailable = Boolean(data.ocr_available);
       ocrLanguage = data.ocr_language || "";
-      ocr.checked = ocrEnabled;
-      ocr.disabled = true;
+      ocr.checked = false;
+      ocr.disabled = !ocrAvailable;
       updateOcrLabel();
       updateCounter();
     }
 
     function updateOcrLabel() {
+      const ocr = document.getElementById("useOcr");
       const ocrLabel = document.getElementById("ocrLabel");
       if (!ocrLabel) return;
-      ocrLabel.textContent = ocrEnabled
-        ? t("ocrConfigured", {language: ocrLanguage})
+      if (!ocrAvailable) {
+        ocrLabel.textContent = t("ocrUnavailable");
+        return;
+      }
+      ocrLabel.textContent = ocr.checked
+        ? t("ocrEnabled")
         : t("ocrDisabled");
     }
 
@@ -1049,6 +1075,7 @@ gerade    let languageData = null;
       counter.classList.toggle("over", maxChars > 0 && length > maxChars);
     }
 
+    document.getElementById("useOcr").addEventListener("change", updateOcrLabel);
     document.getElementById("text").addEventListener("input", updateCounter);
 
     function formatEta(seconds) {
@@ -1269,6 +1296,7 @@ gerade    let languageData = null;
       form.append("source", source);
       form.append("target", target);
       form.append("page_range", document.getElementById("pageRange").value);
+      form.append("use_ocr", document.getElementById("useOcr").checked ? "true" : "false");
       setResult("");
       showProgress("queued", 0, t("uploadingPdf"));
       const response = await fetch("jobs/translate-pdf", {method: "POST", body: form});

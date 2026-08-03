@@ -89,8 +89,8 @@
       <label for="pdf">PDF</label>
       <input id="pdf" type="file" accept="application/pdf" title="Select the PDF to translate.">
       <input id="pageRange" type="text" placeholder="Pages, e.g. 1-3,5" title="Optional page range, e.g. 1-3,5. Leave empty to translate all pages.">
-      <div class="check-row" title="OCR is a server setting and helps with scanned PDFs without embedded text.">
-        <input id="useOcr" type="checkbox" disabled>
+      <div class="check-row" title="Enable OCR for this PDF job if the OCR tools are available in the container image.">
+        <input id="useOcr" type="checkbox">
         <label id="ocrLabel" for="useOcr">OCR disabled</label>
       </div>
       <div class="check-row" title="Keep the original PDF as background and place translated text on top.">
