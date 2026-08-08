@@ -299,6 +299,7 @@
     }
     .row { display: grid; gap: 1rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
+    .actions-right { justify-content: flex-end; }
     .section { margin-top: 1.4rem; }
     .hidden { display: none; }
     .tabs {
