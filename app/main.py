@@ -36,7 +36,7 @@ def env_value(name: str, default: str) -> str:
 FALLBACK_MODEL_ID = env_value("LINGUINATOR_MODEL", "Helsinki-NLP/opus-mt-tc-bible-big-mul-mul")
 MODEL_CACHE_SIZE = max(1, int(env_value("LINGUINATOR_MODEL_CACHE_SIZE", "1")))
 DEVICE_SETTING = env_value("LINGUINATOR_DEVICE", "cpu")
-MAX_CHARS = int(env_value("LINGUINATOR_MAX_CHARS", "6000"))
+MAX_CHARS = int(env_value("LINGUINATOR_MAX_CHARS", "2000"))
 MAX_FILE_MB = int(env_value("LINGUINATOR_MAX_FILE_MB", "50"))
 MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
 MAX_ZIP_UNCOMPRESSED_BYTES = MAX_FILE_BYTES * 10
@@ -342,14 +342,23 @@ def model_language_code(model_id: str, code: str) -> str:
     return code
 
 
+# Hard cap on input tokens, matching the smallest position-embedding size across the OPUS-MT
+# models in use (512 for the bilingual pair models). Several of their tokenizer configs leave
+# model_max_length unset, which makes truncation=True alone a no-op and overruns the model's
+# position embeddings with an "index out of range in self" crash instead of just truncating.
+# MAX_CHARS keeps ordinary chunks well under this already; this is the backstop for the rest
+# (a single very long sentence, or a script with a low chars-per-token ratio).
+TRANSLATE_MAX_TOKENS = 512
+
+
 def prepare_translation(
     tokenizer, model_id: str, text: str, source: str, target: str
 ) -> Tuple[Any, Dict[str, Any]]:
     """Tokenizer inputs and model.generate() kwargs for this model's language convention."""
     if model_family(model_id) == "prefix":
-        prefixed_text = f"{model_language_code(model_id, target)} {text}"
-        return tokenizer(prefixed_text, return_tensors="pt", truncation=True), {}
-    return tokenizer(text, return_tensors="pt", truncation=True), {}
+        text = f"{model_language_code(model_id, target)} {text}"
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=TRANSLATE_MAX_TOKENS)
+    return inputs, {}
 
 
 def language_codes():
@@ -371,7 +380,7 @@ def translate_one(text: str, source: str, target: str) -> str:
             generated = model.generate(
                 **inputs,
                 **generate_kwargs,
-                max_new_tokens=1024,
+                max_new_tokens=TRANSLATE_MAX_TOKENS,
                 num_beams=4,
             )
         return tokenizer.batch_decode(generated, skip_special_tokens=True)[0]

@@ -65,7 +65,7 @@ The `.env` file is grouped by topic:
 | `LINGUINATOR_MODEL_CACHE_SIZE` | `1` | How many models (dedicated pair models plus the fallback) stay loaded in memory at once. Each entry costs its own RAM; raise only if RAM allows and pairs alternate often. |
 | `LINGUINATOR_LANGUAGES` | built-in core list | Overrides the language picker entirely. Comma-separated `xx:xxx_Scr` entries, e.g. `en:eng_Latn,de:deu_Latn`. |
 | `LINGUINATOR_DEVICE` | `cpu` | Runtime device. Use `cuda` with the GPU compose profile and a CUDA-capable host. |
-| `LINGUINATOR_MAX_CHARS` | `6000` | Maximum characters per translation chunk. Longer input is split into multiple chunks. |
+| `LINGUINATOR_MAX_CHARS` | `2000` | Maximum characters per translation chunk. Longer input is split into multiple chunks. Sized for OPUS-MT's ~512-token limit; a hard `TRANSLATE_MAX_TOKENS` cap in the code truncates the rare oversized chunk instead of crashing. |
 | `LINGUINATOR_MAX_FILE_MB` | `50` | Maximum upload size in megabytes. |
 | `LINGUINATOR_CPU_THREADS` | `0` | Optional Torch, OMP, and MKL thread count for CPU translation. `0` keeps library defaults. |
 | `LINGUINATOR_CPU_INTEROP_THREADS` | `0` | Optional Torch inter-op thread count. `0` keeps library defaults. |

@@ -47,8 +47,8 @@ class FakeTokenizer:
     def __init__(self):
         self.src_lang = None
 
-    def __call__(self, text, return_tensors, truncation):
-        return FakeInputs({"text": text, "return_tensors": return_tensors, "truncation": truncation})
+    def __call__(self, text, return_tensors, truncation, max_length=None):
+        return FakeInputs({"text": text, "return_tensors": return_tensors, "truncation": truncation, "max_length": max_length})
 
     def convert_tokens_to_ids(self, target):
         return 42
@@ -452,6 +452,7 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(inputs["text"], ">>deu<< Hello")
         self.assertEqual(generate_kwargs, {})
+        self.assertEqual(inputs["max_length"], main.TRANSLATE_MAX_TOKENS)
 
     def test_prepare_translation_plain_sends_text_unchanged(self):
         tokenizer = FakeTokenizer()
@@ -462,6 +463,19 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(inputs["text"], "Hello")
         self.assertEqual(generate_kwargs, {})
+
+    def test_prepare_translation_caps_input_length_even_when_tokenizer_ignores_truncation(self):
+        # opus-mt-en-de/de-en leave model_max_length unset in their tokenizer config, which
+        # makes truncation=True alone a no-op; prepare_translation must cap explicitly or a
+        # long paragraph overruns the model's position embeddings ("index out of range in self").
+        tokenizer = FakeTokenizer()
+
+        inputs, _ = main.prepare_translation(
+            tokenizer, "Helsinki-NLP/opus-mt-en-de", "Hello " * 2000, "eng_Latn", "deu_Latn"
+        )
+
+        self.assertEqual(inputs["max_length"], main.TRANSLATE_MAX_TOKENS)
+        self.assertTrue(inputs["truncation"])
 
     def test_iso_639_1_looks_up_core_languages(self):
         self.assertEqual(main.iso_639_1("deu_Latn"), "de")
