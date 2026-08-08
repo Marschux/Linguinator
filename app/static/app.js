@@ -13,7 +13,7 @@ let languageData = null;
     const HISTORY_PAGE_SIZE = 5;
     const baseTitle = document.title || "Linguinator";
     const originalExportExtensions = ["docx", "odt", "pptx", "csv", "xlsx", "html", "htm", "srt", "vtt", "json", "yaml", "yml", "po", "xlf", "xliff"];
-    const outputFormatKeys = {txt: "formatTxt", md: "formatMarkdown", pdf: "formatPdf", original: "formatOriginal"};
+    const outputFormatKeys = {txt: "formatTxt", md: "formatMarkdown", pdf: "formatPdf", doc: "formatDoc", original: "formatOriginal"};
     const uiText = {
       en: {
         uiLanguage: "UI Language",
@@ -65,6 +65,7 @@ let languageData = null;
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
         formatPdf: "PDF",
+        formatDoc: "Doc",
         formatOriginal: "Original Format",
         modelDedicated: "Dedicated model for this language pair.",
         modelFallback: "No dedicated model for this pair, using the multilingual fallback."
@@ -119,6 +120,7 @@ let languageData = null;
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
         formatPdf: "PDF",
+        formatDoc: "Doc",
         formatOriginal: "Originalformat",
         modelDedicated: "Eigenes Modell fuer dieses Sprachpaar.",
         modelFallback: "Kein eigenes Modell fuer dieses Paar, nutzt den mehrsprachigen Fallback."
@@ -173,6 +175,7 @@ let languageData = null;
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
         formatPdf: "PDF",
+        formatDoc: "Doc",
         formatOriginal: "Formato original",
         modelDedicated: "Modelo dedicado para este par de idiomas.",
         modelFallback: "Sin modelo dedicado para este par, se usa el alternativo multilingue."
@@ -227,6 +230,7 @@ let languageData = null;
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
         formatPdf: "PDF",
+        formatDoc: "Doc",
         formatOriginal: "Format original",
         modelDedicated: "Modele dedie pour cette paire de langues.",
         modelFallback: "Pas de modele dedie pour cette paire, utilise le modele multilingue."
@@ -802,16 +806,24 @@ let languageData = null;
       clearProgress();
     }
 
+    const serverGeneratedFormats = {
+      pdf: {contentType: "application/pdf", endpoint: "export-pdf"},
+      doc: {
+        contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        endpoint: "export-doc",
+      },
+    };
+
     function outputFormatDetails(format) {
       if (format === "original") {
         if (originalExportExtensions.includes(currentOriginalExtension)) {
           return {extension: currentOriginalExtension, originalFile: true};
         }
-        if (currentSourceFormat === "pdf") return {extension: "pdf", contentType: "application/pdf", pdf: true};
+        if (currentSourceFormat === "pdf") return {extension: "pdf", ...serverGeneratedFormats.pdf};
         if (currentSourceFormat === "md") return {extension: "md", contentType: "text/markdown"};
         return {extension: "txt", contentType: "text/plain"};
       }
-      if (format === "pdf") return {extension: "pdf", contentType: "application/pdf", pdf: true};
+      if (format in serverGeneratedFormats) return {extension: format, ...serverGeneratedFormats[format]};
       if (format === "md") return {extension: "md", contentType: "text/markdown"};
       return {extension: "txt", contentType: "text/plain"};
     }
@@ -824,7 +836,7 @@ let languageData = null;
 
     function updateDownloadButtons() {
       const hasText = Boolean(fullResultText.trim());
-      const formats = {txt: true, md: true, pdf: true, original: canUseOriginalFormat()};
+      const formats = {txt: true, md: true, pdf: true, doc: true, original: canUseOriginalFormat()};
       for (const format of Object.keys(formats)) {
         const button = document.getElementById("download" + format.charAt(0).toUpperCase() + format.slice(1));
         button.classList.toggle("hidden", !formats[format]);
@@ -843,12 +855,12 @@ let languageData = null;
         await downloadOriginalFile(text, details);
         return;
       }
-      if (details.pdf) {
-        if (currentSourceFormat === "pdf" && lastCompletedJob && lastCompletedJob.kind === "translate-pdf-layout" && lastCompletedJob.history_id) {
+      if (details.endpoint) {
+        if (format === "pdf" && currentSourceFormat === "pdf" && lastCompletedJob && lastCompletedJob.kind === "translate-pdf-layout" && lastCompletedJob.history_id) {
           window.location.href = "history/" + lastCompletedJob.history_id + "/export?format=original";
           return;
         }
-        const response = await fetch("export-pdf", {
+        const response = await fetch(details.endpoint, {
           method: "POST",
           headers: {"Content-Type": "application/json"},
           body: JSON.stringify({text})
@@ -1417,7 +1429,7 @@ let languageData = null;
         const format = document.createElement("select");
         format.className = "history-format";
         format.title = "Select the history download format.";
-        const historyFormats = ["md", "txt", "pdf"];
+        const historyFormats = ["md", "txt", "pdf", "doc"];
         if (item.has_source_file && item.source_extension) {
           historyFormats.push("original");
         }

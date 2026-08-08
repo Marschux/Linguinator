@@ -48,7 +48,6 @@ CPU_THREADS = int(env_value("LINGUINATOR_CPU_THREADS", "0"))
 CPU_INTEROP_THREADS = int(env_value("LINGUINATOR_CPU_INTEROP_THREADS", "0"))
 DEFAULT_SOURCE = env_value("LINGUINATOR_DEFAULT_SOURCE", "eng_Latn")
 DEFAULT_TARGET = env_value("LINGUINATOR_DEFAULT_TARGET", "deu_Latn")
-OCR_ENABLED = env_value("LINGUINATOR_ENABLE_OCR", "true").lower() in ("1", "true", "yes", "on")
 OCR_LANGUAGE = env_value("LINGUINATOR_OCR_LANGUAGE", "deu+eng")
 AUTH_ENABLED = env_value("LINGUINATOR_AUTH_ENABLED", "false").lower() in ("1", "true", "yes", "on")
 AUTH_USERNAME = env_value("LINGUINATOR_AUTH_USERNAME", "admin")
@@ -155,6 +154,10 @@ class TranslateRequest(BaseModel):
 
 
 class PdfExportRequest(BaseModel):
+    text: str
+
+
+class DocxExportRequest(BaseModel):
     text: str
 
 
@@ -365,6 +368,14 @@ def language_codes():
     return sorted(CORE_LANGUAGES.values())
 
 
+def normalize_translated_text(text: str) -> str:
+    """OPUS-MT's detokenizer sometimes drops the space between a sentence-ending punctuation
+    mark and the next sentence's capital letter (e.g. "teilen.Wenn" instead of "teilen. Wenn").
+    Put it back; this only touches sentence-end-then-capital, so it never runs into ordinary
+    mid-word text."""
+    return re.sub(r"([.!?])(?=[A-ZÄÖÜ])", r"\1 ", text)
+
+
 def translate_one(text: str, source: str, target: str) -> str:
     if not text:
         return ""
@@ -383,7 +394,7 @@ def translate_one(text: str, source: str, target: str) -> str:
                 max_new_tokens=TRANSLATE_MAX_TOKENS,
                 num_beams=4,
             )
-        return tokenizer.batch_decode(generated, skip_special_tokens=True)[0]
+        return normalize_translated_text(tokenizer.batch_decode(generated, skip_special_tokens=True)[0])
     finally:
         end_model_use()
 
@@ -771,6 +782,60 @@ def create_text_pdf(text: str) -> bytes:
     return create_pdf_from_pages(pdf_document_pages(text))
 
 
+def docx_escape(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def create_text_docx(text: str) -> bytes:
+    """Build a minimal but valid DOCX from plain translated text, for sources (PDF, plain text)
+    that have no original DOCX structure to preserve. Mirrors create_text_pdf's markdown
+    handling: a '#'-prefixed line renders as a bold heading, everything else is its own
+    paragraph (Word wraps long lines itself, unlike the hand-built PDF path)."""
+    paragraphs = []
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    for line in normalized.split("\n"):
+        stripped = line.strip()
+        if not stripped:
+            paragraphs.append("<w:p/>")
+        elif stripped.startswith("#"):
+            heading = docx_escape(stripped.lstrip("#").strip())
+            paragraphs.append(
+                '<w:p><w:pPr><w:spacing w:before="240" w:after="120"/></w:pPr>'
+                f'<w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t xml:space="preserve">{heading}</w:t></w:r></w:p>'
+            )
+        else:
+            paragraphs.append(f'<w:p><w:r><w:t xml:space="preserve">{docx_escape(stripped)}</w:t></w:r></w:p>')
+    body = "".join(paragraphs) or "<w:p/>"
+    document = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body>{body}</w:body></w:document>"
+    )
+    content_types = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+        '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+        '<Default Extension="xml" ContentType="application/xml"/>'
+        '<Override PartName="/word/document.xml" '
+        'ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
+        "</Types>"
+    )
+    package_rels = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        '<Relationship Id="rId1" '
+        'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" '
+        'Target="word/document.xml"/>'
+        "</Relationships>"
+    )
+    output = BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as docx:
+        docx.writestr("[Content_Types].xml", content_types)
+        docx.writestr("_rels/.rels", package_rels)
+        docx.writestr("word/document.xml", document)
+    return output.getvalue()
+
+
 def cleanup_history():
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
     cutoff = time.time() - (HISTORY_DAYS * 86400)
@@ -1071,7 +1136,6 @@ def rebuild_runner_for_job(job: Dict[str, Any]) -> Optional[Tuple[Callable[..., 
             job.get("target", DEFAULT_TARGET),
             job.get("filename", "pdf"),
             job.get("page_range", ""),
-            OCR_ENABLED,
         )
     if job.get("kind") == "translate-pdf-layout":
         payload_path = job.get("payload_path")
@@ -1250,7 +1314,6 @@ def extract_pdf_markdown_from_bytes(
     content: bytes,
     content_type: str = "application/pdf",
     page_range: str = "",
-    use_ocr: bool = False,
 ) -> str:
     if content_type not in ("application/pdf", "application/octet-stream"):
         raise HTTPException(status_code=400, detail="Only PDF uploads are supported")
@@ -1274,29 +1337,23 @@ def extract_pdf_markdown_from_bytes(
         text = page.extract_text() or ""
         text = re.sub(r"[ \t]+\n", "\n", text).strip()
         needs_ocr = not text or len(text) < PDF_LOW_TEXT_CHARS
-        if needs_ocr and use_ocr:
+        if needs_ocr:
             ocr_text = ocr_pdf_page(content, index)
             if ocr_text:
                 text = ocr_text
 
         if text:
             pages_with_text += 1
-            if len(text) < PDF_LOW_TEXT_CHARS and not use_ocr:
-                text += "\n\n> Warning: This page has very little extractable text and may need OCR."
             pages.append(f"# Page {index}\n\n{text}".strip())
         else:
             pages.append(f"# Page {index}\n\n> No extractable text found on this page. It may need OCR.")
 
     markdown = "\n\n".join(pages).strip()
     if not pages_with_text:
-        ocr_detail = (
-            f"OCR is configured for {OCR_LANGUAGE}, but no readable text was produced."
-            if use_ocr
-            else "OCR is disabled for this deployment. Set LINGUINATOR_ENABLE_OCR=true to use OCR fallback."
-        )
         raise HTTPException(
             status_code=422,
-            detail=f"No extractable text found. This PDF may be scanned, image-only, or protected. {ocr_detail}",
+            detail=f"No extractable text found. This PDF may be scanned, image-only, or protected. "
+                   f"OCR is configured for {OCR_LANGUAGE}, but no readable text was produced.",
         )
     return markdown
 
@@ -2410,9 +2467,9 @@ def export_xliff_with_translated_text(content: bytes, translated_text: str) -> b
     return ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
-async def extract_pdf_markdown(file: UploadFile, page_range: str = "", use_ocr: bool = False) -> str:
+async def extract_pdf_markdown(file: UploadFile, page_range: str = "") -> str:
     content = await read_upload_bytes(file, "PDF")
-    return extract_pdf_markdown_from_bytes(content, file.content_type or "application/pdf", page_range, use_ocr=use_ocr)
+    return extract_pdf_markdown_from_bytes(content, file.content_type or "application/pdf", page_range)
 
 
 def run_text_job(
@@ -2482,11 +2539,10 @@ def run_pdf_translate_job(
     target: str,
     filename: str,
     page_range: str = "",
-    use_ocr: bool = False,
 ):
     try:
         update_job(job_id, status="running", message="Extracting PDF", started_at=time.time())
-        markdown = extract_pdf_markdown_from_bytes(content, content_type, page_range, use_ocr=use_ocr)
+        markdown = extract_pdf_markdown_from_bytes(content, content_type, page_range)
         sections = pdf_sections(markdown)
         planned = [(page_number, split_long_text(page_text, MAX_CHARS)) for page_number, page_text in sections]
         total = sum(len(chunks) for _, chunks in planned)
@@ -2588,7 +2644,6 @@ def health():
         "device": selected_device(),
         "max_chars": MAX_CHARS,
         "max_file_mb": MAX_FILE_MB,
-        "ocr_enabled": OCR_ENABLED,
         "ocr_available": ocr_available,
         "ocr_language": OCR_LANGUAGE,
         "model_idle_unload_enabled": MODEL_IDLE_UNLOAD_ENABLED,
@@ -2698,12 +2753,11 @@ async def start_translate_pdf_job(
         content_type=file.content_type or "application/pdf",
         filename=filename,
         page_range=page_range,
-        use_ocr=OCR_ENABLED,
     )
     register_job_runner(
         job_id,
         run_pdf_translate_job,
-        (job_id, content, file.content_type or "application/pdf", source, target, filename, page_range, OCR_ENABLED),
+        (job_id, content, file.content_type or "application/pdf", source, target, filename, page_range),
     )
     return {"job_id": job_id}
 
@@ -2820,6 +2874,12 @@ def export_history(item_id: str, format: str = "md"):
             media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="{filename_base}.pdf"'},
         )
+    if safe_format == "doc":
+        return Response(
+            create_text_docx(text),
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f'attachment; filename="{filename_base}.docx"'},
+        )
     item = history_item(item_id)
     source_extension = file_extension("x." + item.get("source_extension", ""))
     requested_extension = source_extension if safe_format == "original" else file_extension("x." + safe_format)
@@ -2850,6 +2910,20 @@ def export_pdf(request: PdfExportRequest):
         create_text_pdf(request.text),
         media_type="application/pdf",
         headers={"Content-Disposition": 'attachment; filename="linguinator-translation.pdf"'},
+    )
+
+
+@app.post("/export-doc")
+def export_doc(request: DocxExportRequest):
+    """A fresh DOCX built from plain translated text, for sources with no original DOCX
+    structure to preserve (see create_text_docx). Distinct from /export-docx, which
+    reinjects translated text into an uploaded original DOCX."""
+    if not request.text.strip():
+        raise HTTPException(status_code=400, detail="No text to export")
+    return Response(
+        create_text_docx(request.text),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": 'attachment; filename="linguinator-translation.docx"'},
     )
 
 
@@ -2994,7 +3068,7 @@ def translate(request: TranslateRequest):
 
 @app.post("/extract-pdf", response_class=PlainTextResponse)
 async def extract_pdf(file: UploadFile = File(...), page_range: str = Form("")):
-    return await extract_pdf_markdown(file, page_range, OCR_ENABLED)
+    return await extract_pdf_markdown(file, page_range)
 
 
 @app.post("/extract-docx", response_class=PlainTextResponse)
@@ -3074,7 +3148,7 @@ async def translate_pdf(
     target: str = Form(DEFAULT_TARGET),
     page_range: str = Form(""),
 ):
-    markdown = await extract_pdf_markdown(file, page_range, OCR_ENABLED)
+    markdown = await extract_pdf_markdown(file, page_range)
     translated = []
     for section in re.split(r"(?m)^# Page ", markdown):
         section = section.strip()

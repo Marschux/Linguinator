@@ -10,6 +10,7 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import Mock, patch
+from xml.etree import ElementTree
 
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -435,6 +436,24 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(translated, "Uebersetzt")
 
+    def test_normalize_translated_text_inserts_missing_sentence_space(self):
+        # OPUS-MT's detokenizer occasionally drops the space after sentence-ending punctuation.
+        self.assertEqual(
+            main.normalize_translated_text("teilen.Wenn Sie die Option aktivieren"),
+            "teilen. Wenn Sie die Option aktivieren",
+        )
+        self.assertEqual(main.normalize_translated_text("Ist es 3.5 Meter?"), "Ist es 3.5 Meter?")
+        self.assertEqual(main.normalize_translated_text("Wirklich!Ja klar."), "Wirklich! Ja klar.")
+
+    def test_translate_one_normalizes_missing_sentence_space(self):
+        tokenizer = FakeTokenizer()
+        tokenizer.batch_decode = lambda generated, skip_special_tokens: ["teilen.Wenn Sie"]
+
+        with patch.object(main, "load_model", return_value=(tokenizer, FakeModel(), "cpu", FakeTorch())):
+            translated = main.translate_one("Hello", "eng_Latn", "deu_Latn")
+
+        self.assertEqual(translated, "teilen. Wenn Sie")
+
     def test_model_family_classifies_known_model_ids(self):
         self.assertEqual(main.model_family("Helsinki-NLP/opus-mt-tc-bible-big-mul-mul"), "prefix")
         self.assertEqual(main.model_family("Helsinki-NLP/opus-mt-en-de"), "plain")
@@ -568,7 +587,8 @@ class MainTests(unittest.TestCase):
         reader = FakeReader([FakePage("Hello PDF\n"), FakePage("")])
 
         with patch.object(main, "PdfReader", return_value=reader):
-            markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
+            with patch.object(main, "ocr_pdf_page", return_value=""):
+                markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
 
         self.assertIn("# Page 1", markdown)
         self.assertIn("Hello PDF", markdown)
@@ -579,12 +599,13 @@ class MainTests(unittest.TestCase):
         reader = FakeReader([FakePage("tiny")])
 
         with patch.object(main, "PdfReader", return_value=reader):
-            markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
+            with patch.object(main, "ocr_pdf_page", return_value=""):
+                markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
 
-        self.assertIn("very little extractable text", markdown)
+        self.assertIn("tiny", markdown)
 
     def test_pdf_extraction_uses_page_range(self):
-        reader = FakeReader([FakePage("Page one long text"), FakePage("Page two long text")])
+        reader = FakeReader([FakePage("Page one long text, well over the OCR threshold"), FakePage("Page two long text, well over the OCR threshold")])
 
         with patch.object(main, "PdfReader", return_value=reader):
             markdown = main.extract_pdf_markdown_from_bytes(b"%PDF", page_range="2")
@@ -596,11 +617,12 @@ class MainTests(unittest.TestCase):
         reader = FakeReader([FakePage(""), FakePage(None)])
 
         with patch.object(main, "PdfReader", return_value=reader):
-            with self.assertRaises(HTTPException) as raised:
-                main.extract_pdf_markdown_from_bytes(b"%PDF")
+            with patch.object(main, "ocr_pdf_page", return_value=""):
+                with self.assertRaises(HTTPException) as raised:
+                    main.extract_pdf_markdown_from_bytes(b"%PDF")
 
         self.assertEqual(raised.exception.status_code, 422)
-        self.assertIn("OCR is disabled", raised.exception.detail)
+        self.assertIn("no readable text was produced", raised.exception.detail)
 
     def test_ensure_ocr_tools_reports_rebuild_hint_when_tools_are_missing(self):
         with patch.object(main.shutil, "which", side_effect=lambda tool: None):
@@ -610,23 +632,12 @@ class MainTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 500)
         self.assertIn("Rebuild or restart from a current image that includes the OCR binaries", raised.exception.detail)
 
-    def test_pdf_extraction_uses_ocr_for_empty_pages_when_enabled(self):
+    def test_pdf_extraction_uses_ocr_for_empty_pages(self):
         reader = FakeReader([FakePage("")])
 
         with patch.object(main, "PdfReader", return_value=reader):
-            with patch.object(main, "OCR_ENABLED", False):
-                with patch.object(main, "ocr_pdf_page", return_value="OCR text"):
-                    markdown = main.extract_pdf_markdown_from_bytes(b"%PDF", use_ocr=True)
-
-        self.assertIn("OCR text", markdown)
-
-    def test_pdf_extraction_respects_explicit_use_ocr_flag(self):
-        reader = FakeReader([FakePage("")])
-
-        with patch.object(main, "PdfReader", return_value=reader):
-            with patch.object(main, "OCR_ENABLED", False):
-                with patch.object(main, "ocr_pdf_page", return_value="OCR text") as mocked_ocr:
-                    markdown = main.extract_pdf_markdown_from_bytes(b"%PDF", use_ocr=True)
+            with patch.object(main, "ocr_pdf_page", return_value="OCR text") as mocked_ocr:
+                markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
 
         self.assertIn("OCR text", markdown)
         mocked_ocr.assert_called_once_with(b"%PDF", 1)
@@ -660,6 +671,61 @@ class MainTests(unittest.TestCase):
         self.assertIn(b"/FontFile2", content)
         # Round-trips through the ToUnicode CMap, so the text stays selectable.
         self.assertIn("Привет", pdf_text(content))
+
+    def test_create_text_docx_returns_valid_package(self):
+        content = main.create_text_docx("# Title\n\nHallo Welt.\n\nSecond paragraph.")
+
+        with zipfile.ZipFile(BytesIO(content)) as docx:
+            names = docx.namelist()
+            self.assertIn("[Content_Types].xml", names)
+            self.assertIn("_rels/.rels", names)
+            self.assertIn("word/document.xml", names)
+            document = ElementTree.fromstring(docx.read("word/document.xml"))
+
+        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        paragraphs = [
+            "".join(t.text or "" for t in p.findall("w:r/w:t", ns))
+            for p in document.findall(".//w:p", ns)
+        ]
+        self.assertIn("Title", paragraphs)
+        self.assertIn("Hallo Welt.", paragraphs)
+        self.assertIn("Second paragraph.", paragraphs)
+
+    def test_create_text_docx_marks_headings_bold(self):
+        content = main.create_text_docx("# Title\n\nBody")
+
+        with zipfile.ZipFile(BytesIO(content)) as docx:
+            document = ElementTree.fromstring(docx.read("word/document.xml"))
+
+        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        bold_runs = [run for run in document.findall(".//w:r", ns) if run.find("w:rPr/w:b", ns) is not None]
+        self.assertEqual(len(bold_runs), 1)
+        self.assertEqual(bold_runs[0].find("w:t", ns).text, "Title")
+
+    def test_create_text_docx_escapes_xml_special_characters(self):
+        content = main.create_text_docx("Cats & dogs <together>")
+
+        with zipfile.ZipFile(BytesIO(content)) as docx:
+            document = ElementTree.fromstring(docx.read("word/document.xml"))  # raises if malformed
+
+        ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+        self.assertEqual(document.find(".//w:t", ns).text, "Cats & dogs <together>")
+
+    def test_export_doc_route_returns_docx(self):
+        response = TestClient(main.app).post("/export-doc", json={"text": "Hallo Welt."})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers["content-type"],
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        with zipfile.ZipFile(BytesIO(response.content)) as docx:
+            self.assertIn("word/document.xml", docx.namelist())
+
+    def test_export_doc_route_rejects_empty_text(self):
+        response = TestClient(main.app).post("/export-doc", json={"text": "   "})
+
+        self.assertEqual(response.status_code, 400)
 
     def test_export_original_history_content_exports_docx(self):
         with patch.object(main, "export_docx_with_translated_text", return_value=b"translated docx") as export_mock:
@@ -851,6 +917,7 @@ class MainTests(unittest.TestCase):
                 client = TestClient(main.app)
                 text_response = client.get(f"/history/{item_id}/export?format=txt")
                 pdf_response = client.get(f"/history/{item_id}/export?format=pdf")
+                doc_response = client.get(f"/history/{item_id}/export?format=doc")
                 bad_response = client.get(f"/history/{item_id}/export?format=docx")
 
             self.assertEqual(text_response.status_code, 200)
@@ -859,6 +926,13 @@ class MainTests(unittest.TestCase):
             self.assertEqual(pdf_response.status_code, 200)
             self.assertEqual(pdf_response.headers["content-type"], "application/pdf")
             self.assertTrue(pdf_response.content.startswith(b"%PDF-1.4"))
+            self.assertEqual(doc_response.status_code, 200)
+            self.assertEqual(
+                doc_response.headers["content-type"],
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+            with zipfile.ZipFile(BytesIO(doc_response.content)) as docx:
+                self.assertIn("word/document.xml", docx.namelist())
             self.assertEqual(bad_response.status_code, 404)
         finally:
             shutil.rmtree(temp_dir.parent, ignore_errors=True)

@@ -22,11 +22,11 @@ http://localhost:5051/
 - PDF extraction, PDF translation, and PDF download.
 - Layout-preserving PDF translation: the translation is placed back into the original lines, images and graphics stay untouched. Tick `Plaintext` for a plain text export instead.
 - Original-format export for DOCX, ODT, PPTX, CSV, XLSX, HTML, SRT/VTT, JSON/YAML, PO, and XLIFF.
-- Local history with configurable retention, retained source files, and Markdown, TXT, PDF, or original-format downloads.
+- Local history with configurable retention, retained source files, and Markdown, TXT, PDF, DOCX, or original-format downloads.
 - Persistent global job queue with configurable worker count.
 - Interface language selector for English, German, Spanish, and French.
 - Optional HTTP Basic Auth.
-- Optional OCR for scanned PDFs.
+- OCR fallback for scanned PDFs, always on when the image includes the OCR binaries.
 
 ## Usage
 
@@ -75,8 +75,7 @@ The `.env` file is grouped by topic:
 | `LINGUINATOR_JOBS_DIR` | `/data/history/jobs` | Directory for persisted queue metadata and pending PDF payloads. |
 | `LINGUINATOR_DEFAULT_SOURCE` | `eng_Latn` | Default source language code. |
 | `LINGUINATOR_DEFAULT_TARGET` | `deu_Latn` | Default target language code. |
-| `LINGUINATOR_ENABLE_OCR` | `true` | Enables OCR fallback for scanned PDFs when the image dependencies are available. Only controlled via this env var, there is no per-request UI toggle. |
-| `LINGUINATOR_OCR_LANGUAGE` | `deu+eng` | OCR language setting passed to Tesseract. |
+| `LINGUINATOR_OCR_LANGUAGE` | `deu+eng` | OCR language setting passed to Tesseract. OCR itself is always on when `pdftoppm`/`tesseract` are installed, there is no toggle. |
 | `LINGUINATOR_PDF_FONT` | empty | TrueType font embedded into generated PDFs. Defaults to DejaVu Sans from the image; needed for non-Latin target languages. |
 | `LINGUINATOR_PDF_FONT_BOLD` | empty | Bold variant of the embedded PDF font. |
 | `LINGUINATOR_AUTH_ENABLED` | `false` | Enables HTTP Basic Auth for the UI and API. `/health` stays public for health checks. |
