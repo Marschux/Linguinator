@@ -76,7 +76,7 @@ The `.env` file is grouped by topic:
 | `LINGUINATOR_DEFAULT_SOURCE` | `eng_Latn` | Default source language code. |
 | `LINGUINATOR_DEFAULT_TARGET` | `deu_Latn` | Default target language code. |
 | `LINGUINATOR_OCR_LANGUAGE` | `deu+eng` | OCR language setting passed to Tesseract. OCR itself is always on when `pdftoppm`/`tesseract` are installed, there is no toggle. |
-| `LINGUINATOR_PDF_FONT` | empty | TrueType font embedded into generated PDFs. Defaults to DejaVu Sans from the image; needed for non-Latin target languages. |
+| `LINGUINATOR_PDF_FONT` | empty | TrueType font embedded into generated PDFs. Defaults to DejaVu Sans from the image; needed for non-Latin target languages. Ignored for CJK/Arabic/Devanagari/Hebrew text, which always uses the bundled Noto fonts (DejaVu Sans has no glyphs for those scripts). |
 | `LINGUINATOR_PDF_FONT_BOLD` | empty | Bold variant of the embedded PDF font. |
 | `LINGUINATOR_PDF_LAYOUT_BATCH_SIZE` | `4` | How many layout-PDF paragraphs are translated in one model call. Higher trades more peak memory (padding to the longest paragraph in the batch) for fewer, faster calls. |
 | `LINGUINATOR_AUTH_ENABLED` | `false` | Enables HTTP Basic Auth for the UI and API. `/health` stays public for health checks. |

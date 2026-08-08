@@ -705,6 +705,22 @@ class MainTests(unittest.TestCase):
         # Round-trips through the ToUnicode CMap, so the text stays selectable.
         self.assertIn("Привет", pdf_text(content))
 
+    def test_detect_pdf_script_identifies_known_scripts(self):
+        self.assertEqual(main.detect_pdf_script("Hello world"), "")
+        self.assertEqual(main.detect_pdf_script("你好"), "cjk")
+        self.assertEqual(main.detect_pdf_script("こんにちは"), "cjk")
+        self.assertEqual(main.detect_pdf_script("مرحبا"), "arabic")
+        self.assertEqual(main.detect_pdf_script("नमस्ते"), "devanagari")
+        self.assertEqual(main.detect_pdf_script("שלום"), "hebrew")
+
+    def test_create_text_pdf_embeds_script_specific_font_for_cjk_text(self):
+        if not main.load_embedded_font(False, "cjk"):
+            self.skipTest("no CJK-capable font available on this machine")
+        content = main.create_text_pdf("こんにちは世界")
+
+        self.assertIn(b"/FontFile2", content)
+        self.assertIn("こんにちは世界", pdf_text(content))
+
     def test_create_text_docx_returns_valid_package(self):
         content = main.create_text_docx("# Title\n\nHallo Welt.\n\nSecond paragraph.")
 
@@ -769,9 +785,11 @@ class MainTests(unittest.TestCase):
 
     def test_export_original_history_content_uses_layout_overlay_when_marked(self):
         with patch.object(main, "export_pdf_layout_with_translated_text", return_value=b"overlay pdf") as overlay_mock:
-            result = main.export_original_history_content("pdf", b"source pdf", "text", {"layout": "true"})
+            result = main.export_original_history_content(
+                "pdf", b"source pdf", "text", {"layout": "true", "page_range": "2-5"}
+            )
 
-        overlay_mock.assert_called_once_with(b"source pdf", "text")
+        overlay_mock.assert_called_once_with(b"source pdf", "text", "2-5")
         self.assertEqual(result, b"overlay pdf")
 
     def test_pdf_page_runs_collapses_synthetic_bold_double_strokes(self):
@@ -865,6 +883,32 @@ class MainTests(unittest.TestCase):
         self.assertGreater(len(wrapped), 1)
         self.assertEqual(" ".join(wrapped).split(), text.split())
 
+    def test_export_pdf_layout_with_translated_text_respects_page_range(self):
+        # A job translated with page_range="2" only produced translations for page 2's
+        # paragraphs; re-export must extract page 2 only too, or the translation (meant for
+        # page 2) gets matched against page 1's paragraphs instead.
+        source = main.create_pdf_from_pages([
+            {
+                "width": 400, "height": 300, "margin": 40,
+                "source_page": "", "continuation": False, "footer": False,
+                "lines": [{"text": "First page original", "font": "F1", "size": 11, "line_height": 14}],
+            },
+            {
+                "width": 400, "height": 300, "margin": 40,
+                "source_page": "", "continuation": False, "footer": False,
+                "lines": [{"text": "Second page original", "font": "F1", "size": 11, "line_height": 14}],
+            },
+        ])
+
+        overlay = main.export_pdf_layout_with_translated_text(source, "Second page translated", "2")
+
+        # The white cover only hides the original text visually; the underlying text layer is
+        # still extractable, so assert on presence rather than absence.
+        pages_text = [page.extract_text() or "" for page in main.PdfReader(BytesIO(overlay)).pages]
+        self.assertIn("First page original", pages_text[0])
+        self.assertNotIn("translated", pages_text[0])
+        self.assertIn("Second page translated", pages_text[1])
+
     def test_pdf_layout_roundtrip_replaces_text_and_keeps_page_size(self):
         source = main.create_pdf_from_pages([{
             "width": 400, "height": 300, "margin": 40,
@@ -913,7 +957,7 @@ class MainTests(unittest.TestCase):
             self.assertEqual(job["status"], "complete")
             self.assertEqual(job["result"], "Hallo Welt")
             self.assertEqual(history["source_extension"], "pdf")
-            self.assertEqual(history["source_meta"], {"layout": "true"})
+            self.assertEqual(history["source_meta"], {"layout": "true", "page_range": ""})
             self.assertIn("Hallo Welt", pdf_text(exported))
         finally:
             with main.JOBS_LOCK:

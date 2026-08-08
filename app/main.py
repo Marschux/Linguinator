@@ -89,6 +89,43 @@ PDF_FONT_BOLD_CANDIDATES = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "C:/Windows/Fonts/arialbd.ttf",
 )
+# DejaVu Sans (the default embedded PDF font) has no CJK/Arabic/Devanagari/Hebrew glyphs, so a
+# translation into those scripts would otherwise render as empty boxes. Picked automatically per
+# script actually present in the text being measured/drawn (detect_pdf_script), not by target
+# language, so mixed-script text still renders whatever coverage the source PDF font offered.
+PDF_SCRIPT_FONT_CANDIDATES = {
+    "cjk": (
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "C:/Windows/Fonts/msgothic.ttc",
+    ),
+    "arabic": (
+        "/usr/share/fonts/truetype/noto/NotoSansArabic-Regular.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+    ),
+    "devanagari": (
+        "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
+        "C:/Windows/Fonts/mangal.ttf",
+    ),
+    "hebrew": (
+        "/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf",
+        "C:/Windows/Fonts/arial.ttf",
+    ),
+}
+
+
+def detect_pdf_script(text: str) -> str:
+    """Which non-Latin script (if any) a string needs a fallback font for."""
+    for char in text:
+        codepoint = ord(char)
+        if 0x4E00 <= codepoint <= 0x9FFF or 0x3040 <= codepoint <= 0x30FF or 0xAC00 <= codepoint <= 0xD7A3 or 0x3400 <= codepoint <= 0x4DBF:
+            return "cjk"
+        if 0x0600 <= codepoint <= 0x06FF or 0x0750 <= codepoint <= 0x077F:
+            return "arabic"
+        if 0x0900 <= codepoint <= 0x097F:
+            return "devanagari"
+        if 0x0590 <= codepoint <= 0x05FF:
+            return "hebrew"
+    return ""
 def parse_core_languages(value: str, default: Dict[str, str]) -> Dict[str, str]:
     """iso-639-1 code -> internal deu_Latn-style code. LINGUINATOR_LANGUAGES, if set, replaces
     the built-in list entirely; each entry is "xx:xxx_Scr" (e.g. "de:deu_Latn")."""
@@ -141,7 +178,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.3.13", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.3.14", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -494,20 +531,27 @@ class EmbeddedFont:
         return total * size / 1000.0
 
 
-@lru_cache(maxsize=2)
-def load_embedded_font(bold: bool = False) -> Optional[EmbeddedFont]:
+@lru_cache(maxsize=8)
+def load_embedded_font(bold: bool = False, script: str = "") -> Optional[EmbeddedFont]:
     """Load a TrueType font for PDF embedding, or None to fall back to base-14 Helvetica.
 
     Without an embedded font a PDF can only show WinAnsi characters, so any non-Latin target
-    language (Cyrillic, Greek, ...) would come out as garbage.
+    language (Cyrillic, Greek, ...) would come out as garbage. `script` (from detect_pdf_script)
+    picks a font that actually covers CJK/Arabic/Devanagari/Hebrew instead, where DejaVu Sans
+    has no glyphs at all; those fonts are used as-is for "bold" too since covering the script
+    matters more than the weight.
     """
     try:
         from fontTools.ttLib import TTFont
     except ImportError:
         return None
 
-    configured = PDF_FONT_BOLD_FILE if bold else PDF_FONT_FILE
-    candidates = PDF_FONT_BOLD_CANDIDATES if bold else PDF_FONT_CANDIDATES
+    if script and script in PDF_SCRIPT_FONT_CANDIDATES:
+        candidates = PDF_SCRIPT_FONT_CANDIDATES[script]
+        configured = ""
+    else:
+        configured = PDF_FONT_BOLD_FILE if bold else PDF_FONT_FILE
+        candidates = PDF_FONT_BOLD_CANDIDATES if bold else PDF_FONT_CANDIDATES
     for path in (configured, *candidates):
         if not path or not Path(path).exists():
             continue
@@ -544,7 +588,7 @@ def load_embedded_font(bold: bool = False) -> Optional[EmbeddedFont]:
 
 
 def pdf_measure_text(text: str, size: float, bold: bool = False) -> float:
-    font = load_embedded_font(bold)
+    font = load_embedded_font(bold, detect_pdf_script(text))
     if font:
         return font.text_width(text, size)
     return len(text) * PDF_AVG_CHAR_WIDTH * size
@@ -555,7 +599,7 @@ def pdf_escape(text: str) -> str:
 
 
 def pdf_text_object(text: str, bold: bool = False) -> str:
-    font = load_embedded_font(bold)
+    font = load_embedded_font(bold, detect_pdf_script(text))
     if font:
         return "<" + font.encode(text) + ">"
     try:
@@ -742,7 +786,8 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
     font_resources = []
     for index, bold in enumerate((False, True)):
         name = f"F{index + 1}"
-        font = load_embedded_font(bold) if any(font_texts[name]) else None
+        script = detect_pdf_script("".join(font_texts[name]))
+        font = load_embedded_font(bold, script) if any(font_texts[name]) else None
         if not font:
             base = "Helvetica-Bold" if bold else "Helvetica"
             font_resources.append(f"/{name} << /Type /Font /Subtype /Type1 /BaseFont /{base} >>")
@@ -1709,10 +1754,10 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
     return output.getvalue()
 
 
-def export_pdf_layout_with_translated_text(content: bytes, translated_text: str) -> bytes:
+def export_pdf_layout_with_translated_text(content: bytes, translated_text: str, page_range: str = "") -> bytes:
     # Split without dropping empty blocks: translations are matched to paragraphs by position.
     blocks = [block.strip() for block in translated_text.split("\n\n")]
-    return render_pdf_layout_overlay(content, extract_pdf_layout(content), blocks)
+    return render_pdf_layout_overlay(content, extract_pdf_layout(content, page_range), blocks)
 
 
 def exception_message(exc: Exception) -> str:
@@ -2687,7 +2732,7 @@ def run_pdf_layout_translate_job(
             filename,
             content,
             "pdf",
-            {"layout": "true"},
+            {"layout": "true", "page_range": page_range},
         )
         update_job(
             job_id,
@@ -2920,7 +2965,7 @@ def export_original_history_content(extension: str, content: bytes, text: str, s
         return export_xliff_with_translated_text(content, text)
     if extension == "pdf":
         if source_meta.get("layout") == "true":
-            return export_pdf_layout_with_translated_text(content, text)
+            return export_pdf_layout_with_translated_text(content, text, source_meta.get("page_range", ""))
         return create_text_pdf(text)
     if extension in ("md", "txt"):
         return text.encode("utf-8")
