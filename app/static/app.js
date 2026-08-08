@@ -1,6 +1,7 @@
 let languageData = null;
     let maxChars = 0;
     let activeJobId = null;
+    let lastCompletedJob = null;
     let currentInputTab = "textarea";
     let currentSourceFormat = "txt";
     let currentOriginalExtension = "txt";
@@ -813,6 +814,7 @@ let languageData = null;
       currentOriginalExtension = currentSourceFormat;
       updateCounter();
       setResult("");
+      lastCompletedJob = null;
       clearProgress();
     }
 
@@ -858,9 +860,8 @@ let languageData = null;
         return;
       }
       if (details.pdf) {
-        const pdfFile = document.getElementById("pdf").files[0];
-        if (currentSourceFormat === "pdf" && !document.getElementById("pdfPlaintext").checked && pdfFile) {
-          await downloadOverlayPdf(text, details);
+        if (currentSourceFormat === "pdf" && lastCompletedJob && lastCompletedJob.kind === "translate-pdf-layout" && lastCompletedJob.history_id) {
+          window.location.href = "history/" + lastCompletedJob.history_id + "/export?format=original";
           return;
         }
         const response = await fetch("export-pdf", {
@@ -893,21 +894,6 @@ let languageData = null;
       link.click();
       link.remove();
       URL.revokeObjectURL(url);
-    }
-
-    async function downloadOverlayPdf(text, details) {
-      const file = document.getElementById("pdf").files[0];
-      const form = new FormData();
-      form.append("file", file);
-      form.append("text", text);
-      form.append("cover_original", "true");
-      const response = await fetch("export-pdf-overlay", {method: "POST", body: form});
-      if (!response.ok) {
-        const error = await response.text();
-        showProgress("failed", 0, errorTextFromResponse(error));
-        return;
-      }
-      saveBlob(await response.blob(), details.extension);
     }
 
     function originalExportPath(extension) {
@@ -1259,6 +1245,7 @@ let languageData = null;
         updateProgress(job);
         if (job.status === "complete") {
           setResult(job.result || "");
+          lastCompletedJob = job;
           loadHistory();
           loadQueue();
           playNotificationSound();
@@ -1298,6 +1285,7 @@ let languageData = null;
         currentOriginalExtension = "txt";
       }
       setResult("");
+      lastCompletedJob = null;
       showProgress("queued", 0, chunks > 1 ? t("startingChunks", {count: chunks}) : t("starting"));
       let response;
       if (sourceFile) {
@@ -1357,14 +1345,18 @@ let languageData = null;
       renderSelect("source", source);
       renderSelect("target", target);
       currentSourceFormat = "pdf";
+      const layoutMode = !document.getElementById("pdfPlaintext").checked;
       const form = new FormData();
       form.append("file", file);
       form.append("source", source);
       form.append("target", target);
-      form.append("page_range", document.getElementById("pageRange").value);
+      if (!layoutMode) {
+        form.append("page_range", document.getElementById("pageRange").value);
+      }
       setResult("");
+      lastCompletedJob = null;
       showProgress("extracting", 0, t("uploadingPdf"));
-      const response = await fetch("jobs/translate-pdf", {method: "POST", body: form});
+      const response = await fetch(layoutMode ? "jobs/translate-pdf-layout" : "jobs/translate-pdf", {method: "POST", body: form});
       if (!response.ok) {
         const text = await response.text();
         showProgress("failed", 0, errorTextFromResponse(text));

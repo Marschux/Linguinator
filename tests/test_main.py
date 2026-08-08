@@ -8,7 +8,7 @@ import uuid
 import zipfile
 from io import BytesIO
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -570,30 +570,69 @@ class MainTests(unittest.TestCase):
         self.assertIn(b"/F2 15 Tf", content)
         self.assertIn(b"Title", content)
 
-    def test_create_pdf_from_pages_can_add_cover_rectangle(self):
-        content = main.create_pdf_from_pages(
-            [{
-                "source_page": "1",
-                "continuation": False,
-                "lines": [{"text": "Translated", "font": "F1", "size": 11, "line_height": 14}],
-            }],
-            cover_original=True,
-        )
+    def test_convert_via_libreoffice_invokes_soffice_and_reads_output(self):
+        def fake_run(args, check, capture_output, text, timeout):
+            outdir = Path(args[args.index("--outdir") + 1])
+            (outdir / "input.docx").write_bytes(b"fake docx")
+            return Mock(stdout="", stderr="")
 
-        self.assertIn(b" re f", content)
-        self.assertIn(b"1 1 1 rg 0 0 595.00 842.00 re f", content)
-        self.assertIn(b"Translated", content)
-        # Fill color must be reset to black after the white cover rectangle,
-        # otherwise the translated text is drawn white-on-white and invisible.
-        self.assertIn(b"1 1 1 rg 0 0 595.00 842.00 re f\n0 g", content)
+        with patch.object(main.shutil, "which", return_value="/usr/bin/soffice"), \
+                patch.object(main.subprocess, "run", side_effect=fake_run):
+            result = main.convert_via_libreoffice(b"fake pdf", "pdf", "docx")
 
-    def test_create_overlay_pdf_preserves_original_page_count(self):
-        original = main.create_text_pdf("# Page 1\n\nOriginal\n\n# Page 2\n\nSecond")
+        self.assertEqual(result, b"fake docx")
 
-        overlay = main.create_overlay_pdf(original, "# Page 1\n\nTranslated\n\n# Page 2\n\nSecond translated")
+    def test_convert_via_libreoffice_requires_soffice(self):
+        with patch.object(main.shutil, "which", return_value=None):
+            with self.assertRaises(main.HTTPException) as ctx:
+                main.convert_via_libreoffice(b"fake pdf", "pdf", "docx")
 
-        reader = main.PdfReader(BytesIO(overlay))
-        self.assertEqual(len(reader.pages), 2)
+        self.assertEqual(ctx.exception.status_code, 500)
+
+    def test_export_original_history_content_converts_docx_to_pdf_when_marked(self):
+        with patch.object(main, "export_docx_with_translated_text", return_value=b"translated docx") as export_mock, \
+                patch.object(main, "convert_via_libreoffice", return_value=b"translated pdf") as convert_mock:
+            result = main.export_original_history_content("docx", b"source docx", "translated text", {"export_as": "pdf"})
+
+        export_mock.assert_called_once_with(b"source docx", "translated text")
+        convert_mock.assert_called_once_with(b"translated docx", "docx", "pdf")
+        self.assertEqual(result, b"translated pdf")
+
+    def test_export_original_history_content_leaves_plain_docx_untouched(self):
+        with patch.object(main, "export_docx_with_translated_text", return_value=b"translated docx") as export_mock, \
+                patch.object(main, "convert_via_libreoffice") as convert_mock:
+            result = main.export_original_history_content("docx", b"source docx", "translated text", {})
+
+        export_mock.assert_called_once_with(b"source docx", "translated text")
+        convert_mock.assert_not_called()
+        self.assertEqual(result, b"translated docx")
+
+    def test_run_pdf_layout_translate_job_completes_via_docx_roundtrip(self):
+        temp_dir = test_temp_dir()
+        try:
+            with patch.object(main, "HISTORY_DIR", temp_dir):
+                with patch.object(main, "JOBS_DIR", temp_dir / "jobs"):
+                    with main.JOBS_LOCK:
+                        main.JOBS.clear()
+                        main.JOB_RUNNERS.clear()
+                    job_id = main.create_job("translate-pdf-layout", "eng_Latn", "deu_Latn", "input.pdf")
+                    with patch.object(main, "convert_via_libreoffice", return_value=minimal_docx(["Hello world"])) as convert_mock, \
+                            patch.object(main, "translate_one", return_value="Hallo Welt"):
+                        main.run_pdf_layout_translate_job(job_id, b"fake pdf", "eng_Latn", "deu_Latn", "input.pdf")
+
+                    job = main.get_job(job_id)
+                    history = main.history_item(job["history_id"])
+
+            self.assertEqual(job["status"], "complete")
+            self.assertEqual(job["result"], "Hallo Welt")
+            self.assertEqual(convert_mock.call_args_list[0].args, (b"fake pdf", "pdf", "docx"))
+            self.assertEqual(history["source_extension"], "docx")
+            self.assertEqual(history["source_meta"], {"export_as": "pdf"})
+        finally:
+            with main.JOBS_LOCK:
+                main.JOBS.clear()
+                main.JOB_RUNNERS.clear()
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
 
     def test_pdf_text_object_encodes_unicode(self):
         self.assertEqual(main.pdf_text_object("Grusse"), "(Grusse)")

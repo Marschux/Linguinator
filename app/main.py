@@ -25,7 +25,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from pypdf import PdfReader, PdfWriter
+from pypdf import PdfReader
 
 
 def env_value(name: str, default: str, legacy_name: str = "") -> str:
@@ -445,12 +445,7 @@ def pdf_document_pages(text: str) -> List[Dict[str, Any]]:
     return document_pages or [{"source_page": "", "continuation": False, "lines": []}]
 
 
-def page_size_from_pdf_page(page) -> tuple[float, float]:
-    box = page.mediabox
-    return float(box.width), float(box.height)
-
-
-def create_pdf_from_pages(pages: List[Dict[str, Any]], cover_original: bool = False) -> bytes:
+def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
     objects = ["<< /Type /Catalog /Pages 2 0 R >>"]
     page_refs = []
     next_object_id = 3
@@ -464,9 +459,6 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]], cover_original: bool = Fa
         next_object_id += 2
         page_refs.append(f"{page_id} 0 R")
         commands = []
-        if cover_original:
-            commands.append(f"1 1 1 rg 0 0 {width:.2f} {height:.2f} re f")
-            commands.append("0 g")
         y = height - margin
         if page["source_page"]:
             heading = "Page " + page["source_page"]
@@ -517,40 +509,6 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]], cover_original: bool = Fa
 
 def create_text_pdf(text: str) -> bytes:
     return create_pdf_from_pages(pdf_document_pages(text))
-
-
-def create_overlay_pdf(original_content: bytes, translated_text: str, cover_original: bool = False) -> bytes:
-    try:
-        original_reader = PdfReader(BytesIO(original_content))
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Could not read original PDF: {exc}") from exc
-    if not original_reader.pages:
-        raise HTTPException(status_code=422, detail="Original PDF has no pages")
-
-    sections = markdown_page_sections(translated_text)
-    overlay_pages = []
-    for index, original_page in enumerate(original_reader.pages):
-        width, height = page_size_from_pdf_page(original_page)
-        section = sections[index] if index < len(sections) else {"page_number": str(index + 1), "text": ""}
-        content_pages = paginate_pdf_lines(pdf_render_lines(section["text"]))
-        lines = content_pages[0] if content_pages else []
-        overlay_pages.append({
-            "source_page": section["page_number"] or str(index + 1),
-            "continuation": False,
-            "lines": lines,
-            "width": width,
-            "height": height,
-            "margin": PDF_MARGIN,
-        })
-
-    overlay_reader = PdfReader(BytesIO(create_pdf_from_pages(overlay_pages, cover_original=cover_original)))
-    writer = PdfWriter()
-    for original_page, overlay_page in zip(original_reader.pages, overlay_reader.pages):
-        original_page.merge_page(overlay_page)
-        writer.add_page(original_page)
-    output = BytesIO()
-    writer.write(output)
-    return output.getvalue()
 
 
 def cleanup_history():
@@ -855,6 +813,18 @@ def rebuild_runner_for_job(job: Dict[str, Any]) -> Optional[Tuple[Callable[..., 
             job.get("page_range", ""),
             OCR_ENABLED,
         )
+    if job.get("kind") == "translate-pdf-layout":
+        payload_path = job.get("payload_path")
+        if not payload_path or not Path(payload_path).exists():
+            update_job(job_id, status="failed", message="Failed", error="Queued PDF payload is missing", finished_at=time.time())
+            return None
+        return run_pdf_layout_translate_job, (
+            job_id,
+            Path(payload_path).read_bytes(),
+            job.get("source", DEFAULT_SOURCE),
+            job.get("target", DEFAULT_TARGET),
+            job.get("filename", "pdf"),
+        )
     return None
 
 
@@ -1014,6 +984,48 @@ def ocr_pdf_page(content: bytes, page_number: int) -> str:
             text=True,
         )
     return result.stdout.strip()
+
+
+def ensure_libreoffice_available():
+    if not shutil.which("soffice"):
+        raise HTTPException(
+            status_code=500,
+            detail="LibreOffice is unavailable in this container. Rebuild the image with the libreoffice-writer package.",
+        )
+
+
+def convert_via_libreoffice(content: bytes, source_ext: str, target_ext: str) -> bytes:
+    ensure_libreoffice_available()
+    with tempfile.TemporaryDirectory() as temp_dir:
+        input_path = Path(temp_dir) / f"input.{source_ext}"
+        input_path.write_bytes(content)
+        profile_dir = Path(temp_dir) / "lo_profile"
+        try:
+            subprocess.run(
+                [
+                    "soffice",
+                    "--headless",
+                    "--norestore",
+                    f"-env:UserInstallation=file://{profile_dir}",
+                    "--convert-to",
+                    target_ext,
+                    "--outdir",
+                    temp_dir,
+                    str(input_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise HTTPException(status_code=500, detail=f"LibreOffice conversion failed: {exc.stderr}") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise HTTPException(status_code=504, detail="LibreOffice conversion timed out") from exc
+        output_path = Path(temp_dir) / f"input.{target_ext}"
+        if not output_path.exists():
+            raise HTTPException(status_code=500, detail="LibreOffice did not produce an output file")
+        return output_path.read_bytes()
 
 
 def extract_pdf_markdown_from_bytes(
@@ -2003,6 +2015,50 @@ def run_pdf_translate_job(
         cleanup_job_payload(job_id)
 
 
+def run_pdf_layout_translate_job(
+    job_id: str,
+    content: bytes,
+    source: str,
+    target: str,
+    filename: str,
+):
+    try:
+        update_job(job_id, status="running", message="Converting PDF to DOCX", started_at=time.time())
+        docx_content = convert_via_libreoffice(content, "pdf", "docx")
+        wait_if_paused_or_cancelled(job_id)
+        text = extract_docx_text_from_bytes(docx_content)
+        chunks = split_long_text(text, MAX_CHARS)
+        update_job(job_id, total=len(chunks), message=f"Translating 0 / {len(chunks)} chunks")
+        translated_chunks = translate_chunks(chunks, source, target, job_id)
+        result = "\n\n".join(translated_chunks)
+        history_id = save_history(
+            "translate-pdf-layout",
+            result,
+            source,
+            target,
+            filename,
+            docx_content,
+            "docx",
+            {"export_as": "pdf"},
+        )
+        update_job(
+            job_id,
+            status="complete",
+            message="Complete",
+            current=len(chunks),
+            result=result,
+            history_id=history_id,
+            finished_at=time.time(),
+        )
+        cleanup_job_payload(job_id)
+    except Exception as exc:
+        if str(exc) == "Job stopped by user":
+            update_job(job_id, status="cancelled", message="Cancelled", error=None, finished_at=time.time())
+        else:
+            update_job(job_id, status="failed", message="Failed", error=exception_message(exc), finished_at=time.time())
+        cleanup_job_payload(job_id)
+
+
 @app.get("/health")
 def health():
     ocr_available = bool(shutil.which("pdftoppm") and shutil.which("tesseract"))
@@ -2126,6 +2182,28 @@ async def start_translate_pdf_job(
     return {"job_id": job_id}
 
 
+@app.post("/jobs/translate-pdf-layout")
+async def start_translate_pdf_layout_job(
+    file: UploadFile = File(...),
+    source: str = Form(DEFAULT_SOURCE),
+    target: str = Form(DEFAULT_TARGET),
+):
+    ensure_queue_workers()
+    content = await read_upload_bytes(file, "PDF")
+    filename = file.filename or "pdf"
+    job_id = create_job("translate-pdf-layout", source, target, filename)
+    JOBS_DIR.mkdir(parents=True, exist_ok=True)
+    payload_path = job_payload_path(job_id)
+    payload_path.write_bytes(content)
+    update_job(job_id, payload_path=str(payload_path), filename=filename)
+    register_job_runner(
+        job_id,
+        run_pdf_layout_translate_job,
+        (job_id, content, source, target, filename),
+    )
+    return {"job_id": job_id}
+
+
 @app.get("/history")
 def list_history():
     return {"retention_days": HISTORY_DAYS, "items": history_items()}
@@ -2164,7 +2242,10 @@ def original_export_media_type(extension: str) -> str:
 
 def export_original_history_content(extension: str, content: bytes, text: str, source_meta: Dict[str, str]) -> bytes:
     if extension == "docx":
-        return export_docx_with_translated_text(content, text)
+        docx_bytes = export_docx_with_translated_text(content, text)
+        if source_meta.get("export_as") == "pdf":
+            return convert_via_libreoffice(docx_bytes, "docx", "pdf")
+        return docx_bytes
     if extension == "odt":
         return export_odt_with_translated_text(content, text)
     if extension == "pptx":
@@ -2186,7 +2267,7 @@ def export_original_history_content(extension: str, content: bytes, text: str, s
     if extension in ("xlf", "xliff"):
         return export_xliff_with_translated_text(content, text)
     if extension == "pdf":
-        return create_overlay_pdf(content, text, False)
+        return create_text_pdf(text)
     if extension in ("md", "txt"):
         return text.encode("utf-8")
     raise HTTPException(status_code=400, detail="Unsupported history original format")
@@ -2222,16 +2303,18 @@ def export_history(item_id: str, format: str = "md"):
         raise HTTPException(status_code=404, detail="History source file not found")
     if requested_extension != source_extension:
         raise HTTPException(status_code=400, detail="History source can only be exported in its original format")
+    source_meta = item.get("source_meta", {})
     content = export_original_history_content(
         source_extension,
         source_path.read_bytes(),
         text,
-        item.get("source_meta", {}),
+        source_meta,
     )
+    response_extension = "pdf" if source_meta.get("export_as") == "pdf" else source_extension
     return Response(
         content,
-        media_type=original_export_media_type(source_extension),
-        headers={"Content-Disposition": f'attachment; filename="{filename_base}.{source_extension}"'},
+        media_type=original_export_media_type(response_extension),
+        headers={"Content-Disposition": f'attachment; filename="{filename_base}.{response_extension}"'},
     )
 
 
@@ -2243,22 +2326,6 @@ def export_pdf(request: PdfExportRequest):
         create_text_pdf(request.text),
         media_type="application/pdf",
         headers={"Content-Disposition": 'attachment; filename="linguinator-translation.pdf"'},
-    )
-
-
-@app.post("/export-pdf-overlay")
-async def export_pdf_overlay(
-    file: UploadFile = File(...),
-    text: str = Form(""),
-    cover_original: bool = Form(False),
-):
-    if not text.strip():
-        raise HTTPException(status_code=400, detail="No text to export")
-    content = await read_upload_bytes(file, "PDF")
-    return Response(
-        create_overlay_pdf(content, text, cover_original),
-        media_type="application/pdf",
-        headers={"Content-Disposition": 'attachment; filename="linguinator-overlay-translation.pdf"'},
     )
 
 
