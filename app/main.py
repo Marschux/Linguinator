@@ -1000,19 +1000,21 @@ def convert_via_libreoffice(content: bytes, source_ext: str, target_ext: str) ->
         input_path = Path(temp_dir) / f"input.{source_ext}"
         input_path.write_bytes(content)
         profile_dir = Path(temp_dir) / "lo_profile"
+        command = [
+            "soffice",
+            "--headless",
+            "--norestore",
+            f"-env:UserInstallation=file://{profile_dir}",
+        ]
+        if source_ext == "pdf" and target_ext == "docx":
+            # Without this, LibreOffice imports PDFs as a Draw (vector graphics) document,
+            # which has no export filter to DOCX at all. This forces a Writer-compatible,
+            # paragraph-based import instead.
+            command.append("--infilter=writer_pdf_import")
+        command += ["--convert-to", target_ext, "--outdir", temp_dir, str(input_path)]
         try:
             subprocess.run(
-                [
-                    "soffice",
-                    "--headless",
-                    "--norestore",
-                    f"-env:UserInstallation=file://{profile_dir}",
-                    "--convert-to",
-                    target_ext,
-                    "--outdir",
-                    temp_dir,
-                    str(input_path),
-                ],
+                command,
                 check=True,
                 capture_output=True,
                 text=True,
@@ -2015,6 +2017,37 @@ def run_pdf_translate_job(
         cleanup_job_payload(job_id)
 
 
+def dedupe_adjacent_paragraphs(text: str) -> Tuple[str, List[int]]:
+    """Collapse consecutive duplicate paragraphs and drop a leading "everything crammed
+    together" artifact paragraph, returning the cleaned text plus a map from each original
+    paragraph index back to its index in the cleaned list (-1 if dropped entirely).
+
+    LibreOffice's PDF import (writer_pdf_import filter) reliably duplicates every paragraph,
+    and on top of that sometimes produces one extra leading paragraph that's the whole page's
+    text run together with no spacing between what were separate sentences. Translating either
+    of these as-is feeds the model a lot of repeated text, which tends to send NLLB into a
+    repetition loop instead of a normal translation.
+    """
+    paragraphs = text.split("\n\n")
+    deduped: List[str] = []
+    paragraph_map: List[int] = []
+    for paragraph in paragraphs:
+        if deduped and paragraph.strip() == deduped[-1].strip():
+            paragraph_map.append(len(deduped) - 1)
+        else:
+            deduped.append(paragraph)
+            paragraph_map.append(len(deduped) - 1)
+
+    if len(deduped) > 1:
+        first_len = len(re.sub(r"\s+", "", deduped[0]))
+        rest_len = len(re.sub(r"\s+", "", "".join(deduped[1:])))
+        if first_len > rest_len:
+            deduped = deduped[1:]
+            paragraph_map = [index - 1 for index in paragraph_map]
+
+    return "\n\n".join(deduped), paragraph_map
+
+
 def run_pdf_layout_translate_job(
     job_id: str,
     content: bytes,
@@ -2027,10 +2060,15 @@ def run_pdf_layout_translate_job(
         docx_content = convert_via_libreoffice(content, "pdf", "docx")
         wait_if_paused_or_cancelled(job_id)
         text = extract_docx_text_from_bytes(docx_content)
-        chunks = split_long_text(text, MAX_CHARS)
+        deduped_text, paragraph_map = dedupe_adjacent_paragraphs(text)
+        chunks = split_long_text(deduped_text, MAX_CHARS)
         update_job(job_id, total=len(chunks), message=f"Translating 0 / {len(chunks)} chunks")
         translated_chunks = translate_chunks(chunks, source, target, job_id)
-        result = "\n\n".join(translated_chunks)
+        translated_paragraphs = "\n\n".join(translated_chunks).split("\n\n")
+        result = "\n\n".join(
+            translated_paragraphs[index] if 0 <= index < len(translated_paragraphs) else ""
+            for index in paragraph_map
+        )
         history_id = save_history(
             "translate-pdf-layout",
             result,

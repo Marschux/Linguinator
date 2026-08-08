@@ -607,6 +607,32 @@ class MainTests(unittest.TestCase):
         convert_mock.assert_not_called()
         self.assertEqual(result, b"translated docx")
 
+    def test_dedupe_adjacent_paragraphs_collapses_duplicates_and_maps_back(self):
+        text = "A\n\nA\n\nB\n\nC\n\nC"
+
+        deduped, paragraph_map = main.dedupe_adjacent_paragraphs(text)
+
+        self.assertEqual(deduped, "A\n\nB\n\nC")
+        self.assertEqual(paragraph_map, [0, 0, 1, 2, 2])
+
+    def test_dedupe_adjacent_paragraphs_drops_leading_crammed_together_artifact(self):
+        # LibreOffice's PDF import sometimes adds one extra leading paragraph that's the
+        # whole page's text run together with no spacing between sentences.
+        text = "AlphaAlphaBravoBravoCharlieCharlie\n\nAlpha\n\nBravo\n\nCharlie"
+
+        deduped, paragraph_map = main.dedupe_adjacent_paragraphs(text)
+
+        self.assertEqual(deduped, "Alpha\n\nBravo\n\nCharlie")
+        self.assertEqual(paragraph_map, [-1, 0, 1, 2])
+
+    def test_dedupe_adjacent_paragraphs_leaves_unique_text_untouched(self):
+        text = "A\n\nB\n\nC"
+
+        deduped, paragraph_map = main.dedupe_adjacent_paragraphs(text)
+
+        self.assertEqual(deduped, text)
+        self.assertEqual(paragraph_map, [0, 1, 2])
+
     def test_run_pdf_layout_translate_job_completes_via_docx_roundtrip(self):
         temp_dir = test_temp_dir()
         try:
