@@ -1,4 +1,5 @@
 # ... existing imports and setup code ...
+import base64
 import gc
 import os
 import re
@@ -35,29 +36,29 @@ def env_value(name: str, default: str, legacy_name: str = "") -> str:
     return default
 
 
-MODEL_ID = env_value("LINGUMACHINA_MODEL", "facebook/nllb-200-distilled-600M", "NLLB_MODEL")
-DEVICE_SETTING = env_value("LINGUMACHINA_DEVICE", "cpu", "NLLB_DEVICE")
-MAX_CHARS = int(env_value("LINGUMACHINA_MAX_CHARS", "6000", "NLLB_MAX_CHARS"))
-MAX_FILE_MB = int(env_value("LINGUMACHINA_MAX_FILE_MB", "50", "NLLB_MAX_FILE_MB"))
+MODEL_ID = env_value("LINGUINATOR_MODEL", "facebook/nllb-200-distilled-600M", "NLLB_MODEL")
+DEVICE_SETTING = env_value("LINGUINATOR_DEVICE", "cpu", "NLLB_DEVICE")
+MAX_CHARS = int(env_value("LINGUINATOR_MAX_CHARS", "6000", "NLLB_MAX_CHARS"))
+MAX_FILE_MB = int(env_value("LINGUINATOR_MAX_FILE_MB", "50", "NLLB_MAX_FILE_MB"))
 MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
 MAX_ZIP_UNCOMPRESSED_BYTES = MAX_FILE_BYTES * 10
-HISTORY_DAYS = int(env_value("LINGUMACHINA_HISTORY_DAYS", "7", "NLLB_HISTORY_DAYS"))
-HISTORY_DIR = Path(env_value("LINGUMACHINA_HISTORY_DIR", "/data/history", "NLLB_HISTORY_DIR"))
-JOB_WORKERS = max(1, int(env_value("LINGUMACHINA_JOB_WORKERS", "1", "NLLB_JOB_WORKERS")))
-JOBS_DIR = Path(env_value("LINGUMACHINA_JOBS_DIR", str(HISTORY_DIR / "jobs"), "NLLB_JOBS_DIR"))
-CPU_THREADS = int(env_value("LINGUMACHINA_CPU_THREADS", "0", "NLLB_CPU_THREADS"))
-CPU_INTEROP_THREADS = int(env_value("LINGUMACHINA_CPU_INTEROP_THREADS", "0", "NLLB_CPU_INTEROP_THREADS"))
-DEFAULT_SOURCE = env_value("LINGUMACHINA_DEFAULT_SOURCE", "eng_Latn", "NLLB_DEFAULT_SOURCE")
-DEFAULT_TARGET = env_value("LINGUMACHINA_DEFAULT_TARGET", "deu_Latn", "NLLB_DEFAULT_TARGET")
-OCR_ENABLED = env_value("LINGUMACHINA_ENABLE_OCR", "false", "NLLB_ENABLE_OCR").lower() in ("1", "true", "yes", "on")
-OCR_LANGUAGE = env_value("LINGUMACHINA_OCR_LANGUAGE", "deu+eng", "NLLB_OCR_LANGUAGE")
-AUTH_ENABLED = env_value("LINGUMACHINA_AUTH_ENABLED", "false", "NLLB_AUTH_ENABLED").lower() in ("1", "true", "yes", "on")
-AUTH_USERNAME = env_value("LINGUMACHINA_AUTH_USERNAME", "admin", "NLLB_AUTH_USERNAME")
-AUTH_PASSWORD = env_value("LINGUMACHINA_AUTH_PASSWORD", "", "NLLB_AUTH_PASSWORD")
-MODEL_IDLE_UNLOAD_ENABLED = env_value("LINGUMACHINA_UNLOAD_MODEL_AFTER_IDLE", "true").lower() in ("1", "true", "yes", "on")
-MODEL_IDLE_SECONDS = int(env_value("LINGUMACHINA_MODEL_IDLE_SECONDS", "1200"))
-PUBLIC_URL = os.getenv("LINGUMACHINA_PUBLIC_URL", "").rstrip("/")
-TRUST_PROXY_HEADERS = os.getenv("LINGUMACHINA_TRUST_PROXY_HEADERS", "true").lower() in ("1", "true", "yes", "on")
+HISTORY_DAYS = int(env_value("LINGUINATOR_HISTORY_DAYS", "7", "NLLB_HISTORY_DAYS"))
+HISTORY_DIR = Path(env_value("LINGUINATOR_HISTORY_DIR", "/data/history", "NLLB_HISTORY_DIR"))
+JOB_WORKERS = max(1, int(env_value("LINGUINATOR_JOB_WORKERS", "1", "NLLB_JOB_WORKERS")))
+JOBS_DIR = Path(env_value("LINGUINATOR_JOBS_DIR", str(HISTORY_DIR / "jobs"), "NLLB_JOBS_DIR"))
+CPU_THREADS = int(env_value("LINGUINATOR_CPU_THREADS", "0", "NLLB_CPU_THREADS"))
+CPU_INTEROP_THREADS = int(env_value("LINGUINATOR_CPU_INTEROP_THREADS", "0", "NLLB_CPU_INTEROP_THREADS"))
+DEFAULT_SOURCE = env_value("LINGUINATOR_DEFAULT_SOURCE", "eng_Latn", "NLLB_DEFAULT_SOURCE")
+DEFAULT_TARGET = env_value("LINGUINATOR_DEFAULT_TARGET", "deu_Latn", "NLLB_DEFAULT_TARGET")
+OCR_ENABLED = env_value("LINGUINATOR_ENABLE_OCR", "false", "NLLB_ENABLE_OCR").lower() in ("1", "true", "yes", "on")
+OCR_LANGUAGE = env_value("LINGUINATOR_OCR_LANGUAGE", "deu+eng", "NLLB_OCR_LANGUAGE")
+AUTH_ENABLED = env_value("LINGUINATOR_AUTH_ENABLED", "false", "NLLB_AUTH_ENABLED").lower() in ("1", "true", "yes", "on")
+AUTH_USERNAME = env_value("LINGUINATOR_AUTH_USERNAME", "admin", "NLLB_AUTH_USERNAME")
+AUTH_PASSWORD = env_value("LINGUINATOR_AUTH_PASSWORD", "", "NLLB_AUTH_PASSWORD")
+MODEL_IDLE_UNLOAD_ENABLED = env_value("LINGUINATOR_UNLOAD_MODEL_AFTER_IDLE", "true").lower() in ("1", "true", "yes", "on")
+MODEL_IDLE_SECONDS = int(env_value("LINGUINATOR_MODEL_IDLE_SECONDS", "1200"))
+PUBLIC_URL = os.getenv("LINGUINATOR_PUBLIC_URL", "").rstrip("/")
+TRUST_PROXY_HEADERS = os.getenv("LINGUINATOR_TRUST_PROXY_HEADERS", "true").lower() in ("1", "true", "yes", "on")
 PDF_LOW_TEXT_CHARS = 20
 PDF_PAGE_WIDTH = 595
 PDF_PAGE_HEIGHT = 842
@@ -122,9 +123,9 @@ def normalized_root_path(value: str) -> str:
     return f"/{path}" if path else ""
 
 
-ROOT_PATH = normalized_root_path(os.getenv("LINGUMACHINA_ROOT_PATH", ""))
+ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Lingumachina", version="0.1.0", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.1.0", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -150,7 +151,7 @@ def unauthorized_response() -> Response:
     return Response(
         "Authentication required",
         status_code=401,
-        headers={"WWW-Authenticate": 'Basic realm="Lingumachina"'},
+        headers={"WWW-Authenticate": 'Basic realm="Linguinator"'},
     )
 
 
@@ -173,7 +174,7 @@ async def require_basic_auth(request: Request, call_next):
     if not AUTH_ENABLED or request.url.path == "/health":
         return await call_next(request)
     if not AUTH_PASSWORD:
-        return Response("Authentication is enabled but LINGUMACHINA_AUTH_PASSWORD is not set", status_code=500)
+        return Response("Authentication is enabled but LINGUINATOR_AUTH_PASSWORD is not set", status_code=500)
     if not basic_auth_valid(request.headers.get("authorization", "")):
         return unauthorized_response()
     return await call_next(request)
@@ -709,16 +710,22 @@ def job_sort_key(job: Dict[str, Any]):
     return job.get("queued_at") or job.get("started_at") or job.get("finished_at") or 0
 
 
+def queue_positions_by_job_id() -> Dict[str, int]:
+    queued_position = 0
+    positions: Dict[str, int] = {}
+    for job in sorted(JOBS.values(), key=job_sort_key):
+        if job.get("status") == "queued":
+            queued_position += 1
+            positions[job["id"]] = queued_position
+    return positions
+
+
 def list_jobs():
     with JOBS_LOCK:
+        positions = queue_positions_by_job_id()
         jobs = [public_job(job) for job in sorted(JOBS.values(), key=job_sort_key)]
-        queued_position = 0
         for job in jobs:
-            if job.get("status") == "queued":
-                queued_position += 1
-                job["position"] = queued_position
-            else:
-                job["position"] = None
+            job["position"] = positions.get(job["id"])
         return jobs
 
 
@@ -772,7 +779,9 @@ def get_job(job_id: str):
         job = JOBS.get(job_id)
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
-        return job_with_recovered_result(job)
+        visible = job_with_recovered_result(job)
+        visible["position"] = queue_positions_by_job_id().get(job_id)
+        return visible
 
 
 def control_job(job_id: str, action: str):
@@ -2232,7 +2241,7 @@ def export_pdf(request: PdfExportRequest):
     return Response(
         create_text_pdf(request.text),
         media_type="application/pdf",
-        headers={"Content-Disposition": 'attachment; filename="lingumachina-translation.pdf"'},
+        headers={"Content-Disposition": 'attachment; filename="linguinator-translation.pdf"'},
     )
 
 
@@ -2248,7 +2257,7 @@ async def export_pdf_overlay(
     return Response(
         create_overlay_pdf(content, text, cover_original),
         media_type="application/pdf",
-        headers={"Content-Disposition": 'attachment; filename="lingumachina-overlay-translation.pdf"'},
+        headers={"Content-Disposition": 'attachment; filename="linguinator-overlay-translation.pdf"'},
     )
 
 
@@ -2261,7 +2270,7 @@ async def export_docx(
     return Response(
         export_docx_with_translated_text(content, text),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": 'attachment; filename="lingumachina-translation.docx"'},
+        headers={"Content-Disposition": 'attachment; filename="linguinator-translation.docx"'},
     )
 
 
@@ -2274,7 +2283,7 @@ async def export_odt(
     return Response(
         export_odt_with_translated_text(content, text),
         media_type="application/vnd.oasis.opendocument.text",
-        headers={"Content-Disposition": 'attachment; filename="lingumachina-translation.odt"'},
+        headers={"Content-Disposition": 'attachment; filename="linguinator-translation.odt"'},
     )
 
 
@@ -2287,7 +2296,7 @@ async def export_pptx(
     return Response(
         export_pptx_with_translated_text(content, text),
         media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        headers={"Content-Disposition": 'attachment; filename="lingumachina-translation.pptx"'},
+        headers={"Content-Disposition": 'attachment; filename="linguinator-translation.pptx"'},
     )
 
 
@@ -2301,7 +2310,7 @@ async def export_csv(
     return Response(
         export_csv_with_translated_text(content, columns, text),
         media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="lingumachina-translation.csv"'},
+        headers={"Content-Disposition": 'attachment; filename="linguinator-translation.csv"'},
     )
 
 
@@ -2316,7 +2325,7 @@ async def export_xlsx(
     return Response(
         export_xlsx_with_translated_text(content, sheet_name, columns, text),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": 'attachment; filename="lingumachina-translation.xlsx"'},
+        headers={"Content-Disposition": 'attachment; filename="linguinator-translation.xlsx"'},
     )
 
 

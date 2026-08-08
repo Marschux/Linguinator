@@ -319,7 +319,7 @@ class MainTests(unittest.TestCase):
                 response = TestClient(main.app).get("/")
 
         self.assertEqual(response.status_code, 401)
-        self.assertEqual(response.headers["www-authenticate"], 'Basic realm="Lingumachina"')
+        self.assertEqual(response.headers["www-authenticate"], 'Basic realm="Linguinator"')
 
     def test_basic_auth_rejects_wrong_credentials(self):
         with patch.object(main, "AUTH_ENABLED", True):
@@ -345,37 +345,37 @@ class MainTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_health_reports_proxy_configuration(self):
-        with patch.object(main, "ROOT_PATH", "/lingumachina"):
-            with patch.object(main, "PUBLIC_URL", "https://example.test/lingumachina"):
+        with patch.object(main, "ROOT_PATH", "/linguinator"):
+            with patch.object(main, "PUBLIC_URL", "https://example.test/linguinator"):
                 with patch.object(main, "TRUST_PROXY_HEADERS", True):
                     response = TestClient(main.app).get("/health")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["root_path"], "/lingumachina")
-        self.assertEqual(response.json()["public_url"], "https://example.test/lingumachina")
+        self.assertEqual(response.json()["root_path"], "/linguinator")
+        self.assertEqual(response.json()["public_url"], "https://example.test/linguinator")
         self.assertTrue(response.json()["trust_proxy_headers"])
 
     def test_root_path_is_normalized_for_reverse_proxy_prefixes(self):
-        self.assertEqual(main.normalized_root_path("lingumachina"), "/lingumachina")
-        self.assertEqual(main.normalized_root_path("/lingumachina/"), "/lingumachina")
+        self.assertEqual(main.normalized_root_path("linguinator"), "/linguinator")
+        self.assertEqual(main.normalized_root_path("/linguinator/"), "/linguinator")
         self.assertEqual(main.normalized_root_path(""), "")
 
-    def test_env_value_prefers_lingumachina_and_falls_back_to_legacy_nllb(self):
-        with patch.dict(os.environ, {"LINGUMACHINA_MODEL": "new", "NLLB_MODEL": "old"}, clear=False):
-            self.assertEqual(main.env_value("LINGUMACHINA_MODEL", "default", "NLLB_MODEL"), "new")
+    def test_env_value_prefers_linguinator_and_falls_back_to_legacy_nllb(self):
+        with patch.dict(os.environ, {"LINGUINATOR_MODEL": "new", "NLLB_MODEL": "old"}, clear=False):
+            self.assertEqual(main.env_value("LINGUINATOR_MODEL", "default", "NLLB_MODEL"), "new")
         with patch.dict(os.environ, {"NLLB_MODEL": "old"}, clear=True):
-            self.assertEqual(main.env_value("LINGUMACHINA_MODEL", "default", "NLLB_MODEL"), "old")
+            self.assertEqual(main.env_value("LINGUINATOR_MODEL", "default", "NLLB_MODEL"), "old")
         with patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(main.env_value("LINGUMACHINA_MODEL", "default", "NLLB_MODEL"), "default")
+            self.assertEqual(main.env_value("LINGUINATOR_MODEL", "default", "NLLB_MODEL"), "default")
 
     def test_server_reads_proxy_and_https_env(self):
         env = {
-            "LINGUMACHINA_HOST": "127.0.0.1",
-            "LINGUMACHINA_PORT": "5443",
-            "LINGUMACHINA_TRUST_PROXY_HEADERS": "true",
-            "LINGUMACHINA_FORWARDED_ALLOW_IPS": "10.0.0.1",
-            "LINGUMACHINA_SSL_CERTFILE": "/certs/fullchain.pem",
-            "LINGUMACHINA_SSL_KEYFILE": "/certs/privkey.pem",
+            "LINGUINATOR_HOST": "127.0.0.1",
+            "LINGUINATOR_PORT": "5443",
+            "LINGUINATOR_TRUST_PROXY_HEADERS": "true",
+            "LINGUINATOR_FORWARDED_ALLOW_IPS": "10.0.0.1",
+            "LINGUINATOR_SSL_CERTFILE": "/certs/fullchain.pem",
+            "LINGUINATOR_SSL_KEYFILE": "/certs/privkey.pem",
         }
 
         with patch.dict(os.environ, env, clear=False):
@@ -411,7 +411,7 @@ class MainTests(unittest.TestCase):
         self.assertIn('document.getElementById("clearInput").addEventListener("click", clearCurrentWork)', script)
         self.assertIn('download.href = "history/" + item.id + "/export?format="', script)
         self.assertIn('historyFormats.push("original")', script)
-        self.assertIn("lingumachina_ui_language", script)
+        self.assertIn("linguinator_ui_language", script)
 
     def test_frontend_script_starts_with_valid_javascript(self):
         script = (Path(main.APP_DIR) / "static" / "app.js").read_text(encoding="utf-8")
@@ -526,7 +526,7 @@ class MainTests(unittest.TestCase):
                 main.ensure_ocr_tools()
 
         self.assertEqual(raised.exception.status_code, 500)
-        self.assertIn("Rebuild the image and restart the container", raised.exception.detail)
+        self.assertIn("Rebuild or restart from a current image that includes the OCR binaries", raised.exception.detail)
 
     def test_pdf_extraction_uses_ocr_for_empty_pages_when_enabled(self):
         reader = FakeReader([FakePage("")])

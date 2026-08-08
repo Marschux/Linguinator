@@ -5,10 +5,13 @@ let languageData = null;
     let currentSourceFormat = "txt";
     let currentOriginalExtension = "txt";
     let fullResultText = "";
-    let currentUiLanguage = localStorage.getItem("lingumachina_ui_language") || "en";
+    let currentUiLanguage = localStorage.getItem("linguinator_ui_language") || "en";
     let ocrAvailable = false;
     let ocrLanguage = "";
-    const baseTitle = document.title || "Lingumachina";
+    let historyItems = [];
+    let historyVisibleCount = 5;
+    const HISTORY_PAGE_SIZE = 5;
+    const baseTitle = document.title || "Linguinator";
     const PREVIEW_MAX_CHARS = 12000;
     const EXCERPT_MAX_CHARS = 4000;
     const originalExportExtensions = ["docx", "odt", "pptx", "csv", "xlsx", "html", "htm", "srt", "vtt", "json", "yaml", "yml", "po", "xlf", "xliff"];
@@ -20,11 +23,15 @@ let languageData = null;
         queue: "Queue",
         source: "Source",
         target: "Target",
+        searchLanguage: "Search language...",
+        favorites: "Favorites",
+        allLanguages: "All languages",
         loading: "Loading...",
         textField: "Text Field",
         text: "Text",
         markdown: "Markdown",
-        officeDoc: "Office Doc",
+        officeDoc: "Doc File",
+        pptxFile: "PowerPoint",
         csvFile: "CSV File",
         pdf: "PDF",
         textFile: "Text File",
@@ -44,7 +51,10 @@ let languageData = null;
         history: "History",
         noQueuedJobs: "No queued jobs.",
         noHistory: "No saved translations yet.",
+        loadMore: "Load more",
         queued: "Queued",
+        queuePosition: "Queue position #{position}",
+        watchJob: "Click to track this job in the progress bar and tab title.",
         started: "Started",
         chunks: "chunks",
         workerSingular: "worker",
@@ -76,11 +86,15 @@ let languageData = null;
         queue: "Warteschlange",
         source: "Quelle",
         target: "Ziel",
+        searchLanguage: "Sprache suchen...",
+        favorites: "Favoriten",
+        allLanguages: "Alle Sprachen",
         loading: "Laedt...",
         textField: "Textfeld",
         text: "Text",
         markdown: "Markdown",
         officeDoc: "Office-Dokument",
+        pptxFile: "PowerPoint",
         csvFile: "CSV-Datei",
         pdf: "PDF",
         textFile: "Textdatei",
@@ -100,7 +114,10 @@ let languageData = null;
         history: "History",
         noQueuedJobs: "Keine wartenden Jobs.",
         noHistory: "Noch keine gespeicherten Uebersetzungen.",
+        loadMore: "Mehr laden",
         queued: "Eingereiht",
+        queuePosition: "Warteschlangenposition #{position}",
+        watchJob: "Klicken, um diesen Job im Fortschrittsbalken und Tab-Titel zu verfolgen.",
         started: "Gestartet",
         chunks: "Chunks",
         workerSingular: "Worker",
@@ -132,11 +149,15 @@ let languageData = null;
         queue: "Cola",
         source: "Origen",
         target: "Destino",
+        searchLanguage: "Buscar idioma...",
+        favorites: "Favoritos",
+        allLanguages: "Todos los idiomas",
         loading: "Cargando...",
         textField: "Campo de texto",
         text: "Texto",
         markdown: "Markdown",
         officeDoc: "Documento Office",
+        pptxFile: "PowerPoint",
         csvFile: "Archivo CSV",
         pdf: "PDF",
         textFile: "Archivo de texto",
@@ -156,7 +177,10 @@ let languageData = null;
         history: "Historial",
         noQueuedJobs: "No hay trabajos en cola.",
         noHistory: "Aun no hay traducciones guardadas.",
+        loadMore: "Cargar mas",
         queued: "En cola",
+        queuePosition: "Posicion en cola #{position}",
+        watchJob: "Haz clic para seguir este trabajo en la barra de progreso y el titulo de la pestana.",
         started: "Iniciado",
         chunks: "fragmentos",
         workerSingular: "worker",
@@ -188,11 +212,15 @@ let languageData = null;
         queue: "File d'attente",
         source: "Source",
         target: "Cible",
+        searchLanguage: "Rechercher une langue...",
+        favorites: "Favoris",
+        allLanguages: "Toutes les langues",
         loading: "Chargement...",
         textField: "Champ texte",
         text: "Texte",
         markdown: "Markdown",
         officeDoc: "Document Office",
+        pptxFile: "PowerPoint",
         csvFile: "Fichier CSV",
         pdf: "PDF",
         textFile: "Fichier texte",
@@ -212,7 +240,10 @@ let languageData = null;
         history: "Historique",
         noQueuedJobs: "Aucun job en file.",
         noHistory: "Aucune traduction enregistree.",
+        loadMore: "Charger plus",
         queued: "En file",
+        queuePosition: "Position en file #{position}",
+        watchJob: "Cliquer pour suivre ce job dans la barre de progression et le titre de l'onglet.",
         started: "Demarre",
         chunks: "segments",
         workerSingular: "worker",
@@ -239,7 +270,8 @@ let languageData = null;
         formatOriginal: "Format original"
       }
     };
-    const favoriteLanguages = ["deu_Latn", "eng_Latn", "fra_Latn", "spa_Latn", "ita_Latn"];
+    const FAVORITE_LANGUAGE_COUNT = 4;
+    const defaultFavoriteLanguages = ["eng_Latn", "deu_Latn", "fra_Latn", "spa_Latn"];
     const languageNames = new Intl.DisplayNames(["en"], {type: "language"});
     const scriptNames = {
       Adlm: "Adlam",
@@ -417,6 +449,7 @@ let languageData = null;
       setText('[data-input-tab="text"]', "text");
       setText('[data-input-tab="markdown"]', "markdown");
       setText('[data-input-tab="office"]', "officeDoc");
+      setText('[data-input-tab="pptx"]', "pptxFile");
       setText('[data-input-tab="csv"]', "csvFile");
       setText('[data-input-tab="pdf"]', "pdf");
       setText('label[for="text"]', "textField");
@@ -439,6 +472,10 @@ let languageData = null;
       refreshOutputFormats(document.getElementById("outputFormat").value);
       updateOcrLabel();
       updateCounter();
+      if (languageData) {
+        renderSelect("source", document.getElementById("source").value);
+        renderSelect("target", document.getElementById("target").value);
+      }
       loadQueue().catch(() => {});
       loadHistory().catch(() => {});
     }
@@ -449,7 +486,7 @@ let languageData = null;
       select.value = currentUiLanguage;
       select.addEventListener("change", () => {
         currentUiLanguage = select.value || "en";
-        localStorage.setItem("lingumachina_ui_language", currentUiLanguage);
+        localStorage.setItem("linguinator_ui_language", currentUiLanguage);
         applyUiLanguage();
       });
     }
@@ -464,7 +501,7 @@ let languageData = null;
     }
 
     function recentKey(id) {
-      return "lingumachina_recent_" + id;
+      return "linguinator_recent_" + id;
     }
 
     function legacyRecentKey(id) {
@@ -483,6 +520,33 @@ let languageData = null;
     function saveRecent(id, code) {
       const recent = [code, ...getRecent(id).filter((item) => item !== code)].slice(0, 3);
       localStorage.setItem(recentKey(id), JSON.stringify(recent));
+      saveRecentLanguage(code);
+    }
+
+    function recentLanguagesKey() {
+      return "linguinator_recent_languages";
+    }
+
+    function getRecentLanguages() {
+      try {
+        return JSON.parse(localStorage.getItem(recentLanguagesKey()) || "[]");
+      } catch {
+        return [];
+      }
+    }
+
+    function saveRecentLanguage(code) {
+      const recent = [code, ...getRecentLanguages().filter((item) => item !== code)].slice(0, FAVORITE_LANGUAGE_COUNT * 2);
+      localStorage.setItem(recentLanguagesKey(), JSON.stringify(recent));
+    }
+
+    function getFavoriteLanguages() {
+      const favorites = getRecentLanguages().slice(0, FAVORITE_LANGUAGE_COUNT);
+      for (const code of defaultFavoriteLanguages) {
+        if (favorites.length >= FAVORITE_LANGUAGE_COUNT) break;
+        if (!favorites.includes(code)) favorites.push(code);
+      }
+      return favorites;
     }
 
     function addOption(select, language) {
@@ -546,8 +610,14 @@ let languageData = null;
       },
       office: {
         panel: "filePanel",
-        accept: ".docx,.odt,.pptx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.oasis.opendocument.text,application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        accept: ".docx,.odt,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.oasis.opendocument.text",
         labelKey: "officeDoc",
+        sourceFormat: "md"
+      },
+      pptx: {
+        panel: "filePanel",
+        accept: ".pptx,application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        labelKey: "pptxFile",
         sourceFormat: "md"
       },
       csv: {
@@ -610,6 +680,10 @@ let languageData = null;
     function closeLanguageMenus() {
       document.querySelectorAll(".language-field.open").forEach((field) => {
         field.classList.remove("open");
+        const menu = field.querySelector(".language-menu");
+        const search = field.querySelector(".language-search");
+        if (search) search.value = "";
+        if (menu) filterLanguageMenu(menu, "");
       });
     }
 
@@ -632,12 +706,14 @@ let languageData = null;
       group.className = "language-group";
       group.textContent = title;
       menu.appendChild(group);
+      return group;
     }
 
     function renderSelect(id, selectedValue) {
       const select = document.getElementById(id);
       const menu = document.getElementById(id + "Menu");
-      const favorites = favoriteLanguages.map(languageByCode).filter(Boolean);
+      const favoriteCodes = getFavoriteLanguages();
+      const favorites = favoriteCodes.map(languageByCode).filter(Boolean);
       select.innerHTML = "";
       menu.innerHTML = "";
 
@@ -645,7 +721,16 @@ let languageData = null;
         addOption(select, language);
       }
 
-      addLanguageGroup(menu, "Favorites");
+      const search = document.createElement("input");
+      search.type = "text";
+      search.className = "language-search";
+      search.placeholder = t("searchLanguage");
+      search.title = t("searchLanguage");
+      search.addEventListener("click", (event) => event.stopPropagation());
+      search.addEventListener("input", () => filterLanguageMenu(menu, search.value));
+      menu.appendChild(search);
+
+      addLanguageGroup(menu, t("favorites"));
       for (const language of favorites) {
         addLanguageMenuOption(menu, id, language, selectedValue);
       }
@@ -653,14 +738,43 @@ let languageData = null;
       const divider = document.createElement("div");
       divider.className = "language-divider";
       menu.appendChild(divider);
-      addLanguageGroup(menu, "All languages");
+      addLanguageGroup(menu, t("allLanguages"));
       for (const language of languageData.languages) {
-        if (!favoriteLanguages.includes(language.code)) {
+        if (!favoriteCodes.includes(language.code)) {
           addLanguageMenuOption(menu, id, language, selectedValue);
         }
       }
 
       setPickerValue(id, selectedValue);
+    }
+
+    function filterLanguageMenu(menu, query) {
+      const normalized = query.trim().toLowerCase();
+      const groups = [];
+      let currentGroup = null;
+      let currentGroupHasMatch = false;
+      for (const child of menu.children) {
+        if (child.classList.contains("language-search")) continue;
+        if (child.classList.contains("language-divider")) {
+          child.classList.toggle("hidden", Boolean(normalized));
+          continue;
+        }
+        if (child.classList.contains("language-group")) {
+          if (currentGroup) groups.push({el: currentGroup, hasMatch: currentGroupHasMatch});
+          currentGroup = child;
+          currentGroupHasMatch = false;
+          continue;
+        }
+        const matches = !normalized ||
+          child.dataset.code.toLowerCase().includes(normalized) ||
+          child.textContent.toLowerCase().includes(normalized);
+        child.classList.toggle("hidden", !matches);
+        if (matches) currentGroupHasMatch = true;
+      }
+      if (currentGroup) groups.push({el: currentGroup, hasMatch: currentGroupHasMatch});
+      for (const group of groups) {
+        group.el.classList.toggle("hidden", !group.hasMatch);
+      }
     }
 
     function setupLanguagePicker(id) {
@@ -670,6 +784,10 @@ let languageData = null;
         const wasOpen = field.classList.contains("open");
         closeLanguageMenus();
         field.classList.toggle("open", !wasOpen);
+        if (!wasOpen) {
+          const search = field.querySelector(".language-search");
+          if (search) search.focus();
+        }
       });
     }
 
@@ -840,7 +958,9 @@ let languageData = null;
       for (const format of formats) {
         const option = document.createElement("option");
         option.value = format;
-        option.textContent = t(outputFormatKeys[format]);
+        option.textContent = format === "original"
+          ? t(outputFormatKeys[format]) + " (." + outputFormatDetails(format).extension + ")"
+          : t(outputFormatKeys[format]);
         select.appendChild(option);
       }
       select.value = formats.includes(current) ? current : defaultOutputFormat();
@@ -851,7 +971,7 @@ let languageData = null;
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
       const url = URL.createObjectURL(blob);
       link.href = url;
-      link.download = "lingumachina-result-" + stamp + "." + extension;
+      link.download = "linguinator-result-" + stamp + "." + extension;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -1013,7 +1133,7 @@ let languageData = null;
       }[char]));
     }
 
-    function showProgress(status, percent, info, position) {
+    function showProgress(status, percent, info, position, jobLabel) {
       const progress = document.getElementById("progress");
       const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
       const titleStatus = status.charAt(0).toUpperCase() + status.slice(1);
@@ -1023,7 +1143,7 @@ let languageData = null;
       } else {
         prefix = safePercent + "% " + titleStatus;
       }
-      document.title = prefix + " - " + baseTitle;
+      document.title = prefix + (jobLabel ? " - " + jobLabel : "") + " - " + baseTitle;
       progress.className = "progress " + status;
       progress.innerHTML =
         '<div class="progress-top">' +
@@ -1077,6 +1197,34 @@ let languageData = null;
 
     document.getElementById("useOcr").addEventListener("change", updateOcrLabel);
     document.getElementById("text").addEventListener("input", updateCounter);
+
+    let audioContext = null;
+
+    function ensureAudioContext() {
+      if (audioContext) return audioContext;
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return null;
+      audioContext = new AudioContextClass();
+      return audioContext;
+    }
+
+    function playNotificationSound() {
+      const context = audioContext;
+      if (!context) return;
+      const now = context.currentTime;
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(880, now);
+      oscillator.frequency.setValueAtTime(1175, now + .12);
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(.2, now + .01);
+      gain.gain.linearRampToValueAtTime(0, now + .3);
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.start(now);
+      oscillator.stop(now + .3);
+    }
 
     function formatEta(seconds) {
       if (seconds === null || seconds === undefined) return "calculating";
@@ -1145,10 +1293,12 @@ let languageData = null;
         const languages = [job.source, job.target].filter(Boolean).join(" -> ");
         const started = job.started_at ? t("started") + " " + formatJobTime(job.started_at) : t("queued") + " " + formatJobTime(job.queued_at);
         meta.textContent = [languages, started].filter(Boolean).join(" | ");
-        const positionText = job.position ? "#" + job.position : "";
         const progress = document.createElement("div");
         progress.className = "queue-progress";
-        progress.textContent = (positionText ? positionText + " " : "") + (job.percent || 0) + "% | " + (job.current || 0) + " / " + (job.total || 0) + " " + t("chunks") + " | " + (job.message || "");
+        const progressLabel = job.status === "queued" && job.position
+          ? t("queuePosition", {position: job.position})
+          : (job.percent || 0) + "%";
+        progress.textContent = progressLabel + " | " + (job.current || 0) + " / " + (job.total || 0) + " " + t("chunks") + " | " + (job.message || "");
         const actions = document.createElement("div");
         actions.className = "queue-actions";
         actions.appendChild(queueActionButton(job, "pause", t("pause"), ["queued", "running"]));
@@ -1159,6 +1309,12 @@ let languageData = null;
         main.appendChild(progress);
         row.appendChild(main);
         row.appendChild(actions);
+        row.classList.toggle("watched", job.id === activeJobId);
+        row.title = t("watchJob");
+        row.addEventListener("click", (event) => {
+          if (event.target.closest(".queue-actions")) return;
+          watchJob(job.id);
+        });
         queue.appendChild(row);
       }
     }
@@ -1169,27 +1325,44 @@ let languageData = null;
       const percent = job.percent || 0;
       const position = job.position && job.position > 0 ? job.position : undefined;
       const eta = job.status === "running" ? "ETA " + formatEta(job.eta_seconds) : "";
+      const progressLabel = job.status === "queued" && position
+        ? t("queuePosition", {position})
+        : percent + "%";
       showProgress(
         job.status,
         percent,
-        percent + "% | " + current + " / " + total + " chunks | " + eta + " " + (job.message || ""),
-        position
+        progressLabel + " | " + current + " / " + total + " chunks | " + eta + " " + (job.message || ""),
+        position,
+        job.label || job.kind
       );
       document.getElementById("pauseJob").disabled = !["queued", "running"].includes(job.status);
       document.getElementById("resumeJob").disabled = job.status !== "paused";
       document.getElementById("stopJob").disabled = !["queued", "running", "paused"].includes(job.status);
     }
 
-    async function pollJob(jobId) {
-      while (true) {
+    let pollToken = 0;
+
+    function watchJob(jobId) {
+      ensureAudioContext();
+      activeJobId = jobId;
+      const token = ++pollToken;
+      loadQueue().catch(() => {});
+      pollJob(jobId, token);
+    }
+
+    async function pollJob(jobId, token) {
+      while (token === pollToken) {
         const response = await fetch("jobs/" + jobId);
         if (!response.ok) {
           const text = await response.text();
-          setResult(errorTextFromResponse(text));
-          activeJobId = null;
+          if (token === pollToken) {
+            setResult(errorTextFromResponse(text));
+            activeJobId = null;
+          }
           return;
         }
         const job = await response.json();
+        if (token !== pollToken) return;
         updateProgress(job);
         if (job.status === "complete") {
           if (job.kind === "translate-pdf") {
@@ -1200,6 +1373,7 @@ let languageData = null;
           });
           loadHistory();
           loadQueue();
+          playNotificationSound();
           activeJobId = null;
           return;
         }
@@ -1212,6 +1386,7 @@ let languageData = null;
         if (job.status === "failed") {
           setResult(job.error || t("jobFailed"));
           loadQueue();
+          playNotificationSound();
           activeJobId = null;
           return;
         }
@@ -1263,9 +1438,11 @@ let languageData = null;
         return;
       }
       const data = await response.json();
+      ensureAudioContext();
       activeJobId = data.job_id;
+      const token = ++pollToken;
       loadQueue();
-      await pollJob(data.job_id);
+      await pollJob(data.job_id, token);
     }
 
     async function startCurrentJob() {
@@ -1307,9 +1484,11 @@ let languageData = null;
         return;
       }
       const data = await response.json();
+      ensureAudioContext();
       activeJobId = data.job_id;
+      const token = ++pollToken;
       loadQueue();
-      await pollJob(data.job_id);
+      await pollJob(data.job_id, token);
     }
 
     async function controlActiveJob(action) {
@@ -1338,13 +1517,22 @@ let languageData = null;
     async function loadHistory() {
       const response = await fetch("history");
       const data = await response.json();
+      historyItems = data.items || [];
+      historyVisibleCount = Math.min(historyVisibleCount || HISTORY_PAGE_SIZE, Math.max(historyItems.length, HISTORY_PAGE_SIZE));
+      renderHistory();
+    }
+
+    function renderHistory() {
       const history = document.getElementById("history");
+      const loadMore = document.getElementById("loadMoreHistory");
       history.innerHTML = "";
-      if (!data.items.length) {
+      if (!historyItems.length) {
         history.textContent = t("noHistory");
+        loadMore.classList.add("hidden");
         return;
       }
-      for (const item of data.items) {
+      const visibleItems = historyItems.slice(0, historyVisibleCount);
+      for (const item of visibleItems) {
         const row = document.createElement("div");
         row.className = "history-row";
         const main = document.createElement("div");
@@ -1398,7 +1586,30 @@ let languageData = null;
         row.appendChild(actions);
         history.appendChild(row);
       }
+      loadMore.textContent = t("loadMore");
+      loadMore.title = t("loadMore");
+      loadMore.classList.toggle("hidden", historyVisibleCount >= historyItems.length);
     }
+
+    document.getElementById("loadMoreHistory").addEventListener("click", () => {
+      historyVisibleCount += HISTORY_PAGE_SIZE;
+      renderHistory();
+    });
+
+    function setHistoryCollapsed(collapsed) {
+      const body = document.getElementById("historyBody");
+      const icon = document.getElementById("historyCollapseIcon");
+      body.classList.toggle("hidden", collapsed);
+      icon.classList.toggle("collapsed", collapsed);
+      localStorage.setItem("linguinator_history_collapsed", collapsed ? "1" : "0");
+    }
+
+    document.getElementById("historyCollapse").addEventListener("click", () => {
+      const body = document.getElementById("historyBody");
+      setHistoryCollapsed(!body.classList.contains("hidden"));
+    });
+
+    setHistoryCollapsed(localStorage.getItem("linguinator_history_collapsed") === "1");
 
     document.getElementById("pauseJob").addEventListener("click", () => controlActiveJob("pause"));
     document.getElementById("resumeJob").addEventListener("click", () => controlActiveJob("resume"));

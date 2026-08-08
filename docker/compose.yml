@@ -1,10 +1,10 @@
 services:
-  lingumachina:
-    image: registry.gitlab.com/marschu/lingumachina:latest
+  linguinator:
+    image: registry.gitlab.com/marschu/linguinator:latest
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: lingumachina
+    container_name: linguinator
     restart: unless-stopped
     env_file: ../.env
     ports:
@@ -22,19 +22,19 @@ services:
         max-size: "10m"
         max-file: "3"
     healthcheck:
-      test: ["CMD", "python", "-c", "import os, ssl, urllib.request; scheme = 'https' if os.getenv('LINGUMACHINA_SSL_CERTFILE') and os.getenv('LINGUMACHINA_SSL_KEYFILE') else 'http'; context = ssl._create_unverified_context() if scheme == 'https' else None; urllib.request.urlopen(f'{scheme}://localhost:5051/health', timeout=5, context=context)"]
+      test: ["CMD", "python", "-c", "import os, ssl, urllib.request; scheme = 'https' if os.getenv('LINGUINATOR_SSL_CERTFILE') and os.getenv('LINGUINATOR_SSL_KEYFILE') else 'http'; context = ssl._create_unverified_context() if scheme == 'https' else None; urllib.request.urlopen(f'{scheme}://localhost:5051/health', timeout=5, context=context)"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 120s
 
-  lingumachina-gpu:
+  linguinator-gpu:
     profiles: ["gpu"]
-    image: registry.gitlab.com/marschu/lingumachina:latest
+    image: registry.gitlab.com/marschu/linguinator:latest
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    container_name: lingumachina-gpu
+    container_name: linguinator-gpu
     restart: unless-stopped
     env_file: ../.env
     ports:
@@ -44,7 +44,7 @@ services:
       - history:/data/history
     environment:
       HF_HOME: /cache/huggingface
-      LINGUMACHINA_DEVICE: cuda
+      LINGUINATOR_DEVICE: cuda
     networks:
       - proxy-net
     deploy:

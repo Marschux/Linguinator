@@ -1,4 +1,4 @@
-# Lingumachina
+# Linguinator
 
 Local document translation workbench powered by Meta NLLB.
 
@@ -34,7 +34,8 @@ http://localhost:5051/
    - `Text Field`: translate pasted or typed text directly.
    - `Text`: load plain text and supported structured text files.
    - `Markdown`: load Markdown files.
-   - `Office Doc`: load DOCX, ODT, or PPTX files.
+   - `Doc File`: load DOCX or ODT files.
+   - `PowerPoint`: load PPTX files.
    - `CSV File`: load CSV or XLSX files and optionally limit translation to selected columns.
    - `PDF`: extract and translate PDF pages.
 3. For file inputs, select the file and click `Load File` if the tab uses the shared text input.
@@ -59,42 +60,42 @@ The `.env` file is grouped by topic:
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `LINGUMACHINA_MODEL` | `facebook/nllb-200-distilled-600M` | Hugging Face model id used for translation. |
-| `LINGUMACHINA_DEVICE` | `cpu` | Runtime device. Use `cuda` with the GPU compose profile and a CUDA-capable host. |
-| `LINGUMACHINA_MAX_CHARS` | `6000` | Maximum characters per translation chunk. Longer input is split into multiple chunks. |
-| `LINGUMACHINA_MAX_FILE_MB` | `50` | Maximum upload size in megabytes. |
-| `LINGUMACHINA_CPU_THREADS` | `0` | Optional Torch, OMP, and MKL thread count for CPU translation. `0` keeps library defaults. |
-| `LINGUMACHINA_CPU_INTEROP_THREADS` | `0` | Optional Torch inter-op thread count. `0` keeps library defaults. |
-| `LINGUMACHINA_HISTORY_DAYS` | `7` | Number of days to keep saved translation history, including retained source files. |
-| `LINGUMACHINA_HISTORY_DIR` | `/data/history` | Directory for saved history files, source files, and metadata inside the container. |
-| `LINGUMACHINA_JOB_WORKERS` | `1` | Number of queued translation jobs that may run in parallel. Higher values can use more CPU/RAM. |
-| `LINGUMACHINA_JOBS_DIR` | `/data/history/jobs` | Directory for persisted queue metadata and pending PDF payloads. |
-| `LINGUMACHINA_DEFAULT_SOURCE` | `eng_Latn` | Default source language code. |
-| `LINGUMACHINA_DEFAULT_TARGET` | `deu_Latn` | Default target language code. |
-| `LINGUMACHINA_ENABLE_OCR` | `false` | Enables OCR fallback for scanned PDFs when the image dependencies are available. |
-| `LINGUMACHINA_OCR_LANGUAGE` | `deu+eng` | OCR language setting passed to Tesseract. |
-| `LINGUMACHINA_AUTH_ENABLED` | `false` | Enables HTTP Basic Auth for the UI and API. `/health` stays public for health checks. |
-| `LINGUMACHINA_AUTH_USERNAME` | `admin` | Basic Auth username. |
-| `LINGUMACHINA_AUTH_PASSWORD` | `changeme` | Basic Auth password. Change this before enabling auth. |
-| `LINGUMACHINA_ROOT_PATH` | empty | URL prefix when the app is mounted below a reverse-proxy path, for example `/lingumachina`. |
-| `LINGUMACHINA_PUBLIC_URL` | empty | Optional externally visible base URL reported by `/health`. |
-| `LINGUMACHINA_TRUST_PROXY_HEADERS` | `true` | Lets Uvicorn trust forwarded proxy headers. |
-| `LINGUMACHINA_FORWARDED_ALLOW_IPS` | `*` | IP allow-list for forwarded headers. Narrow this in stricter deployments. |
-| `LINGUMACHINA_SSL_CERTFILE` | empty | Optional certificate path for direct HTTPS inside the container. Usually leave empty behind a reverse proxy. |
-| `LINGUMACHINA_SSL_KEYFILE` | empty | Optional private key path for direct HTTPS inside the container. |
-| `LINGUMACHINA_UNLOAD_MODEL_AFTER_IDLE` | `true` | Unloads cached model objects after an idle period. |
-| `LINGUMACHINA_MODEL_IDLE_SECONDS` | `1200` | Idle time in seconds before unloading the model cache. |
+| `LINGUINATOR_MODEL` | `facebook/nllb-200-distilled-600M` | Hugging Face model id used for translation. |
+| `LINGUINATOR_DEVICE` | `cpu` | Runtime device. Use `cuda` with the GPU compose profile and a CUDA-capable host. |
+| `LINGUINATOR_MAX_CHARS` | `6000` | Maximum characters per translation chunk. Longer input is split into multiple chunks. |
+| `LINGUINATOR_MAX_FILE_MB` | `50` | Maximum upload size in megabytes. |
+| `LINGUINATOR_CPU_THREADS` | `0` | Optional Torch, OMP, and MKL thread count for CPU translation. `0` keeps library defaults. |
+| `LINGUINATOR_CPU_INTEROP_THREADS` | `0` | Optional Torch inter-op thread count. `0` keeps library defaults. |
+| `LINGUINATOR_HISTORY_DAYS` | `7` | Number of days to keep saved translation history, including retained source files. |
+| `LINGUINATOR_HISTORY_DIR` | `/data/history` | Directory for saved history files, source files, and metadata inside the container. |
+| `LINGUINATOR_JOB_WORKERS` | `1` | Number of queued translation jobs that may run in parallel. Higher values can use more CPU/RAM. |
+| `LINGUINATOR_JOBS_DIR` | `/data/history/jobs` | Directory for persisted queue metadata and pending PDF payloads. |
+| `LINGUINATOR_DEFAULT_SOURCE` | `eng_Latn` | Default source language code. |
+| `LINGUINATOR_DEFAULT_TARGET` | `deu_Latn` | Default target language code. |
+| `LINGUINATOR_ENABLE_OCR` | `false` | Enables OCR fallback for scanned PDFs when the image dependencies are available. |
+| `LINGUINATOR_OCR_LANGUAGE` | `deu+eng` | OCR language setting passed to Tesseract. |
+| `LINGUINATOR_AUTH_ENABLED` | `false` | Enables HTTP Basic Auth for the UI and API. `/health` stays public for health checks. |
+| `LINGUINATOR_AUTH_USERNAME` | `admin` | Basic Auth username. |
+| `LINGUINATOR_AUTH_PASSWORD` | `changeme` | Basic Auth password. Change this before enabling auth. |
+| `LINGUINATOR_ROOT_PATH` | empty | URL prefix when the app is mounted below a reverse-proxy path, for example `/linguinator`. |
+| `LINGUINATOR_PUBLIC_URL` | empty | Optional externally visible base URL reported by `/health`. |
+| `LINGUINATOR_TRUST_PROXY_HEADERS` | `true` | Lets Uvicorn trust forwarded proxy headers. |
+| `LINGUINATOR_FORWARDED_ALLOW_IPS` | `*` | IP allow-list for forwarded headers. Narrow this in stricter deployments. |
+| `LINGUINATOR_SSL_CERTFILE` | empty | Optional certificate path for direct HTTPS inside the container. Usually leave empty behind a reverse proxy. |
+| `LINGUINATOR_SSL_KEYFILE` | empty | Optional private key path for direct HTTPS inside the container. |
+| `LINGUINATOR_UNLOAD_MODEL_AFTER_IDLE` | `true` | Unloads cached model objects after an idle period. |
+| `LINGUINATOR_MODEL_IDLE_SECONDS` | `1200` | Idle time in seconds before unloading the model cache. |
 
-Older `NLLB_*` variables are still accepted as fallback, but new setups should use the `LINGUMACHINA_*` names.
+Older `NLLB_*` variables are still accepted as fallback, but new setups should use the `LINGUINATOR_*` names.
 Queue worker count defaults to one because multiple simultaneous model jobs can increase memory usage sharply, especially with larger models.
 
 ## Notes
 
 - Default port: `5051`
 - HTTPS is best terminated by Caddy, Traefik, Nginx, or another reverse proxy.
-- GPU test profile: `docker compose -f docker/compose.yml --profile gpu up -d lingumachina-gpu`
+- GPU test profile: `docker compose -f docker/compose.yml --profile gpu up -d linguinator-gpu`
 - OCR is installed by default in the container image; keep the service image current and restart after updates.
-- Docker image: `registry.gitlab.com/marschu/lingumachina:latest`
+- Docker image: `registry.gitlab.com/marschu/linguinator:latest`
 
 ## License
 
@@ -107,7 +108,7 @@ Model license and card:
 - https://huggingface.co/facebook/nllb-200-distilled-600M
 - https://creativecommons.org/licenses/by-nc/4.0/
 
-For commercial use, keep `LINGUMACHINA_MODEL` configurable and replace the default model with one that explicitly allows the intended use. Practical options are:
+For commercial use, keep `LINGUINATOR_MODEL` configurable and replace the default model with one that explicitly allows the intended use. Practical options are:
 
 - use an existing translation model with a suitable commercial license,
 - fine-tune a commercially usable base model on properly licensed parallel texts,

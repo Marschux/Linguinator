@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Lingumachina</title>
+  <title>Linguinator</title>
   <link rel="icon" type="image/svg+xml" href="static/favicon.svg">
   <link rel="stylesheet" href="static/styles.css">
 </head>
@@ -11,7 +11,7 @@
   <main class="app">
     <header>
       <div class="brand">
-        <h1><img class="brand-logo" src="static/favicon.svg" alt="">Lingumachina</h1>
+        <h1><img class="brand-logo" src="static/favicon.svg" alt="">Linguinator</h1>
         <p class="subtle">Local translation workbench for text and document workflows.</p>
       </div>
       <div class="header-controls">
@@ -55,7 +55,8 @@
         <button class="tab active" type="button" data-input-tab="textarea" title="Type text directly into the input field.">Text Field</button>
         <button class="tab" type="button" data-input-tab="text" title="Load and translate a text-like file.">Text</button>
         <button class="tab" type="button" data-input-tab="markdown" title="Load and translate a Markdown file.">Markdown</button>
-        <button class="tab" type="button" data-input-tab="office" title="Load and translate a DOCX, ODT, or PPTX file as text.">Office Doc</button>
+        <button class="tab" type="button" data-input-tab="office" title="Load and translate a DOCX or ODT file as text.">Doc File</button>
+        <button class="tab" type="button" data-input-tab="pptx" title="Load and translate a PowerPoint (PPTX) file as text.">PowerPoint</button>
         <button class="tab" type="button" data-input-tab="csv" title="Load and translate selected CSV or XLSX columns.">CSV File</button>
         <button class="tab" type="button" data-input-tab="pdf" title="Extract and translate a PDF page by page.">PDF</button>
       </div>
@@ -63,7 +64,8 @@
         <option value="textarea">Text Field</option>
         <option value="text">Text</option>
         <option value="markdown">Markdown</option>
-        <option value="office">Office Doc</option>
+        <option value="office">Doc File</option>
+        <option value="pptx">PowerPoint</option>
         <option value="csv">CSV File</option>
         <option value="pdf">PDF</option>
       </select>
@@ -135,13 +137,21 @@
 
     <section id="historyPanel" class="section workspace-section">
       <div class="section-heading">
-        <label for="history">History</label>
+        <button id="historyCollapse" class="history-toggle" type="button" title="Show or hide the history list.">
+          <label for="history">History</label>
+          <span id="historyCollapseIcon" class="history-toggle-icon">&#9660;</span>
+        </button>
       </div>
-      <div id="history" class="history"></div>
+      <div id="historyBody">
+        <div id="history" class="history"></div>
+        <div class="actions">
+          <button id="loadMoreHistory" class="secondary hidden" type="button" title="Show more history entries.">Load more</button>
+        </div>
+      </div>
     </section>
 
     <footer>
-      Lingumachina - AGPL-3.0-or-later - by Marschux
+      Linguinator - AGPL-3.0-or-later - by Marschux
     </footer>
   </main>
   <script src="static/app.js"></script>
