@@ -1,6 +1,7 @@
 # ... existing imports and setup code ...
 import base64
 import gc
+import math
 import os
 import re
 import secrets
@@ -25,7 +26,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from pypdf import PdfReader
+from pypdf import PdfReader, PdfWriter
 
 
 def env_value(name: str, default: str, legacy_name: str = "") -> str:
@@ -67,6 +68,25 @@ PDF_LINE_HEIGHT = 14
 PDF_FONT_SIZE = 11
 PDF_HEADING_FONT_SIZE = 15
 PDF_FOOTER_FONT_SIZE = 9
+# Average glyph width as a fraction of the font size, used when no real font metrics are
+# available. Calibration knob: too small leaves old text peeking out from under the overlay,
+# too large covers neighbouring content.
+PDF_AVG_CHAR_WIDTH = 0.5
+# How far the overlay may shrink the font to make a longer translation fit its original lines.
+PDF_LAYOUT_MIN_SCALE = 0.7
+# Safety margin on the estimated width of the original text when covering it. Anything left
+# uncovered shows through next to the translation; overshoot is clamped at neighbouring columns.
+PDF_COVER_WIDTH_FACTOR = 1.05
+PDF_FONT_FILE = env_value("LINGUINATOR_PDF_FONT", "")
+PDF_FONT_BOLD_FILE = env_value("LINGUINATOR_PDF_FONT_BOLD", "")
+PDF_FONT_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+    "C:/Windows/Fonts/arial.ttf",
+)
+PDF_FONT_BOLD_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    "C:/Windows/Fonts/arialbd.ttf",
+)
 NLLB_LANGUAGE_CODES = (
     "ace_Arab", "ace_Latn", "acm_Arab", "acq_Arab", "aeb_Arab", "afr_Latn",
     "ajp_Arab", "aka_Latn", "amh_Ethi", "apc_Arab", "arb_Arab", "ars_Arab",
@@ -362,11 +382,91 @@ def translate_text(text: str, source: str, target: str) -> str:
     return "\n\n".join(translated)
 
 
+class EmbeddedFont:
+    """A TrueType font loaded from disk, ready to be embedded as a PDF CID font."""
+
+    def __init__(self, name: str, data: bytes, glyph_ids: Dict[int, int], widths: Dict[int, int], metrics: Dict[str, int]):
+        self.name = name
+        self.data = data
+        self.glyph_ids = glyph_ids
+        self.widths = widths
+        self.metrics = metrics
+
+    def glyph_id(self, codepoint: int) -> int:
+        return self.glyph_ids.get(codepoint, self.glyph_ids.get(ord("?"), 0))
+
+    def encode(self, text: str) -> str:
+        return "".join(f"{self.glyph_id(ord(char)):04X}" for char in text)
+
+    def text_width(self, text: str, size: float) -> float:
+        total = sum(self.widths.get(ord(char), 500) for char in text)
+        return total * size / 1000.0
+
+
+@lru_cache(maxsize=2)
+def load_embedded_font(bold: bool = False) -> Optional[EmbeddedFont]:
+    """Load a TrueType font for PDF embedding, or None to fall back to base-14 Helvetica.
+
+    Without an embedded font a PDF can only show WinAnsi characters, so any non-Latin target
+    language (Cyrillic, Greek, ...) would come out as garbage.
+    """
+    try:
+        from fontTools.ttLib import TTFont
+    except ImportError:
+        return None
+
+    configured = PDF_FONT_BOLD_FILE if bold else PDF_FONT_FILE
+    candidates = PDF_FONT_BOLD_CANDIDATES if bold else PDF_FONT_CANDIDATES
+    for path in (configured, *candidates):
+        if not path or not Path(path).exists():
+            continue
+        try:
+            ttf = TTFont(path, fontNumber=0, lazy=True)
+            units = ttf["head"].unitsPerEm or 1000
+            scale = 1000.0 / units
+            metrics = ttf["hmtx"].metrics
+            glyph_ids: Dict[int, int] = {}
+            widths: Dict[int, int] = {}
+            for codepoint, glyph_name in ttf.getBestCmap().items():
+                glyph_ids[codepoint] = ttf.getGlyphID(glyph_name)
+                widths[codepoint] = round(metrics[glyph_name][0] * scale)
+            head = ttf["head"]
+            os2 = ttf["OS/2"] if "OS/2" in ttf else None
+            return EmbeddedFont(
+                re.sub(r"[^A-Za-z0-9-]", "", Path(path).stem) or "EmbeddedFont",
+                Path(path).read_bytes(),
+                glyph_ids,
+                widths,
+                {
+                    "x_min": round(head.xMin * scale),
+                    "y_min": round(head.yMin * scale),
+                    "x_max": round(head.xMax * scale),
+                    "y_max": round(head.yMax * scale),
+                    "ascent": round(ttf["hhea"].ascent * scale),
+                    "descent": round(ttf["hhea"].descent * scale),
+                    "cap_height": round(getattr(os2, "sCapHeight", 0) * scale) or 700,
+                },
+            )
+        except Exception:
+            continue
+    return None
+
+
+def pdf_measure_text(text: str, size: float, bold: bool = False) -> float:
+    font = load_embedded_font(bold)
+    if font:
+        return font.text_width(text, size)
+    return len(text) * PDF_AVG_CHAR_WIDTH * size
+
+
 def pdf_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
-def pdf_text_object(text: str) -> str:
+def pdf_text_object(text: str, bold: bool = False) -> str:
+    font = load_embedded_font(bold)
+    if font:
+        return "<" + font.encode(text) + ">"
     try:
         text.encode("ascii")
     except UnicodeEncodeError:
@@ -389,8 +489,14 @@ def wrap_pdf_line(text: str, max_chars: int = 88) -> List[str]:
     return lines
 
 
-def pdf_line_command(text: str, x: int, y: int, font: str = "F1", size: int = PDF_FONT_SIZE) -> str:
-    return f"BT /{font} {size} Tf {x} {y} Td {pdf_text_object(text)} Tj ET"
+def pdf_line_command(text: str, x: float, y: float, font: str = "F1", size: float = PDF_FONT_SIZE) -> str:
+    return f"BT /{font} {size:g} Tf {x:.2f} {y:.2f} Td {pdf_text_object(text, font == 'F2')} Tj ET"
+
+
+def pdf_cover_command(x: float, y: float, width: float, height: float) -> str:
+    # ponytail: covers with plain white. Text sitting on a coloured background gets a white
+    # patch; reading the actual background colour out of the content stream would fix it.
+    return f"1 1 1 rg {x:.2f} {y:.2f} {width:.2f} {height:.2f} re f 0 g"
 
 
 def markdown_page_sections(text: str) -> List[Dict[str, str]]:
@@ -445,10 +551,117 @@ def pdf_document_pages(text: str) -> List[Dict[str, Any]]:
     return document_pages or [{"source_page": "", "continuation": False, "lines": []}]
 
 
+def pdf_stream_object(dictionary: str, stream: bytes) -> bytes:
+    return f"<< {dictionary} /Length {len(stream)} >>\nstream\n".encode("utf-8") + stream + b"\nendstream"
+
+
+def pdf_to_unicode_stream(font: EmbeddedFont, codepoints: List[int]) -> bytes:
+    """A ToUnicode CMap, so text in the generated PDF stays selectable and searchable
+    even though the content stream addresses glyphs by id."""
+    lines = [
+        "/CIDInit /ProcSet findresource begin",
+        "12 dict begin",
+        "begincmap",
+        "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def",
+        "/CMapName /Adobe-Identity-UCS def",
+        "/CMapType 2 def",
+        "1 begincodespacerange",
+        "<0000> <FFFF>",
+        "endcodespacerange",
+    ]
+    pairs = sorted({(font.glyph_id(codepoint), codepoint) for codepoint in codepoints})
+    for start in range(0, len(pairs), 100):
+        block = pairs[start:start + 100]
+        lines.append(f"{len(block)} beginbfchar")
+        for glyph_id, codepoint in block:
+            target = chr(codepoint).encode("utf-16-be").hex().upper()
+            lines.append(f"<{glyph_id:04X}> <{target}>")
+        lines.append("endbfchar")
+    lines += ["endcmap", "CMapName currentdict /CMap defineresource pop", "end", "end"]
+    return "\n".join(lines).encode("utf-8")
+
+
+def pdf_font_file(font: EmbeddedFont, codepoints: List[int]) -> bytes:
+    """Strip the outlines of glyphs the document never draws. `retain_gids` keeps the original
+    glyph ids valid, so the cached cmap/width tables stay usable."""
+    try:
+        from fontTools import subset
+        from fontTools.ttLib import TTFont
+
+        ttf = TTFont(BytesIO(font.data), fontNumber=0)
+        subsetter = subset.Subsetter(options=subset.Options(retain_gids=True, notdef_outline=True))
+        subsetter.populate(unicodes=codepoints)
+        subsetter.subset(ttf)
+        output = BytesIO()
+        ttf.save(output)
+        return output.getvalue()
+    except Exception:
+        return font.data
+
+
+def pdf_font_objects(font: EmbeddedFont, codepoints: List[int], first_id: int) -> List[bytes]:
+    """Five objects describing one embedded font: file, descriptor, ToUnicode, CID font, Type0."""
+    file_id, descriptor_id, to_unicode_id, cid_id = first_id, first_id + 1, first_id + 2, first_id + 3
+    widths = sorted({(font.glyph_id(codepoint), font.widths.get(codepoint, 500)) for codepoint in codepoints})
+    width_array = " ".join(f"{glyph_id} [{width}]" for glyph_id, width in widths)
+    metrics = font.metrics
+    font_data = pdf_font_file(font, codepoints)
+    return [
+        pdf_stream_object(f"/Length1 {len(font_data)}", font_data),
+        (
+            f"<< /Type /FontDescriptor /FontName /{font.name} /Flags 4 "
+            f"/FontBBox [{metrics['x_min']} {metrics['y_min']} {metrics['x_max']} {metrics['y_max']}] "
+            f"/ItalicAngle 0 /Ascent {metrics['ascent']} /Descent {metrics['descent']} "
+            f"/CapHeight {metrics['cap_height']} /StemV 80 /FontFile2 {file_id} 0 R >>"
+        ).encode("utf-8"),
+        pdf_stream_object("", pdf_to_unicode_stream(font, codepoints)),
+        (
+            f"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /{font.name} "
+            f"/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> "
+            f"/FontDescriptor {descriptor_id} 0 R /DW 1000 /W [{width_array}] /CIDToGIDMap /Identity >>"
+        ).encode("utf-8"),
+        (
+            f"<< /Type /Font /Subtype /Type0 /BaseFont /{font.name} /Encoding /Identity-H "
+            f"/DescendantFonts [{cid_id} 0 R] /ToUnicode {to_unicode_id} 0 R >>"
+        ).encode("utf-8"),
+    ]
+
+
+def pdf_document_font_texts(pages: List[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """Every string the document draws, grouped by font resource name, so each font is only
+    embedded if it is actually used and only needs widths for the characters it draws."""
+    texts: Dict[str, List[str]] = {"F1": [], "F2": []}
+    for page in pages:
+        for line in page["lines"]:
+            texts[line["font"]].append(line["text"])
+        if page["source_page"]:
+            texts["F2"].append("Page " + page["source_page"] + " continued")
+        if page.get("footer", True):
+            texts["F1"].append("0123456789")
+    return texts
+
+
 def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
-    objects = ["<< /Type /Catalog /Pages 2 0 R >>"]
+    objects: List[bytes] = [b"<< /Type /Catalog /Pages 2 0 R >>"]
     page_refs = []
     next_object_id = 3
+
+    # Embedded fonts are shared by every page, so they are allocated before the pages.
+    font_texts = pdf_document_font_texts(pages)
+    font_resources = []
+    for index, bold in enumerate((False, True)):
+        name = f"F{index + 1}"
+        font = load_embedded_font(bold) if any(font_texts[name]) else None
+        if not font:
+            base = "Helvetica-Bold" if bold else "Helvetica"
+            font_resources.append(f"/{name} << /Type /Font /Subtype /Type1 /BaseFont /{base} >>")
+            continue
+        codepoints = sorted({ord(char) for text in font_texts[name] for char in text})
+        objects.extend(pdf_font_objects(font, codepoints, next_object_id))
+        font_resources.append(f"/{name} {next_object_id + 4} 0 R")
+        next_object_id += 5
+
+    resources = "/Font << " + " ".join(font_resources) + " >>"
 
     for output_page_number, page in enumerate(pages, start=1):
         width = page.get("width", PDF_PAGE_WIDTH)
@@ -458,7 +671,7 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
         content_id = next_object_id + 1
         next_object_id += 2
         page_refs.append(f"{page_id} 0 R")
-        commands = []
+        commands = list(page.get("commands", []))
         y = height - margin
         if page["source_page"]:
             heading = "Page " + page["source_page"]
@@ -468,34 +681,38 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
             y -= 24
         for line in page["lines"]:
             if line["text"]:
-                commands.append(pdf_line_command(line["text"], margin, y, line["font"], line["size"]))
+                # Lines carrying their own coordinates are placed absolutely (layout overlay),
+                # everything else flows down the page from the margin.
+                commands.append(
+                    pdf_line_command(line["text"], line.get("x", margin), line.get("y", y), line["font"], line["size"])
+                )
             y -= line["line_height"]
-        commands.append(
-            pdf_line_command(
-                f"{output_page_number}",
-                int(width - margin),
-                margin // 2,
-                "F1",
-                PDF_FOOTER_FONT_SIZE,
+        if page.get("footer", True):
+            commands.append(
+                pdf_line_command(
+                    f"{output_page_number}",
+                    width - margin,
+                    margin // 2,
+                    "F1",
+                    PDF_FOOTER_FONT_SIZE,
+                )
             )
-        )
         stream = "\n".join(commands).encode("utf-8")
         objects.append(
-            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width:.2f} {height:.2f}] "
-            f"/Resources << /Font << "
-            f"/F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> "
-            f"/F2 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >> "
-            f">> >> "
-            f"/Contents {content_id} 0 R >>"
+            (
+                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width:.2f} {height:.2f}] "
+                f"/Resources << {resources} >> "
+                f"/Contents {content_id} 0 R >>"
+            ).encode("utf-8")
         )
-        objects.append(f"<< /Length {len(stream)} >>\nstream\n{stream.decode('utf-8')}\nendstream")
+        objects.append(pdf_stream_object("", stream))
 
-    objects.insert(1, f"<< /Type /Pages /Kids [{' '.join(page_refs)}] /Count {len(page_refs)} >>")
+    objects.insert(1, f"<< /Type /Pages /Kids [{' '.join(page_refs)}] /Count {len(page_refs)} >>".encode("utf-8"))
     data = bytearray(b"%PDF-1.4\n")
     offsets = [0]
     for index, obj in enumerate(objects, start=1):
         offsets.append(len(data))
-        data.extend(f"{index} 0 obj\n{obj}\nendobj\n".encode("utf-8"))
+        data.extend(f"{index} 0 obj\n".encode("utf-8") + obj + b"\nendobj\n")
     xref_offset = len(data)
     data.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode("ascii"))
     for offset in offsets[1:]:
@@ -986,50 +1203,6 @@ def ocr_pdf_page(content: bytes, page_number: int) -> str:
     return result.stdout.strip()
 
 
-def ensure_libreoffice_available():
-    if not shutil.which("soffice"):
-        raise HTTPException(
-            status_code=500,
-            detail="LibreOffice is unavailable in this container. Rebuild the image with the libreoffice-writer package.",
-        )
-
-
-def convert_via_libreoffice(content: bytes, source_ext: str, target_ext: str) -> bytes:
-    ensure_libreoffice_available()
-    with tempfile.TemporaryDirectory() as temp_dir:
-        input_path = Path(temp_dir) / f"input.{source_ext}"
-        input_path.write_bytes(content)
-        profile_dir = Path(temp_dir) / "lo_profile"
-        command = [
-            "soffice",
-            "--headless",
-            "--norestore",
-            f"-env:UserInstallation=file://{profile_dir}",
-        ]
-        if source_ext == "pdf" and target_ext == "docx":
-            # Without this, LibreOffice imports PDFs as a Draw (vector graphics) document,
-            # which has no export filter to DOCX at all. This forces a Writer-compatible,
-            # paragraph-based import instead.
-            command.append("--infilter=writer_pdf_import")
-        command += ["--convert-to", target_ext, "--outdir", temp_dir, str(input_path)]
-        try:
-            subprocess.run(
-                command,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-        except subprocess.CalledProcessError as exc:
-            raise HTTPException(status_code=500, detail=f"LibreOffice conversion failed: {exc.stderr}") from exc
-        except subprocess.TimeoutExpired as exc:
-            raise HTTPException(status_code=504, detail="LibreOffice conversion timed out") from exc
-        output_path = Path(temp_dir) / f"input.{target_ext}"
-        if not output_path.exists():
-            raise HTTPException(status_code=500, detail="LibreOffice did not produce an output file")
-        return output_path.read_bytes()
-
-
 def extract_pdf_markdown_from_bytes(
     content: bytes,
     content_type: str = "application/pdf",
@@ -1083,6 +1256,273 @@ def extract_pdf_markdown_from_bytes(
             detail=f"No extractable text found. This PDF may be scanned, image-only, or protected. {ocr_detail}",
         )
     return markdown
+
+
+def multiply_matrix(a: Tuple[float, ...], b: Tuple[float, ...]) -> Tuple[float, ...]:
+    return (
+        a[0] * b[0] + a[1] * b[2],
+        a[0] * b[1] + a[1] * b[3],
+        a[2] * b[0] + a[3] * b[2],
+        a[2] * b[1] + a[3] * b[3],
+        a[4] * b[0] + a[5] * b[2] + b[4],
+        a[4] * b[1] + a[5] * b[3] + b[5],
+    )
+
+
+def pdf_run_width(text: str, size: float, font_dict: Any) -> Tuple[float, bool]:
+    """Width of an extracted run in the *original* font.
+
+    Simple fonts carry their glyph widths in the page resources, which makes the covering
+    rectangles exact. Composite (Type0) fonts would need the CID mapping reversed, so those
+    fall back to an estimate from our own font metrics. The flag says which of the two it was,
+    because only the estimate needs a safety margin when covering the original text.
+    """
+    try:
+        first_char = int(font_dict["/FirstChar"])
+        widths = font_dict["/Widths"].get_object()
+        total = 0.0
+        for char in text:
+            index = char.encode("cp1252")[0] - first_char
+            total += float(widths[index].get_object()) if 0 <= index < len(widths) else 500.0
+        return total * size / 1000.0, True
+    except Exception:
+        return pdf_measure_text(text, size), False
+
+
+def pdf_page_runs(page) -> List[Dict[str, Any]]:
+    """Every text run on the page with its position on the page and its rendered font size."""
+    runs: List[Dict[str, Any]] = []
+
+    def visitor(text, cm, tm, font_dict, font_size):
+        if not text or not text.strip():
+            return
+        matrix = multiply_matrix(tuple(tm), tuple(cm))
+        scale = math.sqrt(abs(matrix[0] * matrix[3] - matrix[1] * matrix[2])) or 1.0
+        size = abs(float(font_size or PDF_FONT_SIZE)) * scale or PDF_FONT_SIZE
+        width, exact = pdf_run_width(text.strip(), size, font_dict)
+        runs.append({
+            "text": text,
+            "x": matrix[4],
+            "y": matrix[5],
+            "size": size,
+            "width": width,
+            "exact": exact,
+        })
+
+    page.extract_text(visitor_text=visitor)
+    return runs
+
+
+def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Merge runs that share a baseline into lines.
+
+    Grouping by baseline is the one grouping PDFs make reliable, which is why the layout
+    pipeline builds on it instead of trying to detect blocks or columns geometrically.
+    """
+    baselines: List[List[Dict[str, Any]]] = []
+    for run in sorted(runs, key=lambda item: -item["y"]):
+        if baselines and abs(baselines[-1][0]["y"] - run["y"]) <= max(1.0, 0.3 * run["size"]):
+            baselines[-1].append(run)
+        else:
+            baselines.append([run])
+
+    lines: List[Dict[str, Any]] = []
+    for baseline in baselines:
+        line = None
+        for run in sorted(baseline, key=lambda item: item["x"]):
+            width = run.get("width") or pdf_measure_text(run["text"], run["size"])
+            if line is None:
+                line = {
+                    "text": run["text"],
+                    "x": run["x"],
+                    "y": run["y"],
+                    "right": run["x"] + width,
+                    "size": run["size"],
+                    "exact": run.get("exact", False),
+                }
+                continue
+            gap = run["x"] - line["right"]
+            separator = " " if gap > 0.2 * run["size"] and not line["text"].endswith(" ") else ""
+            line["text"] += separator + run["text"]
+            line["right"] = max(line["right"], run["x"] + width)
+            line["size"] = max(line["size"], run["size"])
+            line["exact"] = line["exact"] and run.get("exact", False)
+        line["text"] = re.sub(r"\s+", " ", line["text"]).strip()
+        if line["text"]:
+            lines.append(line)
+    return lines
+
+
+def group_pdf_paragraphs(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Bundle lines into paragraphs, purely so the model gets whole sentences.
+
+    A wrong split only costs translation quality here, never placement: every line keeps its
+    own coordinates and the translation is reflowed into exactly those.
+    """
+    paragraphs: List[Dict[str, Any]] = []
+    for line in lines:
+        current = paragraphs[-1] if paragraphs else None
+        if current:
+            previous = current["lines"][-1]
+            spacing = previous["y"] - line["y"]
+            fits = (
+                0 < spacing <= 1.8 * max(previous["size"], line["size"])
+                and abs(previous["x"] - line["x"]) <= 3
+                and abs(previous["size"] - line["size"]) <= 0.2 * previous["size"]
+            )
+            if fits:
+                current["lines"].append(line)
+                continue
+        paragraphs.append({"lines": [line]})
+    for paragraph in paragraphs:
+        paragraph["text"] = " ".join(line["text"] for line in paragraph["lines"])
+    return paragraphs
+
+
+def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, Any]]:
+    try:
+        reader = PdfReader(BytesIO(content))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read PDF: {exc}") from exc
+    if not reader.pages:
+        raise HTTPException(status_code=422, detail="PDF has no pages")
+
+    pages = []
+    for index in parse_page_range(page_range, len(reader.pages)):
+        page = reader.pages[index - 1]
+        box = page.mediabox
+        # Rotated pages would need the whole overlay transformed; they keep their original text.
+        rotated = int(page.get("/Rotate", 0) or 0) % 360 != 0
+        lines = [] if rotated else group_pdf_lines(pdf_page_runs(page))
+        pages.append({
+            "number": index,
+            "width": float(box.width),
+            "height": float(box.height),
+            "paragraphs": group_pdf_paragraphs(lines),
+        })
+    if not any(page["paragraphs"] for page in pages):
+        raise HTTPException(
+            status_code=422,
+            detail="No positioned text found. This PDF may be scanned or image-only, "
+                   "translate it with Plaintext enabled instead.",
+        )
+    return pages
+
+
+def wrap_text_to_width(text: str, width: float, size: float) -> List[str]:
+    lines: List[str] = []
+    current = ""
+    for word in text.split():
+        candidate = f"{current} {word}".strip()
+        if current and pdf_measure_text(candidate, size) > width:
+            lines.append(current)
+            current = word
+        else:
+            current = candidate
+    if current:
+        lines.append(current)
+    return lines or [""]
+
+
+def cover_right_edge(line: Dict[str, Any], wanted: float, neighbours: List[Dict[str, Any]]) -> float:
+    """Widen the cover as far as the estimate asks, but never into a neighbouring column."""
+    for other in neighbours:
+        if other is line:
+            continue
+        if abs(other["y"] - line["y"]) <= 0.6 * line["size"] and other["x"] > line["x"]:
+            wanted = min(wanted, other["x"] - 1)
+    return max(wanted, line["right"])
+
+
+def reflow_paragraph(
+    paragraph: Dict[str, Any],
+    text: str,
+    neighbours: Optional[List[Dict[str, Any]]] = None,
+) -> Tuple[List[str], List[Dict[str, Any]]]:
+    """Cover the paragraph's original lines and lay the translation out in the same column.
+
+    Returns the cover commands plus absolutely positioned text lines.
+    """
+    lines = paragraph["lines"]
+    left = min(line["x"] for line in lines)
+    width = max(max(line["right"] for line in lines) - left, 10.0)
+    base_size = max(line["size"] for line in lines)
+    if len(lines) > 1:
+        leading = (lines[0]["y"] - lines[-1]["y"]) / (len(lines) - 1)
+    else:
+        leading = 1.2 * base_size
+
+    size = base_size
+    wrapped = wrap_text_to_width(text, width, size)
+    while len(wrapped) > len(lines) and size > base_size * PDF_LAYOUT_MIN_SCALE:
+        size = max(size * 0.95, base_size * PDF_LAYOUT_MIN_SCALE)
+        wrapped = wrap_text_to_width(text, width, size)
+
+    factor = 1.0 if all(line.get("exact") for line in lines) else PDF_COVER_WIDTH_FACTOR
+    covers = []
+    for line in lines:
+        # Each line is covered to its own estimated end, so a short line does not paint over
+        # whatever sits beside the paragraph.
+        right = cover_right_edge(line, line["x"] + (line["right"] - line["x"]) * factor, neighbours or [])
+        covers.append(
+            pdf_cover_command(line["x"] - 1, line["y"] - 0.25 * line["size"], right - line["x"] + 2, 1.2 * line["size"])
+        )
+    placed = []
+    for index, wrapped_line in enumerate(wrapped):
+        # Translations longer than the original keep running below the last line: overflowing
+        # is recoverable for the reader, silently cut off text is not.
+        y = lines[index]["y"] if index < len(lines) else lines[-1]["y"] - leading * (index - len(lines) + 1)
+        placed.append({"text": wrapped_line, "font": "F1", "size": size, "line_height": 0, "x": left, "y": y})
+    return covers, placed
+
+
+def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], translations: List[str]) -> bytes:
+    """Stamp the translated text onto the original pages, so images, icons and vector graphics
+    survive untouched."""
+    overlay_pages = []
+    index = 0
+    for page in pages:
+        commands: List[str] = []
+        lines: List[Dict[str, Any]] = []
+        page_lines = [line for paragraph in page["paragraphs"] for line in paragraph["lines"]]
+        for paragraph in page["paragraphs"]:
+            # A paragraph without a translation keeps its original text rather than being
+            # covered with nothing.
+            if index < len(translations) and translations[index].strip():
+                covers, placed = reflow_paragraph(paragraph, translations[index], page_lines)
+                commands.extend(covers)
+                lines.extend(placed)
+            index += 1
+        overlay_pages.append({
+            "width": page["width"],
+            "height": page["height"],
+            "margin": 0,
+            "source_page": "",
+            "continuation": False,
+            "footer": False,
+            "lines": lines,
+            "commands": commands,
+        })
+
+    overlay_reader = PdfReader(BytesIO(create_pdf_from_pages(overlay_pages)))
+    reader = PdfReader(BytesIO(content))
+    writer = PdfWriter()
+    selected = {page["number"] for page in pages}
+    overlays = {page["number"]: overlay_reader.pages[position] for position, page in enumerate(pages)}
+    for number in range(1, len(reader.pages) + 1):
+        original = reader.pages[number - 1]
+        if number in selected:
+            original.merge_page(overlays[number])
+        writer.add_page(original)
+    output = BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def export_pdf_layout_with_translated_text(content: bytes, translated_text: str) -> bytes:
+    # Split without dropping empty blocks: translations are matched to paragraphs by position.
+    blocks = [block.strip() for block in translated_text.split("\n\n")]
+    return render_pdf_layout_overlay(content, extract_pdf_layout(content), blocks)
 
 
 def exception_message(exc: Exception) -> str:
@@ -2017,37 +2457,6 @@ def run_pdf_translate_job(
         cleanup_job_payload(job_id)
 
 
-def dedupe_adjacent_paragraphs(text: str) -> Tuple[str, List[int]]:
-    """Collapse consecutive duplicate paragraphs and drop a leading "everything crammed
-    together" artifact paragraph, returning the cleaned text plus a map from each original
-    paragraph index back to its index in the cleaned list (-1 if dropped entirely).
-
-    LibreOffice's PDF import (writer_pdf_import filter) reliably duplicates every paragraph,
-    and on top of that sometimes produces one extra leading paragraph that's the whole page's
-    text run together with no spacing between what were separate sentences. Translating either
-    of these as-is feeds the model a lot of repeated text, which tends to send NLLB into a
-    repetition loop instead of a normal translation.
-    """
-    paragraphs = text.split("\n\n")
-    deduped: List[str] = []
-    paragraph_map: List[int] = []
-    for paragraph in paragraphs:
-        if deduped and paragraph.strip() == deduped[-1].strip():
-            paragraph_map.append(len(deduped) - 1)
-        else:
-            deduped.append(paragraph)
-            paragraph_map.append(len(deduped) - 1)
-
-    if len(deduped) > 1:
-        first_len = len(re.sub(r"\s+", "", deduped[0]))
-        rest_len = len(re.sub(r"\s+", "", "".join(deduped[1:])))
-        if first_len > rest_len:
-            deduped = deduped[1:]
-            paragraph_map = [index - 1 for index in paragraph_map]
-
-    return "\n\n".join(deduped), paragraph_map
-
-
 def run_pdf_layout_translate_job(
     job_id: str,
     content: bytes,
@@ -2056,28 +2465,37 @@ def run_pdf_layout_translate_job(
     filename: str,
 ):
     try:
-        update_job(job_id, status="running", message="Converting PDF to DOCX", started_at=time.time())
-        docx_content = convert_via_libreoffice(content, "pdf", "docx")
+        update_job(job_id, status="running", message="Reading PDF layout", started_at=time.time())
+        pages = extract_pdf_layout(content)
         wait_if_paused_or_cancelled(job_id)
-        text = extract_docx_text_from_bytes(docx_content)
-        deduped_text, paragraph_map = dedupe_adjacent_paragraphs(text)
-        chunks = split_long_text(deduped_text, MAX_CHARS)
+        paragraphs = [paragraph["text"] for page in pages for paragraph in page["paragraphs"]]
+        # One paragraph per chunk: the overlay maps translations back to paragraphs by position,
+        # and the model does not reliably keep paragraph breaks inside a single chunk.
+        chunks: List[str] = []
+        chunk_counts: List[int] = []
+        for paragraph in paragraphs:
+            parts = split_long_text(paragraph, MAX_CHARS)
+            chunks.extend(parts)
+            chunk_counts.append(len(parts))
         update_job(job_id, total=len(chunks), message=f"Translating 0 / {len(chunks)} chunks")
         translated_chunks = translate_chunks(chunks, source, target, job_id)
-        translated_paragraphs = "\n\n".join(translated_chunks).split("\n\n")
-        result = "\n\n".join(
-            translated_paragraphs[index] if 0 <= index < len(translated_paragraphs) else ""
-            for index in paragraph_map
-        )
+
+        translated: List[str] = []
+        position = 0
+        for count in chunk_counts:
+            # Collapsed to a single line so the paragraph split on re-export stays exact.
+            translated.append(re.sub(r"\s+", " ", " ".join(translated_chunks[position:position + count])).strip())
+            position += count
+        result = "\n\n".join(translated)
         history_id = save_history(
             "translate-pdf-layout",
             result,
             source,
             target,
             filename,
-            docx_content,
-            "docx",
-            {"export_as": "pdf"},
+            content,
+            "pdf",
+            {"layout": "true"},
         )
         update_job(
             job_id,
@@ -2280,10 +2698,7 @@ def original_export_media_type(extension: str) -> str:
 
 def export_original_history_content(extension: str, content: bytes, text: str, source_meta: Dict[str, str]) -> bytes:
     if extension == "docx":
-        docx_bytes = export_docx_with_translated_text(content, text)
-        if source_meta.get("export_as") == "pdf":
-            return convert_via_libreoffice(docx_bytes, "docx", "pdf")
-        return docx_bytes
+        return export_docx_with_translated_text(content, text)
     if extension == "odt":
         return export_odt_with_translated_text(content, text)
     if extension == "pptx":
@@ -2305,6 +2720,8 @@ def export_original_history_content(extension: str, content: bytes, text: str, s
     if extension in ("xlf", "xliff"):
         return export_xliff_with_translated_text(content, text)
     if extension == "pdf":
+        if source_meta.get("layout") == "true":
+            return export_pdf_layout_with_translated_text(content, text)
         return create_text_pdf(text)
     if extension in ("md", "txt"):
         return text.encode("utf-8")
@@ -2348,11 +2765,10 @@ def export_history(item_id: str, format: str = "md"):
         text,
         source_meta,
     )
-    response_extension = "pdf" if source_meta.get("export_as") == "pdf" else source_extension
     return Response(
         content,
-        media_type=original_export_media_type(response_extension),
-        headers={"Content-Disposition": f'attachment; filename="{filename_base}.{response_extension}"'},
+        media_type=original_export_media_type(source_extension),
+        headers={"Content-Disposition": f'attachment; filename="{filename_base}.{source_extension}"'},
     )
 
 

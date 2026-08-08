@@ -3,5 +3,6 @@ uvicorn[standard]==0.35.0
 transformers==4.54.1
 sentencepiece==0.2.0
 pypdf==5.9.0
+fonttools==4.63.0
 python-multipart==0.0.20
 httpx==0.28.1

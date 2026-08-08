@@ -17,6 +17,12 @@ import app.main as main
 import app.server as server
 
 
+def pdf_text(content):
+    from pypdf import PdfReader
+
+    return "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(content)).pages)
+
+
 class FakePage:
     def __init__(self, text):
         self.text = text
@@ -554,86 +560,122 @@ class MainTests(unittest.TestCase):
 
         self.assertTrue(content.startswith(b"%PDF-1.4"))
         self.assertIn(b"/Type /Page", content)
-        self.assertIn(b"Translated text", content)
-        self.assertIn(b"/Helvetica-Bold", content)
+        self.assertIn("Translated text", pdf_text(content))
 
     def test_create_text_pdf_preserves_markdown_page_breaks(self):
         content = main.create_text_pdf("# Page 1\n\nFirst\n\n# Page 2\n\nSecond")
+        text = pdf_text(content)
 
         self.assertIn(b"/Count 2", content)
-        self.assertIn(b"Page 1", content)
-        self.assertIn(b"Page 2", content)
+        self.assertIn("Page 1", text)
+        self.assertIn("Page 2", text)
 
     def test_create_text_pdf_formats_markdown_headings(self):
         content = main.create_text_pdf("# Title\n\nBody")
 
         self.assertIn(b"/F2 15 Tf", content)
-        self.assertIn(b"Title", content)
+        self.assertIn("Title", pdf_text(content))
 
-    def test_convert_via_libreoffice_invokes_soffice_and_reads_output(self):
-        def fake_run(args, check, capture_output, text, timeout):
-            outdir = Path(args[args.index("--outdir") + 1])
-            (outdir / "input.docx").write_bytes(b"fake docx")
-            return Mock(stdout="", stderr="")
+    def test_create_text_pdf_embeds_font_for_non_latin_text(self):
+        if not main.load_embedded_font(False):
+            self.skipTest("no TrueType font available on this machine")
+        content = main.create_text_pdf("Privet mir: Привет")
 
-        with patch.object(main.shutil, "which", return_value="/usr/bin/soffice"), \
-                patch.object(main.subprocess, "run", side_effect=fake_run):
-            result = main.convert_via_libreoffice(b"fake pdf", "pdf", "docx")
+        self.assertIn(b"/FontFile2", content)
+        # Round-trips through the ToUnicode CMap, so the text stays selectable.
+        self.assertIn("Привет", pdf_text(content))
 
-        self.assertEqual(result, b"fake docx")
-
-    def test_convert_via_libreoffice_requires_soffice(self):
-        with patch.object(main.shutil, "which", return_value=None):
-            with self.assertRaises(main.HTTPException) as ctx:
-                main.convert_via_libreoffice(b"fake pdf", "pdf", "docx")
-
-        self.assertEqual(ctx.exception.status_code, 500)
-
-    def test_export_original_history_content_converts_docx_to_pdf_when_marked(self):
-        with patch.object(main, "export_docx_with_translated_text", return_value=b"translated docx") as export_mock, \
-                patch.object(main, "convert_via_libreoffice", return_value=b"translated pdf") as convert_mock:
-            result = main.export_original_history_content("docx", b"source docx", "translated text", {"export_as": "pdf"})
-
-        export_mock.assert_called_once_with(b"source docx", "translated text")
-        convert_mock.assert_called_once_with(b"translated docx", "docx", "pdf")
-        self.assertEqual(result, b"translated pdf")
-
-    def test_export_original_history_content_leaves_plain_docx_untouched(self):
-        with patch.object(main, "export_docx_with_translated_text", return_value=b"translated docx") as export_mock, \
-                patch.object(main, "convert_via_libreoffice") as convert_mock:
+    def test_export_original_history_content_exports_docx(self):
+        with patch.object(main, "export_docx_with_translated_text", return_value=b"translated docx") as export_mock:
             result = main.export_original_history_content("docx", b"source docx", "translated text", {})
 
         export_mock.assert_called_once_with(b"source docx", "translated text")
-        convert_mock.assert_not_called()
         self.assertEqual(result, b"translated docx")
 
-    def test_dedupe_adjacent_paragraphs_collapses_duplicates_and_maps_back(self):
-        text = "A\n\nA\n\nB\n\nC\n\nC"
+    def test_export_original_history_content_uses_layout_overlay_when_marked(self):
+        with patch.object(main, "export_pdf_layout_with_translated_text", return_value=b"overlay pdf") as overlay_mock:
+            result = main.export_original_history_content("pdf", b"source pdf", "text", {"layout": "true"})
 
-        deduped, paragraph_map = main.dedupe_adjacent_paragraphs(text)
+        overlay_mock.assert_called_once_with(b"source pdf", "text")
+        self.assertEqual(result, b"overlay pdf")
 
-        self.assertEqual(deduped, "A\n\nB\n\nC")
-        self.assertEqual(paragraph_map, [0, 0, 1, 2, 2])
+    def test_group_pdf_lines_merges_runs_on_the_same_baseline(self):
+        runs = [
+            {"text": "Hello", "x": 50.0, "y": 700.0, "size": 11.0},
+            {"text": "world", "x": 90.0, "y": 700.2, "size": 11.0},
+            {"text": "Second", "x": 50.0, "y": 686.0, "size": 11.0},
+        ]
 
-    def test_dedupe_adjacent_paragraphs_drops_leading_crammed_together_artifact(self):
-        # LibreOffice's PDF import sometimes adds one extra leading paragraph that's the
-        # whole page's text run together with no spacing between sentences.
-        text = "AlphaAlphaBravoBravoCharlieCharlie\n\nAlpha\n\nBravo\n\nCharlie"
+        lines = main.group_pdf_lines(runs)
 
-        deduped, paragraph_map = main.dedupe_adjacent_paragraphs(text)
+        self.assertEqual([line["text"] for line in lines], ["Hello world", "Second"])
+        self.assertGreater(lines[0]["right"], 90.0)
 
-        self.assertEqual(deduped, "Alpha\n\nBravo\n\nCharlie")
-        self.assertEqual(paragraph_map, [-1, 0, 1, 2])
+    def test_group_pdf_paragraphs_splits_on_gaps_and_indentation(self):
+        lines = [
+            {"text": "One", "x": 50.0, "y": 700.0, "right": 100.0, "size": 11.0},
+            {"text": "still one", "x": 50.0, "y": 686.0, "right": 100.0, "size": 11.0},
+            {"text": "far below", "x": 50.0, "y": 600.0, "right": 100.0, "size": 11.0},
+            {"text": "indented", "x": 90.0, "y": 586.0, "right": 140.0, "size": 11.0},
+        ]
 
-    def test_dedupe_adjacent_paragraphs_leaves_unique_text_untouched(self):
-        text = "A\n\nB\n\nC"
+        paragraphs = main.group_pdf_paragraphs(lines)
 
-        deduped, paragraph_map = main.dedupe_adjacent_paragraphs(text)
+        self.assertEqual([paragraph["text"] for paragraph in paragraphs],
+                         ["One still one", "far below", "indented"])
 
-        self.assertEqual(deduped, text)
-        self.assertEqual(paragraph_map, [0, 1, 2])
+    def test_reflow_paragraph_shrinks_instead_of_truncating(self):
+        paragraph = {"lines": [
+            {"text": "Short", "x": 50.0, "y": 700.0, "right": 200.0, "size": 11.0},
+            {"text": "line", "x": 50.0, "y": 686.0, "right": 200.0, "size": 11.0},
+        ]}
+        long_text = "Eine deutlich laengere Uebersetzung " * 6
 
-    def test_run_pdf_layout_translate_job_completes_via_docx_roundtrip(self):
+        covers, placed = main.reflow_paragraph(paragraph, long_text)
+
+        self.assertEqual(len(covers), 2)
+        # Shrunk, but never below the floor, and never dropping lines to make it fit.
+        self.assertLess(placed[0]["size"], 11.0)
+        self.assertGreaterEqual(placed[0]["size"], 11.0 * main.PDF_LAYOUT_MIN_SCALE)
+        self.assertGreater(len(placed), 2)
+        self.assertEqual(" ".join(line["text"] for line in placed).split(), long_text.split())
+
+    def test_wrap_text_to_width_keeps_every_word(self):
+        text = "eins zwei drei vier fuenf sechs sieben acht"
+
+        wrapped = main.wrap_text_to_width(text, 60.0, 11.0)
+
+        self.assertGreater(len(wrapped), 1)
+        self.assertEqual(" ".join(wrapped).split(), text.split())
+
+    def test_pdf_layout_roundtrip_replaces_text_and_keeps_page_size(self):
+        source = main.create_pdf_from_pages([{
+            "width": 400, "height": 300, "margin": 40,
+            "source_page": "", "continuation": False, "footer": False,
+            "lines": [
+                {"text": "Hello world", "font": "F1", "size": 11, "line_height": 14},
+                {"text": "second line", "font": "F1", "size": 11, "line_height": 14},
+            ],
+        }])
+
+        pages = main.extract_pdf_layout(source)
+        self.assertEqual(len(pages), 1)
+        self.assertAlmostEqual(pages[0]["width"], 400, places=1)
+        self.assertIn("Hello world", pages[0]["paragraphs"][0]["text"])
+
+        overlay = main.export_pdf_layout_with_translated_text(
+            source,
+            "\n\n".join(paragraph["text"].replace("Hello", "Hallo") for paragraph in pages[0]["paragraphs"]),
+        )
+        text = pdf_text(overlay)
+        self.assertIn("Hallo", text)
+
+    def test_run_pdf_layout_translate_job_overlays_original_pdf(self):
+        source = main.create_pdf_from_pages([{
+            "width": 400, "height": 300, "margin": 40,
+            "source_page": "", "continuation": False, "footer": False,
+            "lines": [{"text": "Hello world", "font": "F1", "size": 11, "line_height": 14}],
+        }])
         temp_dir = test_temp_dir()
         try:
             with patch.object(main, "HISTORY_DIR", temp_dir):
@@ -642,18 +684,20 @@ class MainTests(unittest.TestCase):
                         main.JOBS.clear()
                         main.JOB_RUNNERS.clear()
                     job_id = main.create_job("translate-pdf-layout", "eng_Latn", "deu_Latn", "input.pdf")
-                    with patch.object(main, "convert_via_libreoffice", return_value=minimal_docx(["Hello world"])) as convert_mock, \
-                            patch.object(main, "translate_one", return_value="Hallo Welt"):
-                        main.run_pdf_layout_translate_job(job_id, b"fake pdf", "eng_Latn", "deu_Latn", "input.pdf")
+                    with patch.object(main, "translate_one", return_value="Hallo Welt"):
+                        main.run_pdf_layout_translate_job(job_id, source, "eng_Latn", "deu_Latn", "input.pdf")
 
                     job = main.get_job(job_id)
                     history = main.history_item(job["history_id"])
+                    exported = main.export_original_history_content(
+                        "pdf", source, job["result"], history["source_meta"]
+                    )
 
             self.assertEqual(job["status"], "complete")
             self.assertEqual(job["result"], "Hallo Welt")
-            self.assertEqual(convert_mock.call_args_list[0].args, (b"fake pdf", "pdf", "docx"))
-            self.assertEqual(history["source_extension"], "docx")
-            self.assertEqual(history["source_meta"], {"export_as": "pdf"})
+            self.assertEqual(history["source_extension"], "pdf")
+            self.assertEqual(history["source_meta"], {"layout": "true"})
+            self.assertIn("Hallo Welt", pdf_text(exported))
         finally:
             with main.JOBS_LOCK:
                 main.JOBS.clear()
@@ -661,9 +705,10 @@ class MainTests(unittest.TestCase):
             shutil.rmtree(temp_dir.parent, ignore_errors=True)
 
     def test_pdf_text_object_encodes_unicode(self):
-        self.assertEqual(main.pdf_text_object("Grusse"), "(Grusse)")
-        self.assertEqual(main.pdf_text_object("Gruesse aeoeue"), "(Gruesse aeoeue)")
-        self.assertTrue(main.pdf_text_object("Gruesse: " + chr(228)).startswith("<FEFF"))
+        with patch.object(main, "load_embedded_font", return_value=None):
+            self.assertEqual(main.pdf_text_object("Grusse"), "(Grusse)")
+            self.assertEqual(main.pdf_text_object("Gruesse aeoeue"), "(Gruesse aeoeue)")
+            self.assertTrue(main.pdf_text_object("Gruesse: " + chr(228)).startswith("<FEFF"))
 
     def test_cleanup_history_removes_old_files(self):
         temp_dir = test_temp_dir()

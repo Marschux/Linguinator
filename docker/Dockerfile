@@ -6,7 +6,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates poppler-utils tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng libreoffice-writer libreoffice-draw \
+    && apt-get install -y --no-install-recommends ca-certificates poppler-utils tesseract-ocr tesseract-ocr-deu tesseract-ocr-eng fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 COPY docker/requirements.txt .

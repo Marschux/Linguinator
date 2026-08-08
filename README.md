@@ -20,6 +20,7 @@ http://localhost:5051/
 
 - Text and document translation with progress, pause, resume, and stop.
 - PDF extraction, PDF translation, and PDF download.
+- Layout-preserving PDF translation: the translation is placed back into the original lines, images and graphics stay untouched. Tick `Plaintext` for a plain text export instead.
 - Original-format export for DOCX, ODT, PPTX, CSV, XLSX, HTML, SRT/VTT, JSON/YAML, PO, and XLIFF.
 - Local history with configurable retention, retained source files, and Markdown, TXT, PDF, or original-format downloads.
 - Persistent global job queue with configurable worker count.
@@ -74,6 +75,8 @@ The `.env` file is grouped by topic:
 | `LINGUINATOR_DEFAULT_TARGET` | `deu_Latn` | Default target language code. |
 | `LINGUINATOR_ENABLE_OCR` | `true` | Enables OCR fallback for scanned PDFs when the image dependencies are available. Only controlled via this env var, there is no per-request UI toggle. |
 | `LINGUINATOR_OCR_LANGUAGE` | `deu+eng` | OCR language setting passed to Tesseract. |
+| `LINGUINATOR_PDF_FONT` | empty | TrueType font embedded into generated PDFs. Defaults to DejaVu Sans from the image; needed for non-Latin target languages. |
+| `LINGUINATOR_PDF_FONT_BOLD` | empty | Bold variant of the embedded PDF font. |
 | `LINGUINATOR_AUTH_ENABLED` | `false` | Enables HTTP Basic Auth for the UI and API. `/health` stays public for health checks. |
 | `LINGUINATOR_AUTH_USERNAME` | `admin` | Basic Auth username. |
 | `LINGUINATOR_AUTH_PASSWORD` | `changeme` | Basic Auth password. Change this before enabling auth. |
