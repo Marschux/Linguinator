@@ -12,8 +12,6 @@ let languageData = null;
     let historyVisibleCount = 5;
     const HISTORY_PAGE_SIZE = 5;
     const baseTitle = document.title || "Linguinator";
-    const PREVIEW_MAX_CHARS = 12000;
-    const EXCERPT_MAX_CHARS = 4000;
     const originalExportExtensions = ["docx", "odt", "pptx", "csv", "xlsx", "html", "htm", "srt", "vtt", "json", "yaml", "yml", "po", "xlf", "xliff"];
     const outputFormatKeys = {txt: "formatTxt", md: "formatMarkdown", pdf: "formatPdf", original: "formatOriginal"};
     const uiText = {
@@ -45,9 +43,6 @@ let languageData = null;
         resume: "Resume",
         stop: "Stop",
         skip: "Skip",
-        preview: "Preview",
-        downloadFormat: "Download Format",
-        download: "Download",
         delete: "Delete",
         history: "History",
         noQueuedJobs: "No queued jobs.",
@@ -60,7 +55,6 @@ let languageData = null;
         chunks: "chunks",
         workerSingular: "worker",
         workerPlural: "workers",
-        jobCancelled: "Job cancelled.",
         jobFailed: "Job failed.",
         selectFileFirst: "Select a supported text, document, table, subtitle, or localization file first.",
         selectPdfFirst: "Select a PDF first.",
@@ -73,9 +67,6 @@ let languageData = null;
         ocrEnabled: "OCR enabled for this request",
         ocrDisabled: "OCR disabled",
         ocrUnavailable: "OCR unavailable in this container",
-        previewExcerptTruncated: "Preview shows only a translated excerpt. The download contains the full export.",
-        previewExcerpt: "Preview shows a translated excerpt for this file type. The download contains the full export.",
-        previewTruncated: "Preview truncated. The download contains the full export.",
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
         formatPdf: "PDF",
@@ -109,9 +100,6 @@ let languageData = null;
         resume: "Fortsetzen",
         stop: "Stoppen",
         skip: "Ueberspringen",
-        preview: "Vorschau",
-        downloadFormat: "Download-Format",
-        download: "Download",
         delete: "Loeschen",
         history: "History",
         noQueuedJobs: "Keine wartenden Jobs.",
@@ -124,7 +112,6 @@ let languageData = null;
         chunks: "Chunks",
         workerSingular: "Worker",
         workerPlural: "Worker",
-        jobCancelled: "Job abgebrochen.",
         jobFailed: "Job fehlgeschlagen.",
         selectFileFirst: "Waehle zuerst eine unterstuetzte Text-, Dokument-, Tabellen-, Untertitel- oder Lokalisierungsdatei.",
         selectPdfFirst: "Waehle zuerst eine PDF aus.",
@@ -137,9 +124,6 @@ let languageData = null;
         ocrEnabled: "OCR fuer diesen Auftrag aktiviert",
         ocrDisabled: "OCR deaktiviert",
         ocrUnavailable: "OCR in diesem Container nicht verfuegbar",
-        previewExcerptTruncated: "Die Vorschau zeigt nur einen uebersetzten Auszug. Der Download enthaelt den kompletten Export.",
-        previewExcerpt: "Die Vorschau zeigt fuer diesen Dateityp einen uebersetzten Auszug. Der Download enthaelt den kompletten Export.",
-        previewTruncated: "Vorschau gekuerzt. Der Download enthaelt den kompletten Export.",
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
         formatPdf: "PDF",
@@ -173,9 +157,6 @@ let languageData = null;
         resume: "Continuar",
         stop: "Detener",
         skip: "Omitir",
-        preview: "Vista previa",
-        downloadFormat: "Formato de descarga",
-        download: "Descargar",
         delete: "Eliminar",
         history: "Historial",
         noQueuedJobs: "No hay trabajos en cola.",
@@ -188,7 +169,6 @@ let languageData = null;
         chunks: "fragmentos",
         workerSingular: "worker",
         workerPlural: "workers",
-        jobCancelled: "Trabajo cancelado.",
         jobFailed: "El trabajo fallo.",
         selectFileFirst: "Selecciona primero un archivo compatible de texto, documento, tabla, subtitulos o localizacion.",
         selectPdfFirst: "Selecciona primero un PDF.",
@@ -201,9 +181,6 @@ let languageData = null;
         ocrEnabled: "OCR activado para esta solicitud",
         ocrDisabled: "OCR desactivado",
         ocrUnavailable: "OCR no disponible en este contenedor",
-        previewExcerptTruncated: "La vista previa muestra solo un extracto traducido. La descarga contiene la exportacion completa.",
-        previewExcerpt: "La vista previa muestra un extracto traducido para este tipo de archivo. La descarga contiene la exportacion completa.",
-        previewTruncated: "Vista previa recortada. La descarga contiene la exportacion completa.",
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
         formatPdf: "PDF",
@@ -237,9 +214,6 @@ let languageData = null;
         resume: "Reprendre",
         stop: "Arreter",
         skip: "Passer",
-        preview: "Apercu",
-        downloadFormat: "Format de telechargement",
-        download: "Telecharger",
         delete: "Supprimer",
         history: "Historique",
         noQueuedJobs: "Aucun job en file.",
@@ -252,7 +226,6 @@ let languageData = null;
         chunks: "segments",
         workerSingular: "worker",
         workerPlural: "workers",
-        jobCancelled: "Job annule.",
         jobFailed: "Le job a echoue.",
         selectFileFirst: "Selectionne d'abord un fichier compatible texte, document, tableau, sous-titres ou localisation.",
         selectPdfFirst: "Selectionne d'abord un PDF.",
@@ -265,9 +238,6 @@ let languageData = null;
         ocrEnabled: "OCR active pour cette demande",
         ocrDisabled: "OCR desactive",
         ocrUnavailable: "OCR indisponible dans ce conteneur",
-        previewExcerptTruncated: "L'apercu affiche seulement un extrait traduit. Le telechargement contient l'export complet.",
-        previewExcerpt: "L'apercu affiche un extrait traduit pour ce type de fichier. Le telechargement contient l'export complet.",
-        previewTruncated: "Apercu tronque. Le telechargement contient l'export complet.",
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
         formatPdf: "PDF",
@@ -466,14 +436,11 @@ let languageData = null;
       setText("#pauseJob", "pause");
       setText("#resumeJob", "resume");
       setText("#stopJob", "stop");
-      setText('label[for="result"]', "preview");
-      setText('label[for="outputFormat"]', "downloadFormat");
-      setText("#downloadResult", "download");
       setText('label[for="history"]', "history");
       setTitle("#uiLanguage", "uiLanguage");
       refreshInputLabels();
       refreshInputTabSelectLabels();
-      refreshOutputFormats(document.getElementById("outputFormat").value);
+      updateDownloadButtons();
       updateOcrLabel();
       updateCounter();
       if (languageData) {
@@ -841,7 +808,7 @@ let languageData = null;
       document.querySelectorAll(".file-extra").forEach((input) => {
         input.classList.toggle("visible", showSheet);
       });
-      refreshOutputFormats(defaultOutputFormat());
+      updateDownloadButtons();
     }
 
     document.querySelectorAll("[data-input-tab]").forEach((button) => {
@@ -865,28 +832,9 @@ let languageData = null;
 
     document.getElementById("usePdfOverlay").addEventListener("change", syncOverlayControls);
 
-    function previewText(text, limit) {
-      if (text.length <= limit) {
-        return {text, truncated: false};
-      }
-      return {
-        text: text.slice(0, limit).replace(/\s+\S*$/, "").trimEnd(),
-        truncated: true
-      };
-    }
-
-    function previewLimitForOptions(options) {
-      if (options && options.excerpt) return EXCERPT_MAX_CHARS;
-      return PREVIEW_MAX_CHARS;
-    }
-
-    function setResult(text, options = {}) {
-      const result = document.getElementById("result");
-      const notice = document.getElementById("previewNotice");
+    function setResult(text) {
       fullResultText = text;
-      setPreview(text, options);
-      const hasText = Boolean(text.trim());
-      document.getElementById("downloadResult").disabled = !hasText;
+      updateDownloadButtons();
     }
 
     function clearCurrentWork() {
@@ -901,27 +849,8 @@ let languageData = null;
       currentSourceFormat = (inputTabs[currentInputTab] || inputTabs.textarea).sourceFormat;
       currentOriginalExtension = currentSourceFormat;
       updateCounter();
-      refreshOutputFormats(defaultOutputFormat());
       setResult("");
       clearProgress();
-    }
-
-    function setPreview(text, options = {}) {
-      const result = document.getElementById("result");
-      const notice = document.getElementById("previewNotice");
-      const hasText = Boolean(text.trim());
-      const preview = previewText(text, previewLimitForOptions(options));
-      result.textContent = preview.text;
-      notice.classList.toggle("visible", hasText && (preview.truncated || options.excerpt));
-      if (hasText && options.excerpt) {
-        notice.textContent = preview.truncated
-          ? t("previewExcerptTruncated")
-          : t("previewExcerpt");
-      } else if (hasText && preview.truncated) {
-        notice.textContent = t("previewTruncated");
-      } else {
-        notice.textContent = "";
-      }
     }
 
     function outputFormatDetails(format) {
@@ -944,31 +873,52 @@ let languageData = null;
         originalExportExtensions.includes(currentOriginalExtension);
     }
 
-    function defaultOutputFormat() {
-      if (canUseOriginalFormat()) return "original";
-      if (currentSourceFormat === "pdf") return "pdf";
-      if (currentSourceFormat === "md") return "md";
-      return "txt";
-    }
-
-    function refreshOutputFormats(preferred) {
-      const select = document.getElementById("outputFormat");
-      const current = preferred || select.value || defaultOutputFormat();
-      const formats = ["txt", "md", "pdf"];
-      if (canUseOriginalFormat()) {
-        formats.push("original");
-      }
-      select.innerHTML = "";
-      for (const format of formats) {
-        const option = document.createElement("option");
-        option.value = format;
-        option.textContent = format === "original"
+    function updateDownloadButtons() {
+      const hasText = Boolean(fullResultText.trim());
+      const formats = {txt: true, md: true, pdf: true, original: canUseOriginalFormat()};
+      for (const format of Object.keys(formats)) {
+        const button = document.getElementById("download" + format.charAt(0).toUpperCase() + format.slice(1));
+        button.classList.toggle("hidden", !formats[format]);
+        button.disabled = !hasText;
+        button.textContent = format === "original"
           ? t(outputFormatKeys[format]) + " (." + outputFormatDetails(format).extension + ")"
           : t(outputFormatKeys[format]);
-        select.appendChild(option);
       }
-      select.value = formats.includes(current) ? current : defaultOutputFormat();
     }
+
+    async function downloadFormat(format) {
+      const text = fullResultText;
+      if (!text.trim()) return;
+      const details = outputFormatDetails(format);
+      if (details.originalFile) {
+        await downloadOriginalFile(text, details);
+        return;
+      }
+      if (details.pdf) {
+        const pdfFile = document.getElementById("pdf").files[0];
+        if (currentSourceFormat === "pdf" && document.getElementById("usePdfOverlay").checked && pdfFile) {
+          await downloadOverlayPdf(text, details);
+          return;
+        }
+        const response = await fetch("export-pdf", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({text})
+        });
+        if (!response.ok) {
+          const error = await response.text();
+          showProgress("failed", 0, errorTextFromResponse(error));
+          return;
+        }
+        saveBlob(await response.blob(), details.extension);
+        return;
+      }
+      saveBlob(new Blob([text], {type: details.contentType + ";charset=utf-8"}), details.extension);
+    }
+
+    document.querySelectorAll("#downloadActions button[data-format]").forEach((button) => {
+      button.addEventListener("click", () => downloadFormat(button.dataset.format));
+    });
 
     function saveBlob(blob, extension) {
       const link = document.createElement("a");
@@ -991,7 +941,7 @@ let languageData = null;
       const response = await fetch("export-pdf-overlay", {method: "POST", body: form});
       if (!response.ok) {
         const error = await response.text();
-        setPreview(errorTextFromResponse(error));
+        showProgress("failed", 0, errorTextFromResponse(error));
         return;
       }
       saveBlob(await response.blob(), details.extension);
@@ -1021,7 +971,7 @@ let languageData = null;
       const file = document.getElementById("textFile").files[0];
       const path = originalExportPath(details.extension);
       if (!file || !path) {
-        setPreview(t("originalNeedsFile"));
+        showProgress("failed", 0, t("originalNeedsFile"));
         return;
       }
       const form = new FormData();
@@ -1036,46 +986,16 @@ let languageData = null;
       const response = await fetch(path, {method: "POST", body: form});
       if (!response.ok) {
         const error = await response.text();
-        setPreview(errorTextFromResponse(error));
+        showProgress("failed", 0, errorTextFromResponse(error));
         return;
       }
       saveBlob(await response.blob(), details.extension);
     }
 
-    async function downloadResult() {
-      const text = fullResultText;
-      if (!text.trim()) return;
-      const details = outputFormatDetails(document.getElementById("outputFormat").value);
-      if (details.originalFile) {
-        await downloadOriginalFile(text, details);
-        return;
-      }
-      if (details.pdf) {
-        const pdfFile = document.getElementById("pdf").files[0];
-        if (currentSourceFormat === "pdf" && document.getElementById("usePdfOverlay").checked && pdfFile) {
-          await downloadOverlayPdf(text, details);
-          return;
-        }
-        const response = await fetch("export-pdf", {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({text})
-        });
-        if (!response.ok) {
-          const error = await response.text();
-          setPreview(errorTextFromResponse(error));
-          return;
-        }
-        saveBlob(await response.blob(), details.extension);
-        return;
-      }
-      saveBlob(new Blob([text], {type: details.contentType + ";charset=utf-8"}), details.extension);
-    }
-
     async function loadTextFile() {
       const file = document.getElementById("textFile").files[0];
       if (!file) {
-        setResult(t("selectFileFirst"));
+        showProgress("failed", 0, t("selectFileFirst"));
         return;
       }
       const lowerName = file.name.toLowerCase();
@@ -1098,7 +1018,7 @@ let languageData = null;
         const response = await fetch(path, {method: "POST", body: form});
         const text = await response.text();
         if (!response.ok) {
-          setResult(errorTextFromResponse(text));
+          showProgress("failed", 0, errorTextFromResponse(text));
           return;
         }
         document.getElementById("text").value = text;
@@ -1109,12 +1029,10 @@ let languageData = null;
         currentOriginalExtension = currentSourceFormat;
       }
       updateCounter();
-      refreshOutputFormats(defaultOutputFormat());
       setResult("");
       clearProgress();
     }
 
-    document.getElementById("downloadResult").addEventListener("click", downloadResult);
     document.getElementById("loadTextFile").addEventListener("click", loadTextFile);
     document.getElementById("clearInput").addEventListener("click", clearCurrentWork);
 
@@ -1249,7 +1167,7 @@ let languageData = null;
       const response = await fetch("jobs/" + jobId + "/" + action, {method: "POST"});
       if (!response.ok) {
         const text = await response.text();
-        setResult(errorTextFromResponse(text));
+        showProgress("failed", 0, errorTextFromResponse(text));
         return null;
       }
       const job = await response.json();
@@ -1380,7 +1298,7 @@ let languageData = null;
         if (!response.ok) {
           const text = await response.text();
           if (token === pollToken) {
-            setResult(errorTextFromResponse(text));
+            showProgress("failed", 0, errorTextFromResponse(text));
             activeJobId = null;
           }
           return;
@@ -1389,12 +1307,7 @@ let languageData = null;
         if (token !== pollToken) return;
         updateProgress(job);
         if (job.status === "complete") {
-          if (job.kind === "translate-pdf") {
-            document.getElementById("outputFormat").value = "pdf";
-          }
-          setResult(job.result || "", {
-            excerpt: job.kind === "translate-pdf" || currentInputTab === "office"
-          });
+          setResult(job.result || "");
           loadHistory();
           loadQueue();
           playNotificationSound();
@@ -1402,13 +1315,14 @@ let languageData = null;
           return;
         }
         if (job.status === "cancelled") {
-          setResult(t("jobCancelled"));
+          setResult("");
           loadQueue();
           activeJobId = null;
           return;
         }
         if (job.status === "failed") {
-          setResult(job.error || t("jobFailed"));
+          showProgress("failed", job.percent || 0, job.error || t("jobFailed"));
+          setResult("");
           loadQueue();
           playNotificationSound();
           activeJobId = null;
@@ -1457,8 +1371,8 @@ let languageData = null;
       }
       if (!response.ok) {
         const text = await response.text();
-        setResult(errorTextFromResponse(text));
-        clearProgress();
+        showProgress("failed", 0, errorTextFromResponse(text));
+        setResult("");
         return;
       }
       const data = await response.json();
@@ -1482,7 +1396,7 @@ let languageData = null;
     async function postPdfJob() {
       const file = document.getElementById("pdf").files[0];
       if (!file) {
-        setResult(t("selectPdfFirst"));
+        showProgress("failed", 0, t("selectPdfFirst"));
         return;
       }
       const source = document.getElementById("source").value;
@@ -1503,8 +1417,8 @@ let languageData = null;
       const response = await fetch("jobs/translate-pdf", {method: "POST", body: form});
       if (!response.ok) {
         const text = await response.text();
-        setResult(errorTextFromResponse(text));
-        clearProgress();
+        showProgress("failed", 0, errorTextFromResponse(text));
+        setResult("");
         return;
       }
       const data = await response.json();
@@ -1538,7 +1452,7 @@ let languageData = null;
       const response = await fetch("history/" + id, {method: "DELETE"});
       if (!response.ok) {
         const text = await response.text();
-        setResult(errorTextFromResponse(text));
+        showProgress("failed", 0, errorTextFromResponse(text));
         return;
       }
       await loadHistory();
@@ -1647,10 +1561,10 @@ let languageData = null;
 
     setupUiLanguagePicker();
     loadLanguages().catch((error) => {
-      setResult(error.toString());
+      showProgress("failed", 0, error.toString());
     });
     loadHealth().catch((error) => {
-      setResult(error.toString());
+      showProgress("failed", 0, error.toString());
     });
     loadHistory().catch((error) => {
       document.getElementById("history").textContent = error.toString();

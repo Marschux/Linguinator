@@ -92,8 +92,7 @@
 
     textarea,
     input[type=text],
-    select,
-    pre {
+    select {
       background: var(--panel-soft);
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -347,21 +346,6 @@
     .section-heading button { min-height: 2.25rem; padding: .4rem .75rem; }
     .section-heading .actions { margin-top: 0; }
     .section-meta { color: var(--muted); font-size: .85rem; }
-    .download-row {
-      align-items: end;
-      display: flex;
-      gap: 1rem;
-      justify-content: flex-end;
-      margin-top: .8rem;
-    }
-    .download-row label { margin-bottom: .45rem; }
-    .export-actions select {
-      min-height: 2.25rem;
-      padding-bottom: .4rem;
-      padding-top: .4rem;
-      width: auto;
-    }
-
     .counter {
       color: var(--muted);
       font-size: .9rem;
@@ -563,23 +547,6 @@
     }
     .history-delete { min-height: 2.25rem; padding: .4rem .7rem; }
 
-    pre {
-      margin: 0;
-      min-height: 150px;
-      overflow: auto;
-      padding: 1rem;
-      white-space: pre-wrap;
-    }
-
-    .preview-notice {
-      color: var(--warn);
-      display: none;
-      font-size: .9rem;
-      margin-top: .55rem;
-    }
-
-    .preview-notice.visible { display: block; }
-
     footer {
       color: var(--muted);
       font-size: .82rem;
@@ -632,7 +599,7 @@
       .tabs { display: none; }
       .input-tab-select { display: block; }
 
-      .actions.workspace-section {
+      .primary-actions {
         background: rgba(24, 28, 34, .98);
         border-top: 1px solid rgba(255, 255, 255, .08);
         bottom: 0;
@@ -645,7 +612,7 @@
         z-index: 15;
       }
 
-      .actions.workspace-section #translate {
+      .primary-actions #translate {
         grid-column: 1 / -1;
       }
 
@@ -656,22 +623,6 @@
         flex-direction: column;
         gap: .55rem;
       }
-
-      .download-row {
-        align-items: stretch;
-        display: grid;
-        gap: .45rem;
-        grid-template-columns: 1fr;
-      }
-
-      .export-actions {
-        display: grid;
-        gap: .5rem;
-        grid-template-columns: minmax(0, 1fr) auto;
-        margin-top: 0;
-      }
-
-      .export-actions select { width: 100%; }
 
       .history-row {
         align-items: stretch;
@@ -722,7 +673,7 @@
         padding-top: .55rem;
       }
 
-      .actions.workspace-section {
+      .primary-actions {
         grid-template-columns: 1fr;
         margin-left: -.85rem;
         margin-right: -.85rem;
@@ -730,7 +681,5 @@
         padding-right: .85rem;
       }
 
-      .export-actions { grid-template-columns: 1fr; }
       .history-actions { grid-template-columns: 1fr; }
-      pre { min-height: 120px; padding: .75rem; }
     }
