@@ -611,6 +611,19 @@ class MainTests(unittest.TestCase):
         self.assertEqual([line["text"] for line in lines], ["Hello world", "Second"])
         self.assertGreater(lines[0]["right"], 90.0)
 
+    def test_group_pdf_lines_accumulates_runs_reported_at_the_same_position(self):
+        # Runs drawn in one text block all report the position of the block, so the second run
+        # has to continue from the end of the first instead of restarting there.
+        runs = [
+            {"text": "Hello", "x": 50.0, "y": 700.0, "size": 11.0, "width": 30.0},
+            {"text": "world", "x": 50.0, "y": 700.0, "size": 11.0, "width": 30.0},
+        ]
+
+        lines = main.group_pdf_lines(runs)
+
+        self.assertEqual(lines[0]["text"], "Helloworld")
+        self.assertAlmostEqual(lines[0]["right"], 110.0)
+
     def test_group_pdf_paragraphs_splits_on_gaps_and_indentation(self):
         lines = [
             {"text": "One", "x": 50.0, "y": 700.0, "right": 100.0, "size": 11.0},

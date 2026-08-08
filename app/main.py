@@ -1269,29 +1269,47 @@ def multiply_matrix(a: Tuple[float, ...], b: Tuple[float, ...]) -> Tuple[float, 
     )
 
 
-def pdf_run_width(text: str, size: float, font_dict: Any) -> Tuple[float, bool]:
-    """Width of an extracted run in the *original* font.
+def pdf_font_widths(font_dict: Any) -> Tuple[Dict[Any, float], Dict[str, str]]:
+    """Glyph widths of a font used in the source PDF, plus the mapping from the extracted
+    text back to the keys those widths are stored under."""
+    from pypdf._cmap import build_char_map_from_dict, build_font_width_map
 
-    Simple fonts carry their glyph widths in the page resources, which makes the covering
-    rectangles exact. Composite (Type0) fonts would need the CID mapping reversed, so those
-    fall back to an estimate from our own font metrics. The flag says which of the two it was,
-    because only the estimate needs a safety margin when covering the original text.
+    _, _, _, character_map = build_char_map_from_dict(200.0, font_dict)
+    reverse_map: Dict[str, str] = {}
+    for key, value in character_map.items():
+        reverse_map.setdefault(value, key)
+    return build_font_width_map(font_dict, 400.0), reverse_map
+
+
+def pdf_run_width(text: str, size: float, font_dict: Any, cache: Dict[int, Any]) -> Tuple[float, bool]:
+    """Width of an extracted run in the *original* font, and whether it could be measured.
+
+    Falls back to an estimate from our own font metrics for fonts without usable width
+    information. Only that estimate needs a safety margin when covering the original text.
     """
+    from pypdf._cmap import compute_font_width
+
+    key = id(font_dict)
+    if key not in cache:
+        try:
+            cache[key] = pdf_font_widths(font_dict)
+        except Exception:
+            cache[key] = None
+    entry = cache[key]
+    if not entry:
+        return pdf_measure_text(text, size), False
+    width_map, reverse_map = entry
     try:
-        first_char = int(font_dict["/FirstChar"])
-        widths = font_dict["/Widths"].get_object()
-        total = 0.0
-        for char in text:
-            index = char.encode("cp1252")[0] - first_char
-            total += float(widths[index].get_object()) if 0 <= index < len(widths) else 500.0
-        return total * size / 1000.0, True
+        total = sum(compute_font_width(width_map, reverse_map.get(char, char)) for char in text)
     except Exception:
         return pdf_measure_text(text, size), False
+    return total * size / 1000.0, True
 
 
 def pdf_page_runs(page) -> List[Dict[str, Any]]:
     """Every text run on the page with its position on the page and its rendered font size."""
     runs: List[Dict[str, Any]] = []
+    width_cache: Dict[int, Any] = {}
 
     def visitor(text, cm, tm, font_dict, font_size):
         if not text or not text.strip():
@@ -1299,7 +1317,7 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
         matrix = multiply_matrix(tuple(tm), tuple(cm))
         scale = math.sqrt(abs(matrix[0] * matrix[3] - matrix[1] * matrix[2])) or 1.0
         size = abs(float(font_size or PDF_FONT_SIZE)) * scale or PDF_FONT_SIZE
-        width, exact = pdf_run_width(text.strip(), size, font_dict)
+        width, exact = pdf_run_width(text.strip(), size, font_dict, width_cache)
         runs.append({
             "text": text,
             "x": matrix[4],
@@ -1344,7 +1362,9 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             gap = run["x"] - line["right"]
             separator = " " if gap > 0.2 * run["size"] and not line["text"].endswith(" ") else ""
             line["text"] += separator + run["text"]
-            line["right"] = max(line["right"], run["x"] + width)
+            # Several runs drawn in one text block report the same position, so a run that does
+            # not start beyond the current end continues from it.
+            line["right"] = max(run["x"], line["right"]) + width
             line["size"] = max(line["size"], run["size"])
             line["exact"] = line["exact"] and run.get("exact", False)
         line["text"] = re.sub(r"\s+", " ", line["text"]).strip()
