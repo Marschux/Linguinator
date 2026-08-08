@@ -29,8 +29,15 @@
 
     <section id="queuePanel" class="section workspace-section">
       <div class="section-heading">
-        <label for="queue">Queue</label>
-        <span id="queueWorkers" class="section-meta"></span>
+        <div class="section-heading-label">
+          <label for="queue">Queue</label>
+          <span id="queueWorkers" class="section-meta"></span>
+        </div>
+        <div class="actions">
+          <button id="pauseJob" class="secondary" disabled title="Pause the entire queue.">Pause</button>
+          <button id="resumeJob" class="secondary" disabled title="Resume the entire queue.">Resume</button>
+          <button id="stopJob" class="secondary" disabled title="Cancel the entire queue.">Stop</button>
+        </div>
       </div>
       <div id="queue" class="queue"></div>
     </section>
@@ -108,9 +115,6 @@
     <div class="actions workspace-section">
       <button id="translate" title="Start a new translation for the current input.">Translate Input</button>
       <button id="clearInput" class="secondary" type="button" title="Clear the current input and preview.">Clear</button>
-      <button id="pauseJob" class="secondary" disabled title="Pause the running job.">Pause</button>
-      <button id="resumeJob" class="secondary" disabled title="Resume the paused job.">Resume</button>
-      <button id="stopJob" class="secondary" disabled title="Cancel the running job.">Stop</button>
     </div>
 
     <section class="section workspace-section">

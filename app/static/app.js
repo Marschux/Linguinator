@@ -1276,6 +1276,7 @@ let languageData = null;
       queue.innerHTML = "";
       workers.textContent = data.workers + " " + t(data.workers === 1 ? "workerSingular" : "workerPlural");
       const visibleItems = data.items.filter((job) => !["complete", "failed", "cancelled"].includes(job.status));
+      updateQueueControlButtons(visibleItems);
       if (!visibleItems.length) {
         queue.textContent = t("noQueuedJobs");
         return;
@@ -1335,9 +1336,18 @@ let languageData = null;
         position,
         job.label || job.kind
       );
-      document.getElementById("pauseJob").disabled = !["queued", "running"].includes(job.status);
-      document.getElementById("resumeJob").disabled = job.status !== "paused";
-      document.getElementById("stopJob").disabled = !["queued", "running", "paused"].includes(job.status);
+    }
+
+    const QUEUE_CONTROL_STATUSES = {
+      pause: ["queued", "running"],
+      resume: ["paused"],
+      cancel: ["queued", "running", "paused"],
+    };
+
+    function updateQueueControlButtons(items) {
+      document.getElementById("pauseJob").disabled = !items.some((job) => QUEUE_CONTROL_STATUSES.pause.includes(job.status));
+      document.getElementById("resumeJob").disabled = !items.some((job) => QUEUE_CONTROL_STATUSES.resume.includes(job.status));
+      document.getElementById("stopJob").disabled = !items.some((job) => QUEUE_CONTROL_STATUSES.cancel.includes(job.status));
     }
 
     let pollToken = 0;
@@ -1491,10 +1501,16 @@ let languageData = null;
       await pollJob(data.job_id, token);
     }
 
-    async function controlActiveJob(action) {
-      if (!activeJobId) return;
-      const job = await controlJob(activeJobId, action);
-      if (job) updateProgress(job);
+    async function controlQueue(action) {
+      const response = await fetch("jobs");
+      if (!response.ok) return;
+      const data = await response.json();
+      const eligible = data.items.filter((job) => (QUEUE_CONTROL_STATUSES[action] || []).includes(job.status));
+      await Promise.all(eligible.map((job) => controlJob(job.id, action)));
+      if (activeJobId) {
+        const activeResponse = await fetch("jobs/" + activeJobId);
+        if (activeResponse.ok) updateProgress(await activeResponse.json());
+      }
     }
 
     function formatBytes(bytes) {
@@ -1611,9 +1627,9 @@ let languageData = null;
 
     setHistoryCollapsed(localStorage.getItem("linguinator_history_collapsed") === "1");
 
-    document.getElementById("pauseJob").addEventListener("click", () => controlActiveJob("pause"));
-    document.getElementById("resumeJob").addEventListener("click", () => controlActiveJob("resume"));
-    document.getElementById("stopJob").addEventListener("click", () => controlActiveJob("cancel"));
+    document.getElementById("pauseJob").addEventListener("click", () => controlQueue("pause"));
+    document.getElementById("resumeJob").addEventListener("click", () => controlQueue("resume"));
+    document.getElementById("stopJob").addEventListener("click", () => controlQueue("cancel"));
 
     setupUiLanguagePicker();
     loadLanguages().catch((error) => {
