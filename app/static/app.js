@@ -10,6 +10,7 @@ let languageData = null;
     let ocrLanguage = "";
     let historyItems = [];
     let historyVisibleCount = 5;
+    const seenCompletedJobIds = new Set();
     const HISTORY_PAGE_SIZE = 5;
     const baseTitle = document.title || "Linguinator";
     const originalExportExtensions = ["docx", "odt", "pptx", "csv", "xlsx", "html", "htm", "srt", "vtt", "json", "yaml", "yml", "po", "xlf", "xliff"];
@@ -35,8 +36,7 @@ let languageData = null;
         textFile: "Text File",
         markdownFile: "Markdown File",
         loadFile: "Load File",
-        overlayPdf: "Overlay PDF",
-        coverOldText: "Cover old text",
+        plaintext: "Plaintext",
         translateInput: "Translate Input",
         clear: "Clear",
         pause: "Pause",
@@ -92,8 +92,7 @@ let languageData = null;
         textFile: "Textdatei",
         markdownFile: "Markdown-Datei",
         loadFile: "Datei laden",
-        overlayPdf: "PDF ueberlagern",
-        coverOldText: "Alten Text abdecken",
+        plaintext: "Plaintext",
         translateInput: "Eingabe uebersetzen",
         clear: "Leeren",
         pause: "Pause",
@@ -149,8 +148,7 @@ let languageData = null;
         textFile: "Archivo de texto",
         markdownFile: "Archivo Markdown",
         loadFile: "Cargar archivo",
-        overlayPdf: "Superponer PDF",
-        coverOldText: "Cubrir texto anterior",
+        plaintext: "Plaintext",
         translateInput: "Traducir entrada",
         clear: "Limpiar",
         pause: "Pausar",
@@ -206,8 +204,7 @@ let languageData = null;
         textFile: "Fichier texte",
         markdownFile: "Fichier Markdown",
         loadFile: "Charger le fichier",
-        overlayPdf: "Superposer PDF",
-        coverOldText: "Masquer l'ancien texte",
+        plaintext: "Plaintext",
         translateInput: "Traduire l'entree",
         clear: "Effacer",
         pause: "Pause",
@@ -428,8 +425,7 @@ let languageData = null;
       setText('[data-input-tab="pdf"]', "pdf");
       setText('label[for="text"]', "textField");
       setText('label[for="pdf"]', "pdf");
-      setText('label[for="usePdfOverlay"]', "overlayPdf");
-      setText('label[for="coverPdfText"]', "coverOldText");
+      setText('label[for="pdfPlaintext"]', "plaintext");
       setText("#loadTextFile", "loadFile");
       setText("#translate", "translateInput");
       setText("#clearInput", "clear");
@@ -819,19 +815,6 @@ let languageData = null;
       setInputTab(event.target.value);
     });
 
-    function syncOverlayControls() {
-      const cover = document.getElementById("coverPdfText");
-      const overlayEnabled = document.getElementById("usePdfOverlay").checked;
-      cover.disabled = !overlayEnabled;
-      if (overlayEnabled) {
-        cover.checked = true;
-      } else {
-        cover.checked = false;
-      }
-    }
-
-    document.getElementById("usePdfOverlay").addEventListener("change", syncOverlayControls);
-
     function setResult(text) {
       fullResultText = text;
       updateDownloadButtons();
@@ -844,8 +827,7 @@ let languageData = null;
       document.getElementById("pageRange").value = "";
       document.getElementById("sheetName").value = "";
       document.getElementById("csvColumns").value = "";
-      document.getElementById("usePdfOverlay").checked = false;
-      syncOverlayControls();
+      document.getElementById("pdfPlaintext").checked = false;
       currentSourceFormat = (inputTabs[currentInputTab] || inputTabs.textarea).sourceFormat;
       currentOriginalExtension = currentSourceFormat;
       updateCounter();
@@ -896,7 +878,7 @@ let languageData = null;
       }
       if (details.pdf) {
         const pdfFile = document.getElementById("pdf").files[0];
-        if (currentSourceFormat === "pdf" && document.getElementById("usePdfOverlay").checked && pdfFile) {
+        if (currentSourceFormat === "pdf" && !document.getElementById("pdfPlaintext").checked && pdfFile) {
           await downloadOverlayPdf(text, details);
           return;
         }
@@ -937,7 +919,7 @@ let languageData = null;
       const form = new FormData();
       form.append("file", file);
       form.append("text", text);
-      form.append("cover_original", document.getElementById("coverPdfText").checked ? "true" : "false");
+      form.append("cover_original", "true");
       const response = await fetch("export-pdf-overlay", {method: "POST", body: form});
       if (!response.ok) {
         const error = await response.text();
@@ -1200,6 +1182,14 @@ let languageData = null;
       const response = await fetch("jobs");
       if (!response.ok) return;
       const data = await response.json();
+      let hasNewlyCompleted = false;
+      for (const job of data.items) {
+        if (job.status === "complete" && !seenCompletedJobIds.has(job.id)) {
+          seenCompletedJobIds.add(job.id);
+          hasNewlyCompleted = true;
+        }
+      }
+      if (hasNewlyCompleted) loadHistory();
       const queue = document.getElementById("queue");
       const workers = document.getElementById("queueWorkers");
       queue.innerHTML = "";
@@ -1575,4 +1565,3 @@ let languageData = null;
     }, 3000);
     setInputTab("pdf");
     applyUiLanguage();
-    syncOverlayControls();
