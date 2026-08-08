@@ -837,7 +837,7 @@ let languageData = null;
       document.querySelectorAll(".file-extra").forEach((input) => {
         input.classList.toggle("visible", showSheet);
       });
-      refreshOutputFormats();
+      refreshOutputFormats(defaultOutputFormat());
     }
 
     document.querySelectorAll("[data-input-tab]").forEach((button) => {
@@ -941,7 +941,7 @@ let languageData = null;
     }
 
     function defaultOutputFormat() {
-      if (currentInputTab !== "textarea" && canUseOriginalFormat()) return "original";
+      if (canUseOriginalFormat()) return "original";
       if (currentSourceFormat === "pdf") return "pdf";
       if (currentSourceFormat === "md") return "md";
       return "txt";
