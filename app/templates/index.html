@@ -59,21 +59,21 @@
       </div>
 
       <div class="tabs" role="tablist" aria-label="Input type">
-        <button class="tab active" type="button" data-input-tab="textarea" title="Type text directly into the input field.">Text Field</button>
-        <button class="tab" type="button" data-input-tab="text" title="Load and translate a text-like file.">Text</button>
-        <button class="tab" type="button" data-input-tab="markdown" title="Load and translate a Markdown file.">Markdown</button>
-        <button class="tab" type="button" data-input-tab="office" title="Load and translate a DOCX or ODT file as text.">Doc File</button>
-        <button class="tab" type="button" data-input-tab="pptx" title="Load and translate a PowerPoint (PPTX) file as text.">PowerPoint</button>
-        <button class="tab" type="button" data-input-tab="csv" title="Load and translate selected CSV or XLSX columns.">CSV File</button>
-        <button class="tab" type="button" data-input-tab="pdf" title="Extract and translate a PDF page by page.">PDF</button>
+        <button class="tab" type="button" data-input-tab="textarea" disabled title="Type text directly into the input field.">Text Field</button>
+        <button class="tab" type="button" data-input-tab="text" disabled title="Load and translate a text-like file.">Text</button>
+        <button class="tab" type="button" data-input-tab="markdown" disabled title="Load and translate a Markdown file.">Markdown</button>
+        <button class="tab" type="button" data-input-tab="office" disabled title="Load and translate a DOCX or ODT file as text.">Doc File</button>
+        <button class="tab" type="button" data-input-tab="pptx" disabled title="Load and translate a PowerPoint (PPTX) file as text.">PowerPoint</button>
+        <button class="tab" type="button" data-input-tab="csv" disabled title="Load and translate selected CSV or XLSX columns.">CSV File</button>
+        <button class="tab active" type="button" data-input-tab="pdf" title="Extract and translate a PDF page by page.">PDF</button>
       </div>
       <select id="inputTabSelect" class="input-tab-select" aria-label="Input type" title="Select the input type.">
-        <option value="textarea">Text Field</option>
-        <option value="text">Text</option>
-        <option value="markdown">Markdown</option>
-        <option value="office">Doc File</option>
-        <option value="pptx">PowerPoint</option>
-        <option value="csv">CSV File</option>
+        <option value="textarea" disabled>Text Field</option>
+        <option value="text" disabled>Text</option>
+        <option value="markdown" disabled>Markdown</option>
+        <option value="office" disabled>Doc File</option>
+        <option value="pptx" disabled>PowerPoint</option>
+        <option value="csv" disabled>CSV File</option>
         <option value="pdf">PDF</option>
       </select>
 

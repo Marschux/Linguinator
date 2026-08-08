@@ -1573,6 +1573,6 @@ let languageData = null;
     setInterval(() => {
       loadQueue().catch(() => {});
     }, 3000);
-    setInputTab("textarea");
+    setInputTab("pdf");
     applyUiLanguage();
     syncOverlayControls();
