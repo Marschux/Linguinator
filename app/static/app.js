@@ -44,6 +44,7 @@ let languageData = null;
         pause: "Pause",
         resume: "Resume",
         stop: "Stop",
+        skip: "Skip",
         preview: "Preview",
         downloadFormat: "Download Format",
         download: "Download",
@@ -107,6 +108,7 @@ let languageData = null;
         pause: "Pause",
         resume: "Fortsetzen",
         stop: "Stoppen",
+        skip: "Ueberspringen",
         preview: "Vorschau",
         downloadFormat: "Download-Format",
         download: "Download",
@@ -170,6 +172,7 @@ let languageData = null;
         pause: "Pausar",
         resume: "Continuar",
         stop: "Detener",
+        skip: "Omitir",
         preview: "Vista previa",
         downloadFormat: "Formato de descarga",
         download: "Descargar",
@@ -233,6 +236,7 @@ let languageData = null;
         pause: "Pause",
         resume: "Reprendre",
         stop: "Arreter",
+        skip: "Passer",
         preview: "Apercu",
         downloadFormat: "Format de telechargement",
         download: "Telecharger",
@@ -1267,6 +1271,11 @@ let languageData = null;
       return button;
     }
 
+    function queuePauseResumeButton(job) {
+      const isPaused = job.status === "paused";
+      return queueActionButton(job, isPaused ? "resume" : "pause", isPaused ? t("resume") : t("pause"), ["queued", "running", "paused"]);
+    }
+
     async function loadQueue() {
       const response = await fetch("jobs");
       if (!response.ok) return;
@@ -1302,9 +1311,8 @@ let languageData = null;
         progress.textContent = progressLabel + " | " + (job.current || 0) + " / " + (job.total || 0) + " " + t("chunks") + " | " + (job.message || "");
         const actions = document.createElement("div");
         actions.className = "queue-actions";
-        actions.appendChild(queueActionButton(job, "pause", t("pause"), ["queued", "running"]));
-        actions.appendChild(queueActionButton(job, "resume", t("resume"), ["paused"]));
-        actions.appendChild(queueActionButton(job, "cancel", t("stop"), ["queued", "running", "paused"]));
+        actions.appendChild(queuePauseResumeButton(job));
+        actions.appendChild(queueActionButton(job, "cancel", t("skip"), ["queued", "running", "paused"]));
         main.appendChild(title);
         main.appendChild(meta);
         main.appendChild(progress);
