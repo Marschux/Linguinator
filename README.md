@@ -72,7 +72,7 @@ The `.env` file is grouped by topic:
 | `LINGUINATOR_JOBS_DIR` | `/data/history/jobs` | Directory for persisted queue metadata and pending PDF payloads. |
 | `LINGUINATOR_DEFAULT_SOURCE` | `eng_Latn` | Default source language code. |
 | `LINGUINATOR_DEFAULT_TARGET` | `deu_Latn` | Default target language code. |
-| `LINGUINATOR_ENABLE_OCR` | `false` | Enables OCR fallback for scanned PDFs when the image dependencies are available. |
+| `LINGUINATOR_ENABLE_OCR` | `true` | Enables OCR fallback for scanned PDFs when the image dependencies are available. Only controlled via this env var, there is no per-request UI toggle. |
 | `LINGUINATOR_OCR_LANGUAGE` | `deu+eng` | OCR language setting passed to Tesseract. |
 | `LINGUINATOR_AUTH_ENABLED` | `false` | Enables HTTP Basic Auth for the UI and API. `/health` stays public for health checks. |
 | `LINGUINATOR_AUTH_USERNAME` | `admin` | Basic Auth username. |

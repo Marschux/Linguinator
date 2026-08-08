@@ -50,7 +50,7 @@ CPU_THREADS = int(env_value("LINGUINATOR_CPU_THREADS", "0", "NLLB_CPU_THREADS"))
 CPU_INTEROP_THREADS = int(env_value("LINGUINATOR_CPU_INTEROP_THREADS", "0", "NLLB_CPU_INTEROP_THREADS"))
 DEFAULT_SOURCE = env_value("LINGUINATOR_DEFAULT_SOURCE", "eng_Latn", "NLLB_DEFAULT_SOURCE")
 DEFAULT_TARGET = env_value("LINGUINATOR_DEFAULT_TARGET", "deu_Latn", "NLLB_DEFAULT_TARGET")
-OCR_ENABLED = env_value("LINGUINATOR_ENABLE_OCR", "false", "NLLB_ENABLE_OCR").lower() in ("1", "true", "yes", "on")
+OCR_ENABLED = env_value("LINGUINATOR_ENABLE_OCR", "true", "NLLB_ENABLE_OCR").lower() in ("1", "true", "yes", "on")
 OCR_LANGUAGE = env_value("LINGUINATOR_OCR_LANGUAGE", "deu+eng", "NLLB_OCR_LANGUAGE")
 AUTH_ENABLED = env_value("LINGUINATOR_AUTH_ENABLED", "false", "NLLB_AUTH_ENABLED").lower() in ("1", "true", "yes", "on")
 AUTH_USERNAME = env_value("LINGUINATOR_AUTH_USERNAME", "admin", "NLLB_AUTH_USERNAME")
@@ -852,6 +852,7 @@ def rebuild_runner_for_job(job: Dict[str, Any]) -> Optional[Tuple[Callable[..., 
             job.get("target", DEFAULT_TARGET),
             job.get("filename", "pdf"),
             job.get("page_range", ""),
+            OCR_ENABLED,
         )
     return None
 
@@ -1060,7 +1061,7 @@ def extract_pdf_markdown_from_bytes(
         ocr_detail = (
             f"OCR is configured for {OCR_LANGUAGE}, but no readable text was produced."
             if use_ocr
-            else "OCR is disabled for this request. Enable the OCR checkbox in the web interface to use OCR fallback."
+            else "OCR is disabled for this deployment. Set LINGUINATOR_ENABLE_OCR=true to use OCR fallback."
         )
         raise HTTPException(
             status_code=422,
@@ -2100,7 +2101,6 @@ async def start_translate_pdf_job(
     source: str = Form(DEFAULT_SOURCE),
     target: str = Form(DEFAULT_TARGET),
     page_range: str = Form(""),
-    use_ocr: bool = Form(False),
 ):
     ensure_queue_workers()
     content = await read_upload_bytes(file, "PDF")
@@ -2115,12 +2115,12 @@ async def start_translate_pdf_job(
         content_type=file.content_type or "application/pdf",
         filename=filename,
         page_range=page_range,
-        use_ocr=use_ocr,
+        use_ocr=OCR_ENABLED,
     )
     register_job_runner(
         job_id,
         run_pdf_translate_job,
-        (job_id, content, file.content_type or "application/pdf", source, target, filename, page_range, use_ocr),
+        (job_id, content, file.content_type or "application/pdf", source, target, filename, page_range, OCR_ENABLED),
     )
     return {"job_id": job_id}
 
@@ -2401,8 +2401,8 @@ def translate(request: TranslateRequest):
 
 
 @app.post("/extract-pdf", response_class=PlainTextResponse)
-async def extract_pdf(file: UploadFile = File(...), page_range: str = Form(""), use_ocr: bool = Form(False)):
-    return await extract_pdf_markdown(file, page_range, use_ocr)
+async def extract_pdf(file: UploadFile = File(...), page_range: str = Form("")):
+    return await extract_pdf_markdown(file, page_range, OCR_ENABLED)
 
 
 @app.post("/extract-docx", response_class=PlainTextResponse)
@@ -2481,9 +2481,8 @@ async def translate_pdf(
     source: str = Form(DEFAULT_SOURCE),
     target: str = Form(DEFAULT_TARGET),
     page_range: str = Form(""),
-    use_ocr: bool = Form(False),
 ):
-    markdown = await extract_pdf_markdown(file, page_range, use_ocr)
+    markdown = await extract_pdf_markdown(file, page_range, OCR_ENABLED)
     translated = []
     for section in re.split(r"(?m)^# Page ", markdown):
         section = section.strip()

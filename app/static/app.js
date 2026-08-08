@@ -6,8 +6,6 @@ let languageData = null;
     let currentOriginalExtension = "txt";
     let fullResultText = "";
     let currentUiLanguage = localStorage.getItem("linguinator_ui_language") || "en";
-    let ocrAvailable = false;
-    let ocrLanguage = "";
     let historyItems = [];
     let historyVisibleCount = 5;
     const seenCompletedJobIds = new Set();
@@ -63,10 +61,6 @@ let languageData = null;
         starting: "Starting...",
         startingChunks: "Starting {count} chunks...",
         uploadingPdf: "Uploading PDF...",
-        ocrConfigured: "OCR configured: {language}",
-        ocrEnabled: "OCR enabled for this request",
-        ocrDisabled: "OCR disabled",
-        ocrUnavailable: "OCR unavailable in this container",
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
         formatPdf: "PDF",
@@ -92,7 +86,7 @@ let languageData = null;
         textFile: "Textdatei",
         markdownFile: "Markdown-Datei",
         loadFile: "Datei laden",
-        plaintext: "Plaintext",
+        plaintext: "Klartext",
         translateInput: "Eingabe uebersetzen",
         clear: "Leeren",
         pause: "Pause",
@@ -119,10 +113,6 @@ let languageData = null;
         starting: "Starte...",
         startingChunks: "Starte {count} Chunks...",
         uploadingPdf: "Lade PDF hoch...",
-        ocrConfigured: "OCR konfiguriert: {language}",
-        ocrEnabled: "OCR fuer diesen Auftrag aktiviert",
-        ocrDisabled: "OCR deaktiviert",
-        ocrUnavailable: "OCR in diesem Container nicht verfuegbar",
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
         formatPdf: "PDF",
@@ -148,7 +138,7 @@ let languageData = null;
         textFile: "Archivo de texto",
         markdownFile: "Archivo Markdown",
         loadFile: "Cargar archivo",
-        plaintext: "Plaintext",
+        plaintext: "Texto plano",
         translateInput: "Traducir entrada",
         clear: "Limpiar",
         pause: "Pausar",
@@ -175,10 +165,6 @@ let languageData = null;
         starting: "Iniciando...",
         startingChunks: "Iniciando {count} fragmentos...",
         uploadingPdf: "Subiendo PDF...",
-        ocrConfigured: "OCR configurado: {language}",
-        ocrEnabled: "OCR activado para esta solicitud",
-        ocrDisabled: "OCR desactivado",
-        ocrUnavailable: "OCR no disponible en este contenedor",
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
         formatPdf: "PDF",
@@ -204,7 +190,7 @@ let languageData = null;
         textFile: "Fichier texte",
         markdownFile: "Fichier Markdown",
         loadFile: "Charger le fichier",
-        plaintext: "Plaintext",
+        plaintext: "Texte brut",
         translateInput: "Traduire l'entree",
         clear: "Effacer",
         pause: "Pause",
@@ -231,10 +217,6 @@ let languageData = null;
         starting: "Demarrage...",
         startingChunks: "Demarrage de {count} segments...",
         uploadingPdf: "Televersement du PDF...",
-        ocrConfigured: "OCR configure: {language}",
-        ocrEnabled: "OCR active pour cette demande",
-        ocrDisabled: "OCR desactive",
-        ocrUnavailable: "OCR indisponible dans ce conteneur",
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
         formatPdf: "PDF",
@@ -437,7 +419,6 @@ let languageData = null;
       refreshInputLabels();
       refreshInputTabSelectLabels();
       updateDownloadButtons();
-      updateOcrLabel();
       updateCounter();
       if (languageData) {
         renderSelect("source", document.getElementById("source").value);
@@ -1070,26 +1051,7 @@ let languageData = null;
       const response = await fetch("health");
       const data = await response.json();
       maxChars = data.max_chars || 0;
-      const ocr = document.getElementById("useOcr");
-      ocrAvailable = Boolean(data.ocr_available);
-      ocrLanguage = data.ocr_language || "";
-      ocr.checked = false;
-      ocr.disabled = !ocrAvailable;
-      updateOcrLabel();
       updateCounter();
-    }
-
-    function updateOcrLabel() {
-      const ocr = document.getElementById("useOcr");
-      const ocrLabel = document.getElementById("ocrLabel");
-      if (!ocrLabel) return;
-      if (!ocrAvailable) {
-        ocrLabel.textContent = t("ocrUnavailable");
-        return;
-      }
-      ocrLabel.textContent = ocr.checked
-        ? t("ocrEnabled")
-        : t("ocrDisabled");
     }
 
     function updateCounter() {
@@ -1101,7 +1063,6 @@ let languageData = null;
       counter.classList.toggle("over", maxChars > 0 && length > maxChars);
     }
 
-    document.getElementById("useOcr").addEventListener("change", updateOcrLabel);
     document.getElementById("text").addEventListener("input", updateCounter);
 
     let audioContext = null;
@@ -1401,7 +1362,6 @@ let languageData = null;
       form.append("source", source);
       form.append("target", target);
       form.append("page_range", document.getElementById("pageRange").value);
-      form.append("use_ocr", document.getElementById("useOcr").checked ? "true" : "false");
       setResult("");
       showProgress("extracting", 0, t("uploadingPdf"));
       const response = await fetch("jobs/translate-pdf", {method: "POST", body: form});
