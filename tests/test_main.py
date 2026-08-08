@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import shutil
+import sys
 import time
 import unittest
 import uuid
@@ -114,7 +115,7 @@ class FakeCachedLoader:
         self.cleared = False
         self.called = False
 
-    def __call__(self):
+    def __call__(self, *args):
         self.called = True
         return self.value
 
@@ -366,13 +367,11 @@ class MainTests(unittest.TestCase):
         self.assertEqual(main.normalized_root_path("/linguinator/"), "/linguinator")
         self.assertEqual(main.normalized_root_path(""), "")
 
-    def test_env_value_prefers_linguinator_and_falls_back_to_legacy_nllb(self):
-        with patch.dict(os.environ, {"LINGUINATOR_MODEL": "new", "NLLB_MODEL": "old"}, clear=False):
-            self.assertEqual(main.env_value("LINGUINATOR_MODEL", "default", "NLLB_MODEL"), "new")
-        with patch.dict(os.environ, {"NLLB_MODEL": "old"}, clear=True):
-            self.assertEqual(main.env_value("LINGUINATOR_MODEL", "default", "NLLB_MODEL"), "old")
+    def test_env_value_prefers_set_variable_over_default(self):
+        with patch.dict(os.environ, {"LINGUINATOR_MODEL": "new"}, clear=False):
+            self.assertEqual(main.env_value("LINGUINATOR_MODEL", "default"), "new")
         with patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(main.env_value("LINGUINATOR_MODEL", "default", "NLLB_MODEL"), "default")
+            self.assertEqual(main.env_value("LINGUINATOR_MODEL", "default"), "default")
 
     def test_server_reads_proxy_and_https_env(self):
         env = {
@@ -436,24 +435,87 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(translated, "Uebersetzt")
 
+    def test_model_family_classifies_known_model_ids(self):
+        self.assertEqual(main.model_family("Helsinki-NLP/opus-mt-tc-bible-big-mul-mul"), "prefix")
+        self.assertEqual(main.model_family("Helsinki-NLP/opus-mt-en-de"), "plain")
+
+    def test_model_language_code_per_family(self):
+        self.assertEqual(main.model_language_code("Helsinki-NLP/opus-mt-tc-bible-big-mul-mul", "deu_Latn"), ">>deu<<")
+        self.assertEqual(main.model_language_code("Helsinki-NLP/opus-mt-en-de", "deu_Latn"), "deu_Latn")
+
+    def test_prepare_translation_prefix_prepends_target_token(self):
+        tokenizer = FakeTokenizer()
+
+        inputs, generate_kwargs = main.prepare_translation(
+            tokenizer, "Helsinki-NLP/opus-mt-tc-bible-big-mul-mul", "Hello", "eng_Latn", "deu_Latn"
+        )
+
+        self.assertEqual(inputs["text"], ">>deu<< Hello")
+        self.assertEqual(generate_kwargs, {})
+
+    def test_prepare_translation_plain_sends_text_unchanged(self):
+        tokenizer = FakeTokenizer()
+
+        inputs, generate_kwargs = main.prepare_translation(
+            tokenizer, "Helsinki-NLP/opus-mt-en-de", "Hello", "eng_Latn", "deu_Latn"
+        )
+
+        self.assertEqual(inputs["text"], "Hello")
+        self.assertEqual(generate_kwargs, {})
+
+    def test_iso_639_1_looks_up_core_languages(self):
+        self.assertEqual(main.iso_639_1("deu_Latn"), "de")
+        self.assertEqual(main.iso_639_1("eng_Latn"), "en")
+
+    def test_resolve_model_prefers_dedicated_pair_over_fallback(self):
+        with patch.object(main, "OPUS_PAIRS", {"en>de": {"model_id": "Helsinki-NLP/opus-mt-en-de", "license": "cc-by-4.0"}}):
+            model_id, dedicated = main.resolve_model("eng_Latn", "deu_Latn")
+
+        self.assertEqual(model_id, "Helsinki-NLP/opus-mt-en-de")
+        self.assertTrue(dedicated)
+
+    def test_resolve_model_falls_back_when_pair_not_curated(self):
+        with patch.object(main, "OPUS_PAIRS", {}):
+            model_id, dedicated = main.resolve_model("eng_Latn", "rus_Cyrl")
+
+        self.assertEqual(model_id, main.FALLBACK_MODEL_ID)
+        self.assertFalse(dedicated)
+
+    def test_translate_one_resolves_model_per_pair(self):
+        seen_model_ids = []
+
+        def fake_load_model(model_id):
+            seen_model_ids.append(model_id)
+            return FakeTokenizer(), FakeModel(), "cpu", FakeTorch()
+
+        with patch.object(main, "OPUS_PAIRS", {"en>de": {"model_id": "Helsinki-NLP/opus-mt-en-de", "license": "x"}}):
+            with patch.object(main, "load_model", fake_load_model):
+                main.translate_one("Hello", "eng_Latn", "deu_Latn")
+
+        self.assertEqual(seen_model_ids, ["Helsinki-NLP/opus-mt-en-de"])
+
+    def test_language_codes_returns_core_languages(self):
+        with patch.object(main, "CORE_LANGUAGES", {"en": "eng_Latn", "de": "deu_Latn"}):
+            self.assertEqual(main.language_codes(), ["deu_Latn", "eng_Latn"])
+
     def test_model_idle_unload_clears_cached_model_after_timeout(self):
-        torch_module = FakeTorchWithCuda()
-        model_loader = FakeCachedLoader((FakeTokenizer(), FakeModel(), "cuda", torch_module))
+        fake_torch = FakeTorchWithCuda()
+        model_loader = FakeCachedLoader((FakeTokenizer(), FakeModel(), "cuda", fake_torch))
         tokenizer_loader = FakeCachedLoader(FakeTokenizer())
 
         with patch.object(main, "load_model", model_loader):
             with patch.object(main, "load_tokenizer", tokenizer_loader):
-                with patch.object(main, "MODEL_IDLE_UNLOAD_ENABLED", True):
-                    with patch.object(main, "MODEL_IDLE_SECONDS", 1200):
-                        with patch.object(main, "MODEL_ACTIVE_USERS", 0):
-                            with patch.object(main, "MODEL_LAST_USED", 100.0):
-                                unloaded = main.unload_model_if_idle(now=1301.0)
+                with patch.dict(sys.modules, {"torch": fake_torch}):
+                    with patch.object(main, "MODEL_IDLE_UNLOAD_ENABLED", True):
+                        with patch.object(main, "MODEL_IDLE_SECONDS", 1200):
+                            with patch.object(main, "MODEL_ACTIVE_USERS", 0):
+                                with patch.object(main, "MODEL_LAST_USED", 100.0):
+                                    unloaded = main.unload_model_if_idle(now=1301.0)
 
         self.assertTrue(unloaded)
-        self.assertTrue(model_loader.called)
         self.assertTrue(model_loader.cleared)
         self.assertTrue(tokenizer_loader.cleared)
-        self.assertTrue(torch_module.cuda.emptied)
+        self.assertTrue(fake_torch.cuda.emptied)
 
     def test_model_idle_unload_keeps_recent_model_loaded(self):
         model_loader = FakeCachedLoader((FakeTokenizer(), FakeModel(), "cpu", FakeTorch()))
@@ -946,10 +1008,10 @@ class MainTests(unittest.TestCase):
         self.assertEqual(torch_module.threads, 3)
         self.assertEqual(torch_module.interop_threads, 2)
 
-    def test_languages_uses_static_nllb_codes_without_tokenizer(self):
+    def test_languages_endpoint_returns_core_languages_without_loading_a_model(self):
         client = TestClient(main.app)
 
-        with patch.object(main, "load_tokenizer", side_effect=RuntimeError("missing tokenizer")):
+        with patch.object(main, "load_tokenizer", side_effect=RuntimeError("must not load a model")):
             response = client.get("/languages")
 
         self.assertEqual(response.status_code, 200)

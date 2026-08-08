@@ -29,33 +29,30 @@ from pydantic import BaseModel
 from pypdf import PdfReader, PdfWriter
 
 
-def env_value(name: str, default: str, legacy_name: str = "") -> str:
-    if name in os.environ:
-        return os.environ[name]
-    if legacy_name and legacy_name in os.environ:
-        return os.environ[legacy_name]
-    return default
+def env_value(name: str, default: str) -> str:
+    return os.environ.get(name, default)
 
 
-MODEL_ID = env_value("LINGUINATOR_MODEL", "facebook/nllb-200-distilled-600M", "NLLB_MODEL")
-DEVICE_SETTING = env_value("LINGUINATOR_DEVICE", "cpu", "NLLB_DEVICE")
-MAX_CHARS = int(env_value("LINGUINATOR_MAX_CHARS", "6000", "NLLB_MAX_CHARS"))
-MAX_FILE_MB = int(env_value("LINGUINATOR_MAX_FILE_MB", "50", "NLLB_MAX_FILE_MB"))
+FALLBACK_MODEL_ID = env_value("LINGUINATOR_MODEL", "Helsinki-NLP/opus-mt-tc-bible-big-mul-mul")
+MODEL_CACHE_SIZE = max(1, int(env_value("LINGUINATOR_MODEL_CACHE_SIZE", "1")))
+DEVICE_SETTING = env_value("LINGUINATOR_DEVICE", "cpu")
+MAX_CHARS = int(env_value("LINGUINATOR_MAX_CHARS", "6000"))
+MAX_FILE_MB = int(env_value("LINGUINATOR_MAX_FILE_MB", "50"))
 MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
 MAX_ZIP_UNCOMPRESSED_BYTES = MAX_FILE_BYTES * 10
-HISTORY_DAYS = int(env_value("LINGUINATOR_HISTORY_DAYS", "7", "NLLB_HISTORY_DAYS"))
-HISTORY_DIR = Path(env_value("LINGUINATOR_HISTORY_DIR", "/data/history", "NLLB_HISTORY_DIR"))
-JOB_WORKERS = max(1, int(env_value("LINGUINATOR_JOB_WORKERS", "1", "NLLB_JOB_WORKERS")))
-JOBS_DIR = Path(env_value("LINGUINATOR_JOBS_DIR", str(HISTORY_DIR / "jobs"), "NLLB_JOBS_DIR"))
-CPU_THREADS = int(env_value("LINGUINATOR_CPU_THREADS", "0", "NLLB_CPU_THREADS"))
-CPU_INTEROP_THREADS = int(env_value("LINGUINATOR_CPU_INTEROP_THREADS", "0", "NLLB_CPU_INTEROP_THREADS"))
-DEFAULT_SOURCE = env_value("LINGUINATOR_DEFAULT_SOURCE", "eng_Latn", "NLLB_DEFAULT_SOURCE")
-DEFAULT_TARGET = env_value("LINGUINATOR_DEFAULT_TARGET", "deu_Latn", "NLLB_DEFAULT_TARGET")
-OCR_ENABLED = env_value("LINGUINATOR_ENABLE_OCR", "true", "NLLB_ENABLE_OCR").lower() in ("1", "true", "yes", "on")
-OCR_LANGUAGE = env_value("LINGUINATOR_OCR_LANGUAGE", "deu+eng", "NLLB_OCR_LANGUAGE")
-AUTH_ENABLED = env_value("LINGUINATOR_AUTH_ENABLED", "false", "NLLB_AUTH_ENABLED").lower() in ("1", "true", "yes", "on")
-AUTH_USERNAME = env_value("LINGUINATOR_AUTH_USERNAME", "admin", "NLLB_AUTH_USERNAME")
-AUTH_PASSWORD = env_value("LINGUINATOR_AUTH_PASSWORD", "", "NLLB_AUTH_PASSWORD")
+HISTORY_DAYS = int(env_value("LINGUINATOR_HISTORY_DAYS", "7"))
+HISTORY_DIR = Path(env_value("LINGUINATOR_HISTORY_DIR", "/data/history"))
+JOB_WORKERS = max(1, int(env_value("LINGUINATOR_JOB_WORKERS", "1")))
+JOBS_DIR = Path(env_value("LINGUINATOR_JOBS_DIR", str(HISTORY_DIR / "jobs")))
+CPU_THREADS = int(env_value("LINGUINATOR_CPU_THREADS", "0"))
+CPU_INTEROP_THREADS = int(env_value("LINGUINATOR_CPU_INTEROP_THREADS", "0"))
+DEFAULT_SOURCE = env_value("LINGUINATOR_DEFAULT_SOURCE", "eng_Latn")
+DEFAULT_TARGET = env_value("LINGUINATOR_DEFAULT_TARGET", "deu_Latn")
+OCR_ENABLED = env_value("LINGUINATOR_ENABLE_OCR", "true").lower() in ("1", "true", "yes", "on")
+OCR_LANGUAGE = env_value("LINGUINATOR_OCR_LANGUAGE", "deu+eng")
+AUTH_ENABLED = env_value("LINGUINATOR_AUTH_ENABLED", "false").lower() in ("1", "true", "yes", "on")
+AUTH_USERNAME = env_value("LINGUINATOR_AUTH_USERNAME", "admin")
+AUTH_PASSWORD = env_value("LINGUINATOR_AUTH_PASSWORD", "")
 MODEL_IDLE_UNLOAD_ENABLED = env_value("LINGUINATOR_UNLOAD_MODEL_AFTER_IDLE", "true").lower() in ("1", "true", "yes", "on")
 MODEL_IDLE_SECONDS = int(env_value("LINGUINATOR_MODEL_IDLE_SECONDS", "1200"))
 PUBLIC_URL = os.getenv("LINGUINATOR_PUBLIC_URL", "").rstrip("/")
@@ -87,42 +84,36 @@ PDF_FONT_BOLD_CANDIDATES = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "C:/Windows/Fonts/arialbd.ttf",
 )
-NLLB_LANGUAGE_CODES = (
-    "ace_Arab", "ace_Latn", "acm_Arab", "acq_Arab", "aeb_Arab", "afr_Latn",
-    "ajp_Arab", "aka_Latn", "amh_Ethi", "apc_Arab", "arb_Arab", "ars_Arab",
-    "ary_Arab", "arz_Arab", "asm_Beng", "ast_Latn", "awa_Deva", "ayr_Latn",
-    "azb_Arab", "azj_Latn", "bak_Cyrl", "bam_Latn", "ban_Latn", "bel_Cyrl",
-    "bem_Latn", "ben_Beng", "bho_Deva", "bjn_Arab", "bjn_Latn", "bod_Tibt",
-    "bos_Latn", "bug_Latn", "bul_Cyrl", "cat_Latn", "ceb_Latn", "ces_Latn",
-    "cjk_Latn", "ckb_Arab", "crh_Latn", "cym_Latn", "dan_Latn", "deu_Latn",
-    "dik_Latn", "dyu_Latn", "dzo_Tibt", "ell_Grek", "eng_Latn", "epo_Latn",
-    "est_Latn", "eus_Latn", "ewe_Latn", "fao_Latn", "fij_Latn", "fin_Latn",
-    "fon_Latn", "fra_Latn", "fur_Latn", "fuv_Latn", "gla_Latn", "gle_Latn",
-    "glg_Latn", "grn_Latn", "guj_Gujr", "hat_Latn", "hau_Latn", "heb_Hebr",
-    "hin_Deva", "hne_Deva", "hrv_Latn", "hun_Latn", "hye_Armn", "ibo_Latn",
-    "ilo_Latn", "ind_Latn", "isl_Latn", "ita_Latn", "jav_Latn", "jpn_Jpan",
-    "kab_Latn", "kac_Latn", "kam_Latn", "kan_Knda", "kas_Arab", "kas_Deva",
-    "kat_Geor", "knc_Arab", "knc_Latn", "kaz_Cyrl", "kbp_Latn", "kea_Latn",
-    "khm_Khmr", "kik_Latn", "kin_Latn", "kir_Cyrl", "kmb_Latn", "kon_Latn",
-    "kor_Hang", "kmr_Latn", "lao_Laoo", "lvs_Latn", "lij_Latn", "lim_Latn",
-    "lin_Latn", "lit_Latn", "lmo_Latn", "ltg_Latn", "ltz_Latn", "lua_Latn",
-    "lug_Latn", "luo_Latn", "lus_Latn", "mag_Deva", "mai_Deva", "mal_Mlym",
-    "mar_Deva", "min_Arab", "min_Latn", "mkd_Cyrl", "plt_Latn", "mlt_Latn",
-    "mni_Beng", "khk_Cyrl", "mos_Latn", "mri_Latn", "zsm_Latn", "mya_Mymr",
-    "nld_Latn", "nno_Latn", "nob_Latn", "npi_Deva", "nso_Latn", "nus_Latn",
-    "nya_Latn", "oci_Latn", "gaz_Latn", "ory_Orya", "pag_Latn", "pan_Guru",
-    "pap_Latn", "pes_Arab", "pol_Latn", "por_Latn", "prs_Arab", "pbt_Arab",
-    "quy_Latn", "ron_Latn", "run_Latn", "rus_Cyrl", "sag_Latn", "san_Deva",
-    "sat_Olck", "scn_Latn", "shn_Mymr", "sin_Sinh", "slk_Latn", "slv_Latn",
-    "smo_Latn", "sna_Latn", "snd_Arab", "som_Latn", "sot_Latn", "spa_Latn",
-    "als_Latn", "srd_Latn", "srp_Cyrl", "ssw_Latn", "sun_Latn", "swe_Latn",
-    "swh_Latn", "szl_Latn", "tam_Taml", "taq_Latn", "taq_Tfng", "tel_Telu",
-    "tgk_Cyrl", "tgl_Latn", "tha_Thai", "tir_Ethi", "tpi_Latn", "tsn_Latn",
-    "tso_Latn", "tuk_Latn", "tum_Latn", "tur_Latn", "twi_Latn", "tzm_Tfng",
-    "uig_Arab", "ukr_Cyrl", "umb_Latn", "urd_Arab", "uzn_Latn", "vec_Latn",
-    "vie_Latn", "war_Latn", "wol_Latn", "xho_Latn", "ydd_Hebr", "yor_Latn",
-    "yue_Hant", "zho_Hans", "zho_Hant", "zul_Latn",
-)
+def parse_core_languages(value: str, default: Dict[str, str]) -> Dict[str, str]:
+    """iso-639-1 code -> internal deu_Latn-style code. LINGUINATOR_LANGUAGES, if set, replaces
+    the built-in list entirely; each entry is "xx:xxx_Scr" (e.g. "de:deu_Latn")."""
+    if not value.strip():
+        return default
+    result = {}
+    for entry in value.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        short, _, internal = entry.partition(":")
+        if not internal:
+            raise ValueError(f"LINGUINATOR_LANGUAGES entry {entry!r} must be formatted as xx:xxx_Scr")
+        result[short] = internal
+    return result
+
+
+# The language picker's contents, and simultaneously the alias table used to look up OPUS-MT
+# pair models (whose ids use iso-639-1 codes) and to build the >>xxx<< prefix token for the
+# multilingual fallback model. Restricted to languages with at least one bilingual OPUS-MT
+# model against English; override entirely via LINGUINATOR_LANGUAGES.
+CORE_LANGUAGES = parse_core_languages(env_value("LINGUINATOR_LANGUAGES", ""), {
+    "en": "eng_Latn", "de": "deu_Latn", "fr": "fra_Latn", "es": "spa_Latn", "it": "ita_Latn",
+    "nl": "nld_Latn", "pt": "por_Latn", "pl": "pol_Latn", "ru": "rus_Cyrl", "uk": "ukr_Cyrl",
+    "cs": "ces_Latn", "sv": "swe_Latn", "da": "dan_Latn", "fi": "fin_Latn", "el": "ell_Grek",
+    "ro": "ron_Latn", "hu": "hun_Latn", "bg": "bul_Cyrl", "hr": "hrv_Latn", "sk": "slk_Latn",
+    "et": "est_Latn", "ar": "arb_Arab", "zh": "zho_Hans", "ja": "jpn_Jpan", "he": "heb_Hebr",
+    "hi": "hin_Deva", "vi": "vie_Latn", "id": "ind_Latn",
+})
+INTERNAL_TO_ISO_639_1 = {internal: short for short, internal in CORE_LANGUAGES.items()}
 
 if CPU_THREADS > 0:
     os.environ.setdefault("OMP_NUM_THREADS", str(CPU_THREADS))
@@ -222,17 +213,17 @@ def configure_torch_threads(torch_module):
             pass
 
 
-@lru_cache(maxsize=1)
-def load_tokenizer():
+@lru_cache(maxsize=MODEL_CACHE_SIZE)
+def load_tokenizer(model_id: str):
     try:
         from transformers import AutoTokenizer
     except ImportError as exc:
         raise RuntimeError("transformers is required for translation") from exc
-    return AutoTokenizer.from_pretrained(MODEL_ID)
+    return AutoTokenizer.from_pretrained(model_id)
 
 
-@lru_cache(maxsize=1)
-def load_model():
+@lru_cache(maxsize=MODEL_CACHE_SIZE)
+def load_model(model_id: str):
     try:
         import torch
         from transformers import AutoModelForSeq2SeqLM
@@ -240,8 +231,8 @@ def load_model():
         raise RuntimeError("torch and transformers are required for translation") from exc
     configure_torch_threads(torch)
     device = selected_device()
-    tokenizer = load_tokenizer()
-    model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_ID)
+    tokenizer = load_tokenizer(model_id)
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
     model.to(device)
     model.eval()
     return tokenizer, model, device, torch
@@ -265,20 +256,18 @@ def end_model_use():
 
 
 def unload_model_cache() -> bool:
-    torch_module = None
     with MODEL_LOCK:
         if MODEL_ACTIVE_USERS > 0:
             return False
         if not model_cache_loaded():
             return False
-        if load_model.cache_info().currsize > 0:
-            try:
-                _, _, _, torch_module = load_model()
-            except Exception:
-                torch_module = None
         load_model.cache_clear()
         load_tokenizer.cache_clear()
     gc.collect()
+    try:
+        import torch as torch_module
+    except ImportError:
+        torch_module = None
     cuda = getattr(torch_module, "cuda", None) if torch_module else None
     if cuda and hasattr(cuda, "is_available") and hasattr(cuda, "empty_cache") and cuda.is_available():
         cuda.empty_cache()
@@ -308,35 +297,80 @@ if MODEL_IDLE_UNLOAD_ENABLED and MODEL_IDLE_SECONDS > 0:
     threading.Thread(target=model_idle_unloader, daemon=True).start()
 
 
-def language_codes():
-    if "nllb" in MODEL_ID.lower():
-        return sorted(NLLB_LANGUAGE_CODES)
+def iso_639_1(code: str) -> str:
+    """Best-effort ISO 639-1 code for an internal deu_Latn-style code, used to look up OPUS-MT
+    pair models and their >>xxx<< prefix tokens."""
+    return INTERNAL_TO_ISO_639_1.get(code, code.split("_", 1)[0][:2])
+
+
+def load_opus_pairs() -> Dict[str, Dict[str, str]]:
+    """source>target -> {"model_id", "license"}, generated by tools/generate_opus_pairs.py.
+    Read once at import time; the app never queries Hugging Face to find a model."""
     try:
-        tokenizer = load_tokenizer()
-    except RuntimeError:
-        return sorted(NLLB_LANGUAGE_CODES)
-    codes = getattr(tokenizer, "additional_special_tokens", [])
-    return sorted(
-        code for code in codes
-        if "_" in code and len(code.split("_", 1)[0]) == 3
-    ) or sorted(NLLB_LANGUAGE_CODES)
+        data = json.loads((APP_DIR / "opus_pairs.json").read_text(encoding="utf-8"))
+        return data.get("pairs", {})
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+
+OPUS_PAIRS = load_opus_pairs()
+
+
+def resolve_model(source: str, target: str) -> Tuple[str, bool]:
+    """The model id to use for a language pair, and whether it is a dedicated bilingual model
+    (True) or the multilingual fallback (False)."""
+    entry = OPUS_PAIRS.get(f"{iso_639_1(source)}>{iso_639_1(target)}")
+    if entry:
+        return entry["model_id"], True
+    return FALLBACK_MODEL_ID, False
+
+
+def model_family(model_id: str) -> str:
+    """Which language-signalling convention a translation model expects, keyed off its id.
+
+    "prefix": a language token prepended to the input text, which alone picks the target
+    (OPUS-MT's multilingual fallback model). "plain": no signalling at all, for a bilingual
+    model that only ever translates one fixed pair.
+    """
+    return "prefix" if "mul-mul" in model_id.lower() else "plain"
+
+
+def model_language_code(model_id: str, code: str) -> str:
+    """Turn an internal deu_Latn-style code into whatever the given model expects."""
+    if "mul-mul" in model_id.lower():
+        return f">>{code.split('_', 1)[0]}<<"
+    return code
+
+
+def prepare_translation(
+    tokenizer, model_id: str, text: str, source: str, target: str
+) -> Tuple[Any, Dict[str, Any]]:
+    """Tokenizer inputs and model.generate() kwargs for this model's language convention."""
+    if model_family(model_id) == "prefix":
+        prefixed_text = f"{model_language_code(model_id, target)} {text}"
+        return tokenizer(prefixed_text, return_tensors="pt", truncation=True), {}
+    return tokenizer(text, return_tensors="pt", truncation=True), {}
+
+
+def language_codes():
+    return sorted(CORE_LANGUAGES.values())
 
 
 def translate_one(text: str, source: str, target: str) -> str:
     if not text:
         return ""
 
+    model_id, _dedicated = resolve_model(source, target)
     begin_model_use()
     try:
-        tokenizer, model, device, torch_module = load_model()
-        tokenizer.src_lang = source
-        inputs = tokenizer(text, return_tensors="pt", truncation=True).to(device)
-        forced_bos_token_id = tokenizer.convert_tokens_to_ids(target)
+        tokenizer, model, device, torch_module = load_model(model_id)
+        inputs, generate_kwargs = prepare_translation(tokenizer, model_id, text, source, target)
+        inputs = inputs.to(device)
 
         with torch_module.inference_mode():
             generated = model.generate(
                 **inputs,
-                forced_bos_token_id=forced_bos_token_id,
+                **generate_kwargs,
                 max_new_tokens=1024,
                 num_beams=4,
             )
@@ -2540,7 +2574,8 @@ def health():
     ocr_available = bool(shutil.which("pdftoppm") and shutil.which("tesseract"))
     return {
         "status": "ok",
-        "model": MODEL_ID,
+        "fallback_model": FALLBACK_MODEL_ID,
+        "dedicated_pairs": len(OPUS_PAIRS),
         "device": selected_device(),
         "max_chars": MAX_CHARS,
         "max_file_mb": MAX_FILE_MB,
@@ -2561,10 +2596,16 @@ def health():
 
 @app.get("/languages")
 def languages():
+    dedicated_pairs = []
+    for key in OPUS_PAIRS:
+        source, _, target = key.partition(">")
+        if source in CORE_LANGUAGES and target in CORE_LANGUAGES:
+            dedicated_pairs.append([CORE_LANGUAGES[source], CORE_LANGUAGES[target]])
     return {
         "source_default": DEFAULT_SOURCE,
         "target_default": DEFAULT_TARGET,
         "languages": [{"code": code, "name": code} for code in language_codes()],
+        "dedicated_pairs": dedicated_pairs,
     }
 
 

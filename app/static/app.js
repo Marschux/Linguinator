@@ -65,7 +65,9 @@ let languageData = null;
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
         formatPdf: "PDF",
-        formatOriginal: "Original Format"
+        formatOriginal: "Original Format",
+        modelDedicated: "Dedicated model for this language pair.",
+        modelFallback: "No dedicated model for this pair, using the multilingual fallback."
       },
       de: {
         uiLanguage: "UI-Sprache",
@@ -117,7 +119,9 @@ let languageData = null;
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
         formatPdf: "PDF",
-        formatOriginal: "Originalformat"
+        formatOriginal: "Originalformat",
+        modelDedicated: "Eigenes Modell fuer dieses Sprachpaar.",
+        modelFallback: "Kein eigenes Modell fuer dieses Paar, nutzt den mehrsprachigen Fallback."
       },
       es: {
         uiLanguage: "Idioma de UI",
@@ -169,7 +173,9 @@ let languageData = null;
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
         formatPdf: "PDF",
-        formatOriginal: "Formato original"
+        formatOriginal: "Formato original",
+        modelDedicated: "Modelo dedicado para este par de idiomas.",
+        modelFallback: "Sin modelo dedicado para este par, se usa el alternativo multilingue."
       },
       fr: {
         uiLanguage: "Langue UI",
@@ -221,46 +227,14 @@ let languageData = null;
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
         formatPdf: "PDF",
-        formatOriginal: "Format original"
+        formatOriginal: "Format original",
+        modelDedicated: "Modele dedie pour cette paire de langues.",
+        modelFallback: "Pas de modele dedie pour cette paire, utilise le modele multilingue."
       }
     };
     const FAVORITE_LANGUAGE_COUNT = 4;
     const defaultFavoriteLanguages = ["eng_Latn", "deu_Latn", "fra_Latn", "spa_Latn"];
     const languageNames = new Intl.DisplayNames(["en"], {type: "language"});
-    const scriptNames = {
-      Adlm: "Adlam",
-      Arab: "Arabic",
-      Armn: "Armenian",
-      Beng: "Bengali",
-      Cans: "Canadian Aboriginal",
-      Cyrl: "Cyrillic",
-      Deva: "Devanagari",
-      Ethi: "Ethiopic",
-      Geor: "Georgian",
-      Grek: "Greek",
-      Gujr: "Gujarati",
-      Guru: "Gurmukhi",
-      Hans: "Simplified Han",
-      Hant: "Traditional Han",
-      Hebr: "Hebrew",
-      Jpan: "Japanese",
-      Khmr: "Khmer",
-      Knda: "Kannada",
-      Kore: "Korean",
-      Laoo: "Lao",
-      Latn: "Latin",
-      Mlym: "Malayalam",
-      Mtei: "Meitei",
-      Mymr: "Myanmar",
-      Orya: "Odia",
-      Sinh: "Sinhala",
-      Taml: "Tamil",
-      Telu: "Telugu",
-      Tfng: "Tifinagh",
-      Thai: "Thai",
-      Tibt: "Tibetan",
-      Vaii: "Vai"
-    };
     const languageFallbacks = {
       ace: "Acehnese",
       acm: "Mesopotamian Arabic",
@@ -517,7 +491,7 @@ let languageData = null;
     }
 
     function languageDisplayName(languageCode) {
-      const [languagePart, scriptPart] = languageCode.split("_");
+      const languagePart = languageCode.split("_")[0];
       let intlName = "";
       try {
         intlName = languageNames.of(languagePart) || "";
@@ -528,14 +502,13 @@ let languageData = null;
       if (name === languagePart) {
         name = titleCase(languagePart);
       }
-      const script = scriptNames[scriptPart] || scriptPart;
       const flag = countryFlag(languageCountries[languagePart]);
-      return {name, script, flag};
+      return {name, flag};
     }
 
     function formatLanguageLabel(languageCode) {
       const display = languageDisplayName(languageCode);
-      return (display.flag ? display.flag + " " : "") + display.name + " (" + display.script + ")";
+      return (display.flag ? display.flag + " " : "") + display.name;
     }
 
     const inputTabs = {
@@ -624,6 +597,17 @@ let languageData = null;
         option.classList.toggle("active", option.dataset.code === languageCode);
       });
       closeLanguageMenus();
+      updateModelQualityHint();
+    }
+
+    function updateModelQualityHint() {
+      const hint = document.getElementById("modelQualityHint");
+      if (!hint) return;
+      const pairs = (languageData && languageData.dedicated_pairs) || [];
+      const source = document.getElementById("source").value;
+      const target = document.getElementById("target").value;
+      const dedicated = pairs.some((pair) => pair[0] === source && pair[1] === target);
+      hint.textContent = t(dedicated ? "modelDedicated" : "modelFallback");
     }
 
     function closeLanguageMenus() {
