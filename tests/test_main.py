@@ -48,8 +48,8 @@ class FakeTokenizer:
     def __init__(self):
         self.src_lang = None
 
-    def __call__(self, text, return_tensors, truncation, max_length=None):
-        return FakeInputs({"text": text, "return_tensors": return_tensors, "truncation": truncation, "max_length": max_length})
+    def __call__(self, text, return_tensors, truncation, max_length=None, padding=False):
+        return FakeInputs({"text": text, "return_tensors": return_tensors, "truncation": truncation, "max_length": max_length, "padding": padding})
 
     def convert_tokens_to_ids(self, target):
         return 42
@@ -459,6 +459,34 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(translated, "teilen. Wenn Sie")
 
+    def test_translate_batch_maps_results_back_by_position_and_skips_empties(self):
+        seen_texts = {}
+
+        class RecordingTokenizer(FakeTokenizer):
+            def __call__(self, text, return_tensors, truncation, max_length=None, padding=False):
+                seen_texts["text"] = text
+                seen_texts["padding"] = padding
+                return FakeInputs({"text": text})
+
+            def batch_decode(self, generated, skip_special_tokens):
+                return ["Eins", "Zwei"]
+
+        model = FakeModel()
+        model.generate = lambda **inputs: ["g1", "g2"]
+
+        with patch.object(main, "load_model", return_value=(RecordingTokenizer(), model, "cpu", FakeTorch())):
+            translated = main.translate_batch(["Hello", "", "World"], "eng_Latn", "deu_Latn")
+
+        self.assertEqual(translated, ["Eins", "", "Zwei"])
+        self.assertEqual(seen_texts["text"], ["Hello", "World"])
+        self.assertTrue(seen_texts["padding"])
+
+    def test_translate_batch_empty_input_skips_model_call(self):
+        with patch.object(main, "load_model", side_effect=AssertionError("should not load a model")):
+            translated = main.translate_batch(["", ""], "eng_Latn", "deu_Latn")
+
+        self.assertEqual(translated, ["", ""])
+
     def test_model_family_classifies_known_model_ids(self):
         self.assertEqual(main.model_family("Helsinki-NLP/opus-mt-tc-bible-big-mul-mul"), "prefix")
         self.assertEqual(main.model_family("Helsinki-NLP/opus-mt-en-de"), "plain")
@@ -844,7 +872,7 @@ class MainTests(unittest.TestCase):
                         main.JOBS.clear()
                         main.JOB_RUNNERS.clear()
                     job_id = main.create_job("translate-pdf-layout", "eng_Latn", "deu_Latn", "input.pdf")
-                    with patch.object(main, "translate_one", return_value="Hallo Welt"):
+                    with patch.object(main, "translate_batch", return_value=["Hallo Welt"]):
                         main.run_pdf_layout_translate_job(job_id, source, "eng_Latn", "deu_Latn", "input.pdf")
 
                     job = main.get_job(job_id)

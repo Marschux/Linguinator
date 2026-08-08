@@ -1344,9 +1344,7 @@ let languageData = null;
       form.append("file", file);
       form.append("source", source);
       form.append("target", target);
-      if (!layoutMode) {
-        form.append("page_range", document.getElementById("pageRange").value);
-      }
+      form.append("page_range", document.getElementById("pageRange").value);
       setResult("");
       lastCompletedJob = null;
       showProgress("extracting", 0, t("uploadingPdf"));

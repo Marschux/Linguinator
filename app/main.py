@@ -14,6 +14,7 @@ import threading
 import time
 import uuid
 import zipfile
+from collections import Counter
 from datetime import datetime, timezone
 from functools import lru_cache
 from html.parser import HTMLParser
@@ -73,6 +74,11 @@ PDF_LAYOUT_MIN_SCALE = 0.7
 # Safety margin on the estimated width of the original text when covering it. Anything left
 # uncovered shows through next to the translation; overshoot is clamped at neighbouring columns.
 PDF_COVER_WIDTH_FACTOR = 1.05
+# Layout-PDF paragraphs are usually short, so translating one per model call wastes most of
+# each call on fixed beam-search overhead. Batched via the tensor's batch dimension (not string
+# concatenation), so paragraph boundaries stay exact; kept small to cap the extra padding memory
+# a batch costs over a single call.
+PDF_LAYOUT_BATCH_SIZE = int(env_value("LINGUINATOR_PDF_LAYOUT_BATCH_SIZE", "4"))
 PDF_FONT_FILE = env_value("LINGUINATOR_PDF_FONT", "")
 PDF_FONT_BOLD_FILE = env_value("LINGUINATOR_PDF_FONT_BOLD", "")
 PDF_FONT_CANDIDATES = (
@@ -135,7 +141,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.3.9", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.3.12", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -397,6 +403,37 @@ def translate_one(text: str, source: str, target: str) -> str:
         return normalize_translated_text(tokenizer.batch_decode(generated, skip_special_tokens=True)[0])
     finally:
         end_model_use()
+
+
+def translate_batch(texts: List[str], source: str, target: str) -> List[str]:
+    """Translate several short texts in a single model.generate() call (real tensor batching,
+    not string concatenation, so each result maps back to its input by position)."""
+    indices = [i for i, text in enumerate(texts) if text]
+    if not indices:
+        return ["" for _ in texts]
+
+    model_id, _dedicated = resolve_model(source, target)
+    begin_model_use()
+    try:
+        tokenizer, model, device, torch_module = load_model(model_id)
+        batch_texts = [texts[i] for i in indices]
+        if model_family(model_id) == "prefix":
+            prefix = model_language_code(model_id, target)
+            batch_texts = [f"{prefix} {text}" for text in batch_texts]
+        inputs = tokenizer(
+            batch_texts, return_tensors="pt", truncation=True, max_length=TRANSLATE_MAX_TOKENS, padding=True
+        ).to(device)
+
+        with torch_module.inference_mode():
+            generated = model.generate(**inputs, max_new_tokens=TRANSLATE_MAX_TOKENS, num_beams=4)
+        decoded = tokenizer.batch_decode(generated, skip_special_tokens=True)
+    finally:
+        end_model_use()
+
+    results = ["" for _ in texts]
+    for i, text in zip(indices, decoded):
+        results[i] = normalize_translated_text(text)
+    return results
 
 
 def split_long_text(text: str, max_chars: int) -> List[str]:
@@ -1149,6 +1186,7 @@ def rebuild_runner_for_job(job: Dict[str, Any]) -> Optional[Tuple[Callable[..., 
             job.get("source", DEFAULT_SOURCE),
             job.get("target", DEFAULT_TARGET),
             job.get("filename", "pdf"),
+            job.get("page_range", ""),
         )
     return None
 
@@ -1233,6 +1271,17 @@ def translate_chunks(chunks: List[str], source: str, target: str, job_id: str, o
         )
         translated.append(translate_one(chunk, source, target))
         update_job(job_id, current=offset + index)
+    return translated
+
+
+def translate_chunks_batched(chunks: List[str], source: str, target: str, job_id: str, batch_size: int) -> List[str]:
+    translated: List[str] = []
+    for start in range(0, len(chunks), batch_size):
+        wait_if_paused_or_cancelled(job_id)
+        group = chunks[start:start + batch_size]
+        update_job(job_id, status="running", current=start, message=f"Translating {start} / {len(chunks)} chunks")
+        translated.extend(translate_batch(group, source, target))
+        update_job(job_id, current=start + len(group))
     return translated
 
 
@@ -1567,7 +1616,10 @@ def reflow_paragraph(
     lines = paragraph["lines"]
     left = min(line["x"] for line in lines)
     width = max(max(line["right"] for line in lines) - left, 10.0)
-    base_size = max(line["size"] for line in lines)
+    # A paragraph can start with a larger heading line merged into smaller body lines (grouped
+    # for translation context, see group_pdf_paragraphs). Sizing the whole reflow off the max
+    # would blow the body text up to heading size, so use whichever size the paragraph mostly is.
+    base_size = Counter(line["size"] for line in lines).most_common(1)[0][0]
     if len(lines) > 1:
         leading = (lines[0]["y"] - lines[-1]["y"]) / (len(lines) - 1)
     else:
@@ -2583,14 +2635,17 @@ def run_pdf_layout_translate_job(
     source: str,
     target: str,
     filename: str,
+    page_range: str = "",
 ):
     try:
         update_job(job_id, status="running", message="Reading PDF layout", started_at=time.time())
-        pages = extract_pdf_layout(content)
+        pages = extract_pdf_layout(content, page_range)
         wait_if_paused_or_cancelled(job_id)
         paragraphs = [paragraph["text"] for page in pages for paragraph in page["paragraphs"]]
         # One paragraph per chunk: the overlay maps translations back to paragraphs by position,
-        # and the model does not reliably keep paragraph breaks inside a single chunk.
+        # and the model does not reliably keep paragraph breaks inside a single chunk. Several
+        # chunks are still translated per model call (translate_chunks_batched), via the tensor's
+        # batch dimension rather than concatenated text, so this mapping stays exact.
         chunks: List[str] = []
         chunk_counts: List[int] = []
         for paragraph in paragraphs:
@@ -2598,7 +2653,7 @@ def run_pdf_layout_translate_job(
             chunks.extend(parts)
             chunk_counts.append(len(parts))
         update_job(job_id, total=len(chunks), message=f"Translating 0 / {len(chunks)} chunks")
-        translated_chunks = translate_chunks(chunks, source, target, job_id)
+        translated_chunks = translate_chunks_batched(chunks, source, target, job_id, PDF_LAYOUT_BATCH_SIZE)
 
         translated: List[str] = []
         position = 0
@@ -2769,6 +2824,7 @@ async def start_translate_pdf_layout_job(
     file: UploadFile = File(...),
     source: str = Form(DEFAULT_SOURCE),
     target: str = Form(DEFAULT_TARGET),
+    page_range: str = Form(""),
 ):
     ensure_queue_workers()
     content = await read_upload_bytes(file, "PDF")
@@ -2777,11 +2833,11 @@ async def start_translate_pdf_layout_job(
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
     payload_path = job_payload_path(job_id)
     payload_path.write_bytes(content)
-    update_job(job_id, payload_path=str(payload_path), filename=filename)
+    update_job(job_id, payload_path=str(payload_path), filename=filename, page_range=page_range)
     register_job_runner(
         job_id,
         run_pdf_layout_translate_job,
-        (job_id, content, source, target, filename),
+        (job_id, content, source, target, filename, page_range),
     )
     return {"job_id": job_id}
 
