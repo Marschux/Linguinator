@@ -11,7 +11,7 @@
   <main class="app">
     <header>
       <div class="brand">
-        <h1><img class="brand-logo" src="static/favicon.svg" alt="">Linguinator</h1>
+        <h1><a href="." class="brand-link" title="Reload Linguinator."><img class="brand-logo" src="static/favicon.svg" alt="">Linguinator</a></h1>
         <p class="subtle">Local translation workbench for text and document workflows.</p>
       </div>
       <div class="header-controls">
@@ -60,13 +60,13 @@
       <p id="modelQualityHint" class="subtle"></p>
 
       <div class="tabs" role="tablist" aria-label="Input type">
-        <button class="tab" type="button" data-input-tab="textarea" disabled title="Type text directly into the input field.">Text Field</button>
-        <button class="tab" type="button" data-input-tab="text" disabled title="Load and translate a text-like file.">Text</button>
-        <button class="tab" type="button" data-input-tab="markdown" disabled title="Load and translate a Markdown file.">Markdown</button>
-        <button class="tab" type="button" data-input-tab="office" disabled title="Load and translate a DOCX or ODT file as text.">Doc File</button>
-        <button class="tab" type="button" data-input-tab="pptx" disabled title="Load and translate a PowerPoint (PPTX) file as text.">PowerPoint</button>
-        <button class="tab" type="button" data-input-tab="csv" disabled title="Load and translate selected CSV or XLSX columns.">CSV File</button>
-        <button class="tab active" type="button" data-input-tab="pdf" title="Extract and translate a PDF page by page.">PDF</button>
+        <button class="tab" type="button" data-input-tab="textarea" disabled title="Type text directly into the input field."><span class="tab-badge">ABC</span><span class="tab-label">Text Field</span></button>
+        <button class="tab" type="button" data-input-tab="text" disabled title="Load and translate a text-like file."><span class="tab-badge">TXT</span><span class="tab-label">Text</span></button>
+        <button class="tab" type="button" data-input-tab="markdown" disabled title="Load and translate a Markdown file."><span class="tab-badge">MD</span><span class="tab-label">Markdown</span></button>
+        <button class="tab" type="button" data-input-tab="office" disabled title="Load and translate a DOCX or ODT file as text."><span class="tab-badge">DOC</span><span class="tab-label">Doc File</span></button>
+        <button class="tab" type="button" data-input-tab="pptx" disabled title="Load and translate a PowerPoint (PPTX) file as text."><span class="tab-badge">PPT</span><span class="tab-label">PowerPoint</span></button>
+        <button class="tab" type="button" data-input-tab="csv" disabled title="Load and translate selected CSV or XLSX columns."><span class="tab-badge">CSV</span><span class="tab-label">CSV File</span></button>
+        <button class="tab active" type="button" data-input-tab="pdf" title="Extract and translate a PDF page by page."><span class="tab-badge">PDF</span><span class="tab-label">PDF</span></button>
       </div>
       <select id="inputTabSelect" class="input-tab-select" aria-label="Input type" title="Select the input type.">
         <option value="textarea" disabled>Text Field</option>
@@ -134,7 +134,7 @@
     </section>
 
     <footer>
-      Linguinator<span id="appVersion"></span> - AGPL-3.0-or-later - by Marschux
+      <a href="https://gitlab.com/Marschux/Linguinator" target="_blank" rel="noopener" title="Open the Linguinator repository.">Linguinator</a><span id="appVersion"></span> - AGPL-3.0-or-later - by Marschux
     </footer>
   </main>
   <script src="static/app.js"></script>
