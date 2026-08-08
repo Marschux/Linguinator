@@ -178,7 +178,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.3.14", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.3.15", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -609,19 +609,13 @@ def pdf_text_object(text: str, bold: bool = False) -> str:
     return f"({pdf_escape(text)})"
 
 
-def wrap_pdf_line(text: str, max_chars: int = 88) -> List[str]:
+def wrap_pdf_line(text: str, size: float = PDF_FONT_SIZE) -> List[str]:
+    # Measured by actual glyph width (script-aware, see detect_pdf_script), not a fixed character
+    # count: CJK glyphs run close to twice as wide as Latin ones at the same point size, so a
+    # char-count cap tuned for Latin text ran CJK lines off the page edge.
     if not text:
         return [""]
-    lines = []
-    remaining = text
-    while len(remaining) > max_chars:
-        cut = remaining.rfind(" ", 0, max_chars + 1)
-        if cut <= 0:
-            cut = max_chars
-        lines.append(remaining[:cut].strip())
-        remaining = remaining[cut:].strip()
-    lines.append(remaining)
-    return lines
+    return wrap_text_to_width(text, PDF_PAGE_WIDTH - 2 * PDF_MARGIN, size)
 
 
 def pdf_line_command(text: str, x: float, y: float, font: str = "F1", size: float = PDF_FONT_SIZE) -> str:
@@ -649,7 +643,7 @@ def pdf_render_lines(text: str) -> List[Dict[str, Any]]:
         if stripped.startswith("#"):
             heading = stripped.lstrip("#").strip()
             if heading:
-                for line in wrap_pdf_line(heading, 68):
+                for line in wrap_pdf_line(heading, PDF_HEADING_FONT_SIZE):
                     lines.append({"text": line, "font": "F2", "size": PDF_HEADING_FONT_SIZE, "line_height": 18})
                 lines.append({"text": "", "font": "F1", "size": PDF_FONT_SIZE, "line_height": 8})
                 continue
@@ -1642,13 +1636,19 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
 
 
 def wrap_text_to_width(text: str, width: float, size: float) -> List[str]:
+    # CJK text has no spaces between words, so any character is a valid break point; splitting
+    # on whitespace there would treat the whole string as one unbreakable "word".
+    cjk = detect_pdf_script(text) == "cjk"
+    units = list(text) if cjk else text.split()
+    separator = "" if cjk else " "
+
     lines: List[str] = []
     current = ""
-    for word in text.split():
-        candidate = f"{current} {word}".strip()
+    for unit in units:
+        candidate = current + separator + unit if current else unit
         if current and pdf_measure_text(candidate, size) > width:
             lines.append(current)
-            current = word
+            current = unit
         else:
             current = candidate
     if current:

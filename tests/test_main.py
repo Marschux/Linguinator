@@ -883,6 +883,18 @@ class MainTests(unittest.TestCase):
         self.assertGreater(len(wrapped), 1)
         self.assertEqual(" ".join(wrapped).split(), text.split())
 
+    def test_wrap_text_to_width_breaks_cjk_text_without_spaces(self):
+        # Japanese/Chinese have no spaces between words, so word-splitting would treat the
+        # whole string as one unbreakable unit and it would run off the page edge.
+        text = "こんにちは" * 40
+
+        wrapped = main.wrap_text_to_width(text, 100.0, 11.0)
+
+        self.assertGreater(len(wrapped), 1)
+        self.assertEqual("".join(wrapped), text)
+        for line in wrapped:
+            self.assertLessEqual(main.pdf_measure_text(line, 11.0), 100.0)
+
     def test_export_pdf_layout_with_translated_text_respects_page_range(self):
         # A job translated with page_range="2" only produced translations for page 2's
         # paragraphs; re-export must extract page 2 only too, or the translation (meant for
