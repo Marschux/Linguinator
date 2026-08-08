@@ -466,6 +466,7 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]], cover_original: bool = Fa
         commands = []
         if cover_original:
             commands.append(f"1 1 1 rg 0 0 {width:.2f} {height:.2f} re f")
+            commands.append("0 g")
         y = height - margin
         if page["source_page"]:
             heading = "Page " + page["source_page"]

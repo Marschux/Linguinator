@@ -583,6 +583,9 @@ class MainTests(unittest.TestCase):
         self.assertIn(b" re f", content)
         self.assertIn(b"1 1 1 rg 0 0 595.00 842.00 re f", content)
         self.assertIn(b"Translated", content)
+        # Fill color must be reset to black after the white cover rectangle,
+        # otherwise the translated text is drawn white-on-white and invisible.
+        self.assertIn(b"1 1 1 rg 0 0 595.00 842.00 re f\n0 g", content)
 
     def test_create_overlay_pdf_preserves_original_page_count(self):
         original = main.create_text_pdf("# Page 1\n\nOriginal\n\n# Page 2\n\nSecond")
