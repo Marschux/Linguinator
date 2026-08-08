@@ -141,7 +141,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.3.12", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.3.13", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -1465,9 +1465,26 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
         if not text or not text.strip():
             return
         matrix = multiply_matrix(tuple(tm), tuple(cm))
+        if abs(matrix[4]) < 0.01 and abs(matrix[5]) < 0.01:
+            # Some PDF generators dump a hidden duplicate of the whole page's text anchored at
+            # the origin (accessibility/search layer). It is never real, visible page content.
+            return
         scale = math.sqrt(abs(matrix[0] * matrix[3] - matrix[1] * matrix[2])) or 1.0
         size = abs(float(font_size or PDF_FONT_SIZE)) * scale or PDF_FONT_SIZE
         width, exact = pdf_run_width(text.strip(), size, font_dict, width_cache)
+        # Synthetic bold (no real bold font available) is commonly faked by drawing the same
+        # glyphs twice at the same spot; keep only one copy or lines double up into "PPoowweerr".
+        if runs:
+            previous = runs[-1]
+            if (
+                previous["text"].strip() == text.strip()
+                and abs(previous["x"] - matrix[4]) < 0.5
+                and abs(previous["y"] - matrix[5]) < 0.5
+            ):
+                # Keep whichever stroke carries the trailing space, e.g. "r" vs "r ".
+                if len(text) > len(previous["text"]):
+                    previous["text"] = text
+                return
         runs.append({
             "text": text,
             "x": matrix[4],

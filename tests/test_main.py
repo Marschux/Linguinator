@@ -774,6 +774,35 @@ class MainTests(unittest.TestCase):
         overlay_mock.assert_called_once_with(b"source pdf", "text")
         self.assertEqual(result, b"overlay pdf")
 
+    def test_pdf_page_runs_collapses_synthetic_bold_double_strokes(self):
+        # Fake bold draws each glyph twice at the identical position, sometimes with a trailing
+        # space on only one of the two copies (e.g. "r" then "r ").
+        calls = [
+            ("P", 200.0, 670.0, 48.0),
+            ("P", 200.0, 670.0, 48.0),
+            ("r", 316.0, 670.0, 48.0),
+            ("r ", 316.0, 670.0, 48.0),
+        ]
+
+        class FakePdfPage:
+            def extract_text(self, visitor_text):
+                for text, x, y, size in calls:
+                    visitor_text(text, (1, 0, 0, 1, 0, 0), (size, 0, 0, size, x, y), {}, size)
+
+        runs = main.pdf_page_runs(FakePdfPage())
+
+        self.assertEqual([run["text"] for run in runs], ["P", "r "])
+
+    def test_pdf_page_runs_skips_hidden_text_anchored_at_origin(self):
+        class FakePdfPage:
+            def extract_text(self, visitor_text):
+                visitor_text("hidden duplicate page text", (1, 0, 0, 1, 0, 0), (12, 0, 0, 12, 0, 0), {}, 12)
+                visitor_text("Visible", (1, 0, 0, 1, 0, 0), (11, 0, 0, 11, 90.0, 700.0), {}, 11)
+
+        runs = main.pdf_page_runs(FakePdfPage())
+
+        self.assertEqual([run["text"] for run in runs], ["Visible"])
+
     def test_group_pdf_lines_merges_runs_on_the_same_baseline(self):
         runs = [
             {"text": "Hello", "x": 50.0, "y": 700.0, "size": 11.0},
