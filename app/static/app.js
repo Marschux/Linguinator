@@ -42,7 +42,6 @@ let languageData = null;
         resume: "Resume",
         stop: "Stop",
         skip: "Skip",
-        delete: "Delete",
         history: "History",
         noQueuedJobs: "No queued jobs.",
         noHistory: "No saved translations yet.",
@@ -97,7 +96,6 @@ let languageData = null;
         resume: "Fortsetzen",
         stop: "Stoppen",
         skip: "Ueberspringen",
-        delete: "Loeschen",
         history: "History",
         noQueuedJobs: "Keine wartenden Jobs.",
         noHistory: "Noch keine gespeicherten Uebersetzungen.",
@@ -152,7 +150,6 @@ let languageData = null;
         resume: "Continuar",
         stop: "Detener",
         skip: "Omitir",
-        delete: "Eliminar",
         history: "Historial",
         noQueuedJobs: "No hay trabajos en cola.",
         noHistory: "Aun no hay traducciones guardadas.",
@@ -207,7 +204,6 @@ let languageData = null;
         resume: "Reprendre",
         stop: "Arreter",
         skip: "Passer",
-        delete: "Supprimer",
         history: "Historique",
         noQueuedJobs: "Aucun job en file.",
         noHistory: "Aucune traduction enregistree.",
@@ -1034,6 +1030,8 @@ let languageData = null;
       const data = await response.json();
       maxChars = data.max_chars || 0;
       updateCounter();
+      const versionEl = document.getElementById("appVersion");
+      if (versionEl && data.version) versionEl.textContent = " v" + data.version;
     }
 
     function updateCounter() {
@@ -1379,21 +1377,25 @@ let languageData = null;
       }
     }
 
+    function formatHistoryDate(isoString) {
+      try {
+        return new Intl.DateTimeFormat(currentUiLanguage, {year: "numeric", month: "2-digit", day: "2-digit"}).format(new Date(isoString));
+      } catch {
+        return (isoString || "").slice(0, 10);
+      }
+    }
+
+    function historyDisplayName(item) {
+      const date = formatHistoryDate(item.created_at);
+      const code = item.code ? " (" + item.code + ")" : "";
+      return item.original_name + " — " + date + code;
+    }
+
     function formatBytes(bytes) {
       if (!bytes) return "0 B";
       if (bytes < 1024) return bytes + " B";
       if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + " KB";
       return (bytes / 1024 / 1024).toFixed(1) + " MB";
-    }
-
-    async function deleteHistoryItem(id) {
-      const response = await fetch("history/" + id, {method: "DELETE"});
-      if (!response.ok) {
-        const text = await response.text();
-        showProgress("failed", 0, errorTextFromResponse(text));
-        return;
-      }
-      await loadHistory();
     }
 
     async function loadHistory() {
@@ -1421,11 +1423,11 @@ let languageData = null;
         main.className = "history-main";
         const link = document.createElement("a");
         link.href = "history/" + item.id;
-        link.textContent = item.filename;
-        link.download = item.filename;
+        link.textContent = historyDisplayName(item);
+        link.download = item.original_name;
         const meta = document.createElement("div");
         meta.className = "history-meta";
-        meta.textContent = item.source + " -> " + item.target + " | " + formatBytes(item.size_bytes) + " | " + item.created_at;
+        meta.textContent = item.source + " -> " + item.target + " | " + formatBytes(item.size_bytes);
         const format = document.createElement("select");
         format.className = "history-format";
         format.title = "Select the history download format.";
@@ -1451,19 +1453,12 @@ let languageData = null;
           download.href = "history/" + item.id + "/export?format=" + encodeURIComponent(format.value);
           download.download = "";
         });
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "secondary history-delete";
-        remove.textContent = t("delete");
-        remove.title = "Delete this history item.";
-        remove.addEventListener("click", () => deleteHistoryItem(item.id));
         main.appendChild(link);
         main.appendChild(meta);
         const actions = document.createElement("div");
         actions.className = "history-actions";
         actions.appendChild(format);
         actions.appendChild(download);
-        actions.appendChild(remove);
         row.appendChild(main);
         row.appendChild(actions);
         history.appendChild(row);

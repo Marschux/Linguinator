@@ -352,6 +352,11 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    def test_health_reports_app_version(self):
+        response = TestClient(main.app).get("/health")
+
+        self.assertEqual(response.json()["version"], main.app.version)
+
     def test_health_reports_proxy_configuration(self):
         with patch.object(main, "ROOT_PATH", "/linguinator"):
             with patch.object(main, "PUBLIC_URL", "https://example.test/linguinator"):
@@ -934,6 +939,18 @@ class MainTests(unittest.TestCase):
             with zipfile.ZipFile(BytesIO(doc_response.content)) as docx:
                 self.assertIn("word/document.xml", docx.namelist())
             self.assertEqual(bad_response.status_code, 404)
+        finally:
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
+    def test_save_history_includes_a_short_disambiguation_code(self):
+        temp_dir = test_temp_dir()
+        try:
+            with patch.object(main, "HISTORY_DIR", temp_dir):
+                item_id = main.save_history("text", "Hallo", "eng_Latn", "deu_Latn", "notes.txt")
+                items = main.history_items()
+
+            self.assertEqual(len(items[0]["code"]), 8)
+            self.assertTrue(item_id.endswith(items[0]["code"]))
         finally:
             shutil.rmtree(temp_dir.parent, ignore_errors=True)
 

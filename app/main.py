@@ -135,7 +135,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.3.4", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.3.6", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -885,6 +885,7 @@ def save_history(
         "created_at": created_at,
         "filename": md_path.name,
         "original_name": original_name,
+        "code": item_id[:8],
         "source_extension": source_ext,
         "source_meta": source_meta or {},
     }
@@ -2639,6 +2640,7 @@ def health():
     ocr_available = bool(shutil.which("pdftoppm") and shutil.which("tesseract"))
     return {
         "status": "ok",
+        "version": app.version,
         "fallback_model": FALLBACK_MODEL_ID,
         "dedicated_pairs": len(OPUS_PAIRS),
         "device": selected_device(),

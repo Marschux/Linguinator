@@ -545,8 +545,6 @@
       border-color: #4b5565;
       text-decoration: none;
     }
-    .history-delete { min-height: 2.25rem; padding: .4rem .7rem; }
-
     footer {
       color: var(--muted);
       font-size: .82rem;
