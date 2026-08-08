@@ -1094,7 +1094,7 @@ let languageData = null;
           form.append("sheet_name", document.getElementById("sheetName").value);
         }
         const path = extractionPathForFile(lowerName);
-        showProgress("queued", 0, t("extracting") + " " + lowerName.split(".").pop().toUpperCase() + "...");
+        showProgress("extracting", 0, t("extracting") + " " + lowerName.split(".").pop().toUpperCase() + "...");
         const response = await fetch(path, {method: "POST", body: form});
         const text = await response.text();
         if (!response.ok) {
@@ -1144,6 +1144,8 @@ let languageData = null;
       let prefix;
       if ((status === "queued" || status === "running") && position && position > 0) {
         prefix = "#" + position + " " + titleStatus;
+      } else if (status === "extracting") {
+        prefix = titleStatus;
       } else {
         prefix = safePercent + "% " + titleStatus;
       }
@@ -1296,8 +1298,12 @@ let languageData = null;
         const main = document.createElement("div");
         const title = document.createElement("div");
         title.className = "queue-title";
+        const typeBadge = document.createElement("span");
+        typeBadge.className = "queue-type-badge";
+        typeBadge.textContent = (job.source_extension || "txt").toUpperCase();
         const position = job.position ? "#" + job.position + " " : "";
-        title.textContent = position + (job.label || job.kind) + " - " + job.status;
+        title.appendChild(typeBadge);
+        title.appendChild(document.createTextNode(position + (job.label || job.kind) + " - " + job.status));
         const meta = document.createElement("div");
         meta.className = "queue-meta";
         const languages = [job.source, job.target].filter(Boolean).join(" -> ");
@@ -1493,7 +1499,7 @@ let languageData = null;
       form.append("page_range", document.getElementById("pageRange").value);
       form.append("use_ocr", document.getElementById("useOcr").checked ? "true" : "false");
       setResult("");
-      showProgress("queued", 0, t("uploadingPdf"));
+      showProgress("extracting", 0, t("uploadingPdf"));
       const response = await fetch("jobs/translate-pdf", {method: "POST", body: form});
       if (!response.ok) {
         const text = await response.text();
