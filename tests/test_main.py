@@ -914,6 +914,44 @@ class MainTests(unittest.TestCase):
         self.assertGreater(len(placed), 2)
         self.assertEqual(" ".join(line["text"] for line in placed).split(), long_text.split())
 
+    def test_reflow_paragraph_covers_with_sampled_color_instead_of_white(self):
+        paragraph = {"lines": [
+            {"text": "Short", "x": 50.0, "y": 700.0, "right": 200.0, "size": 11.0},
+        ]}
+        seen_boxes = []
+
+        def fake_sample(x, y, width, height):
+            seen_boxes.append((x, y, width, height))
+            return (0.2, 0.4, 0.6)
+
+        covers, _ = main.reflow_paragraph(paragraph, "Kurz", sample_color=fake_sample)
+
+        self.assertEqual(len(seen_boxes), 1)
+        self.assertIn("0.200 0.400 0.600 rg", covers[0])
+
+    def test_reflow_paragraph_defaults_to_white_without_sample_color(self):
+        paragraph = {"lines": [
+            {"text": "Short", "x": 50.0, "y": 700.0, "right": 200.0, "size": 11.0},
+        ]}
+
+        covers, _ = main.reflow_paragraph(paragraph, "Kurz")
+
+        self.assertIn("1.000 1.000 1.000 rg", covers[0])
+
+    def test_pdf_page_color_sampler_averages_a_solid_region(self):
+        from PIL import Image
+
+        image = Image.new("RGB", (100, 100), (51, 102, 204))
+        sample = main.pdf_page_color_sampler(image, page_width=200.0, page_height=200.0)
+
+        r, g, b = sample(x=0.0, y=0.0, width=50.0, height=50.0)
+        self.assertAlmostEqual(r, 51 / 255, places=1)
+        self.assertAlmostEqual(g, 102 / 255, places=1)
+        self.assertAlmostEqual(b, 204 / 255, places=1)
+
+    def test_pdf_page_color_sampler_returns_none_without_an_image(self):
+        self.assertIsNone(main.pdf_page_color_sampler(None, 200.0, 200.0))
+
     def test_wrap_text_to_width_keeps_every_word(self):
         text = "eins zwei drei vier fuenf sechs sieben acht"
 

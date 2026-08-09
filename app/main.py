@@ -178,7 +178,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.3.17", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.3.18", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -622,10 +622,9 @@ def pdf_line_command(text: str, x: float, y: float, font: str = "F1", size: floa
     return f"BT /{font} {size:g} Tf {x:.2f} {y:.2f} Td {pdf_text_object(text, font == 'F2')} Tj ET"
 
 
-def pdf_cover_command(x: float, y: float, width: float, height: float) -> str:
-    # ponytail: covers with plain white. Text sitting on a coloured background gets a white
-    # patch; reading the actual background colour out of the content stream would fix it.
-    return f"1 1 1 rg {x:.2f} {y:.2f} {width:.2f} {height:.2f} re f 0 g"
+def pdf_cover_command(x: float, y: float, width: float, height: float, color: Tuple[float, float, float] = (1.0, 1.0, 1.0)) -> str:
+    r, g, b = color
+    return f"{r:.3f} {g:.3f} {b:.3f} rg {x:.2f} {y:.2f} {width:.2f} {height:.2f} re f 0 g"
 
 
 def markdown_page_sections(text: str) -> List[Dict[str, str]]:
@@ -1399,6 +1398,57 @@ def ocr_pdf_page(content: bytes, page_number: int) -> str:
     return result.stdout.strip()
 
 
+def render_pdf_page_image(content: bytes, page_number: int, dpi: int = 100) -> Optional[Any]:
+    """Rasterize one original PDF page, so the layout overlay can sample the real colour behind
+    covered text (pdf_cover_command) instead of always painting over it with plain white."""
+    if not shutil.which("pdftoppm"):
+        return None
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    with tempfile.TemporaryDirectory() as temp_dir:
+        pdf_path = Path(temp_dir) / "input.pdf"
+        output_prefix = Path(temp_dir) / "page"
+        pdf_path.write_bytes(content)
+        try:
+            subprocess.run(
+                ["pdftoppm", "-f", str(page_number), "-l", str(page_number), "-r", str(dpi), "-png", "-singlefile", str(pdf_path), str(output_prefix)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            with Image.open(output_prefix.with_suffix(".png")) as image:
+                return image.convert("RGB").copy()
+        except Exception:
+            return None
+
+
+def pdf_page_color_sampler(image: Optional[Any], page_width: float, page_height: float):
+    """A `sample(x, y, width, height)` closure over a rasterized page, averaging the pixels
+    behind a PDF-space box (bottom-left origin) into an RGB triple, or None if there is no image
+    to sample (pdftoppm/Pillow unavailable) so callers can fall back to plain white."""
+    if image is None or page_width <= 0 or page_height <= 0:
+        return None
+    from PIL import Image as PILImage
+
+    scale_x = image.width / page_width
+    scale_y = image.height / page_height
+    resample = getattr(PILImage, "Resampling", PILImage).BOX
+
+    def sample(x: float, y: float, width: float, height: float) -> Tuple[float, float, float]:
+        left = max(0, min(image.width - 1, int(x * scale_x)))
+        right = max(left + 1, min(image.width, int((x + width) * scale_x)))
+        # PDF y is measured bottom-up from the page origin, image rows are top-down.
+        top = max(0, min(image.height - 1, int((page_height - (y + height)) * scale_y)))
+        bottom = max(top + 1, min(image.height, int((page_height - y) * scale_y)))
+        region = image.resize((1, 1), resample=resample, box=(left, top, right, bottom))
+        pixel = region.getpixel((0, 0))
+        return (pixel[0] / 255.0, pixel[1] / 255.0, pixel[2] / 255.0)
+
+    return sample
+
+
 def extract_pdf_markdown_from_bytes(
     content: bytes,
     content_type: str = "application/pdf",
@@ -1707,6 +1757,7 @@ def reflow_paragraph(
     paragraph: Dict[str, Any],
     text: str,
     neighbours: Optional[List[Dict[str, Any]]] = None,
+    sample_color: Optional[Callable[[float, float, float, float], Tuple[float, float, float]]] = None,
 ) -> Tuple[List[str], List[Dict[str, Any]]]:
     """Cover the paragraph's original lines and lay the translation out in the same column.
 
@@ -1736,9 +1787,10 @@ def reflow_paragraph(
         # Each line is covered to its own estimated end, so a short line does not paint over
         # whatever sits beside the paragraph.
         right = cover_right_edge(line, line["x"] + (line["right"] - line["x"]) * factor, neighbours or [])
-        covers.append(
-            pdf_cover_command(line["x"] - 1, line["y"] - 0.25 * line["size"], right - line["x"] + 2, 1.2 * line["size"])
-        )
+        cover_x, cover_y = line["x"] - 1, line["y"] - 0.25 * line["size"]
+        cover_width, cover_height = right - line["x"] + 2, 1.2 * line["size"]
+        color = sample_color(cover_x, cover_y, cover_width, cover_height) if sample_color else (1.0, 1.0, 1.0)
+        covers.append(pdf_cover_command(cover_x, cover_y, cover_width, cover_height, color))
     placed = []
     for index, wrapped_line in enumerate(wrapped):
         # Translations longer than the original keep running below the last line: overflowing
@@ -1757,11 +1809,15 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
         commands: List[str] = []
         lines: List[Dict[str, Any]] = []
         page_lines = [line for paragraph in page["paragraphs"] for line in paragraph["lines"]]
+        # Rendered once per page (not per paragraph) so covers can sample the real background
+        # colour instead of always painting plain white over it.
+        page_image = render_pdf_page_image(content, page["number"])
+        sample_color = pdf_page_color_sampler(page_image, page["width"], page["height"])
         for paragraph in page["paragraphs"]:
             # A paragraph without a translation keeps its original text rather than being
             # covered with nothing.
             if index < len(translations) and translations[index].strip():
-                covers, placed = reflow_paragraph(paragraph, translations[index], page_lines)
+                covers, placed = reflow_paragraph(paragraph, translations[index], page_lines, sample_color)
                 commands.extend(covers)
                 lines.extend(placed)
             index += 1
