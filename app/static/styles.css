@@ -540,7 +540,8 @@
       padding: .7rem .85rem;
     }
     .own-job-banner p { margin: 0 0 .5rem; }
-    .own-job-banner .history-row { background: transparent; border-color: rgba(var(--overlay-rgb), .15); }
+    .own-job-banner .history-row,
+    .own-job-banner .history-row.history-row-own-current { background: transparent; border-color: rgba(var(--overlay-rgb), .15); }
 
     .progress:empty { display: none; }
     .progress-top {
@@ -615,12 +616,12 @@
       border-color: var(--accent);
     }
 
-    .history-row-own-current {
+    .history-row.history-row-own-current {
       background: rgba(34, 197, 94, .12);
       border-color: #22c55e;
     }
 
-    .history-row-own {
+    .history-row.history-row-own {
       background: rgba(47, 125, 246, .12);
       border-color: var(--accent);
     }
