@@ -1438,8 +1438,9 @@ let languageData = null;
         const format = document.createElement("select");
         format.className = "history-format";
         format.title = "Select the history download format.";
+        const hasOriginal = item.has_source_file && item.source_extension;
         const historyFormats = ["md", "txt", "pdf", "doc"];
-        if (item.has_source_file && item.source_extension) {
+        if (hasOriginal) {
           historyFormats.push("original");
         }
         for (const optionFormat of historyFormats) {
@@ -1452,14 +1453,20 @@ let languageData = null;
         }
         const download = document.createElement("a");
         download.className = "history-download secondary-link";
-        download.href = "history/" + item.id;
         download.textContent = t("download");
-        download.download = item.filename;
         download.title = "Download this history item.";
-        format.addEventListener("change", () => {
-          download.href = "history/" + item.id + "/export?format=" + encodeURIComponent(format.value);
-          download.download = "";
-        });
+        const syncDownloadHref = () => {
+          if (format.value === "md") {
+            download.href = "history/" + item.id;
+            download.download = item.filename;
+          } else {
+            download.href = "history/" + item.id + "/export?format=" + encodeURIComponent(format.value);
+            download.download = "";
+          }
+        };
+        if (hasOriginal) format.value = "original";
+        syncDownloadHref();
+        format.addEventListener("change", syncDownloadHref);
         main.appendChild(link);
         main.appendChild(meta);
         const actions = document.createElement("div");
