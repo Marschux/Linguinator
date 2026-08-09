@@ -179,7 +179,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.4.11", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.4.13", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -1499,6 +1499,9 @@ def extract_pdf_markdown_from_bytes(
     return markdown
 
 
+IDENTITY_MATRIX: Tuple[float, ...] = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
+
+
 def multiply_matrix(a: Tuple[float, ...], b: Tuple[float, ...]) -> Tuple[float, ...]:
     return (
         a[0] * b[0] + a[1] * b[2],
@@ -1552,8 +1555,42 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
     runs: List[Dict[str, Any]] = []
     width_cache: Dict[int, Any] = {}
     page_width = float(page.mediabox.width)
+    # pypdf does not update the text leading when a TD operator sets it, so a T* later in the
+    # stream moves by whatever leading the *first* TD happened to set, which drops whole
+    # paragraphs hundreds of points off the page. The text matrix is tracked here instead, and
+    # the baselines seen while a run accumulates are used to place its lines.
+    text_state: Dict[str, Any] = {"tm": IDENTITY_MATRIX, "tlm": IDENTITY_MATRIX, "leading": 0.0}
+    pending_baselines: List[Tuple[float, float]] = []
+
+    def track(operator, operands, cm, tm):
+        name = operator.decode() if isinstance(operator, bytes) else str(operator)
+        if name == "BT":
+            text_state["tm"] = IDENTITY_MATRIX
+            text_state["tlm"] = IDENTITY_MATRIX
+        elif name == "Tm" and len(operands) == 6:
+            matrix = tuple(float(value) for value in operands)
+            text_state["tm"] = matrix
+            text_state["tlm"] = matrix
+        elif name == "TL" and operands:
+            text_state["leading"] = float(operands[0])
+        elif name in ("Td", "TD") and len(operands) == 2:
+            offset_x, offset_y = float(operands[0]), float(operands[1])
+            if name == "TD":
+                text_state["leading"] = -offset_y
+            moved = multiply_matrix((1.0, 0.0, 0.0, 1.0, offset_x, offset_y), text_state["tlm"])
+            text_state["tm"] = moved
+            text_state["tlm"] = moved
+        elif name in ("T*", "'", '"'):
+            moved = multiply_matrix((1.0, 0.0, 0.0, 1.0, 0.0, -text_state["leading"]), text_state["tlm"])
+            text_state["tm"] = moved
+            text_state["tlm"] = moved
+        if name in ("Tj", "TJ", "'", '"'):
+            placed = multiply_matrix(text_state["tm"], tuple(cm))
+            pending_baselines.append((placed[4], placed[5]))
 
     def visitor(text, cm, tm, font_dict, font_size):
+        baselines = list(pending_baselines)
+        pending_baselines.clear()
         if not text or not text.strip():
             return
         matrix = multiply_matrix(tuple(tm), tuple(cm))
@@ -1561,6 +1598,10 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
             # Some PDF generators dump a hidden duplicate of the whole page's text anchored at
             # the origin (accessibility/search layer). It is never real, visible page content.
             return
+        if baselines:
+            # pypdf reports the matrix from the start of the accumulated run, so the first
+            # tracked baseline is the corrected equivalent of what it just handed over.
+            matrix = matrix[:4] + baselines[0]
         scale = math.sqrt(abs(matrix[0] * matrix[3] - matrix[1] * matrix[2])) or 1.0
         size = abs(float(font_size or PDF_FONT_SIZE)) * scale or PDF_FONT_SIZE
         width, exact = pdf_run_width(text.strip(), size, font_dict, width_cache)
@@ -1602,12 +1643,27 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
                     current = candidate
             if current:
                 wrapped_lines.append(current)
+            # The tracked baselines are where the source PDF actually drew its lines. Re-wrapping
+            # rarely reproduces its exact line count, so take the real line spacing from them
+            # (and the exact baseline whenever the counts do line up) instead of guessing 1.2em.
+            distinct: List[Tuple[float, float]] = []
+            for spot in baselines:
+                if not distinct or abs(distinct[-1][1] - spot[1]) > 0.5:
+                    distinct.append(spot)
+            steps = sorted(distinct[index][1] - distinct[index + 1][1] for index in range(len(distinct) - 1))
+            line_height = steps[len(steps) // 2] if steps else size * 1.2
+            if not 0 < line_height < 4 * size:
+                line_height = size * 1.2
             for index, wrapped_line in enumerate(wrapped_lines):
                 line_width, line_exact = pdf_run_width(wrapped_line, size, font_dict, width_cache)
+                if len(distinct) == len(wrapped_lines):
+                    line_x, line_y = distinct[index]
+                else:
+                    line_x, line_y = matrix[4], matrix[5] - index * line_height
                 runs.append({
                     "text": wrapped_line,
-                    "x": matrix[4],
-                    "y": matrix[5] - index * size * 1.2,
+                    "x": line_x,
+                    "y": line_y,
                     "size": size,
                     "width": line_width,
                     "exact": line_exact,
@@ -1622,7 +1678,7 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
             "exact": exact,
         })
 
-    page.extract_text(visitor_text=visitor)
+    page.extract_text(visitor_text=visitor, visitor_operand_before=track)
     return runs
 
 

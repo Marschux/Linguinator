@@ -818,7 +818,7 @@ class MainTests(unittest.TestCase):
         class FakePdfPage:
             mediabox = SimpleNamespace(width=595.0)
 
-            def extract_text(self, visitor_text):
+            def extract_text(self, visitor_text, visitor_operand_before=None):
                 for text, x, y, size in calls:
                     visitor_text(text, (1, 0, 0, 1, 0, 0), (size, 0, 0, size, x, y), {}, size)
 
@@ -835,7 +835,7 @@ class MainTests(unittest.TestCase):
         class FakePdfPage:
             mediabox = SimpleNamespace(width=300.0)
 
-            def extract_text(self, visitor_text):
+            def extract_text(self, visitor_text, visitor_operand_before=None):
                 visitor_text(text, (1, 0, 0, 1, 0, 0), (1, 0, 0, 1, 20.0, 500.0), {}, 11)
 
         runs = main.pdf_page_runs(FakePdfPage())
@@ -848,11 +848,46 @@ class MainTests(unittest.TestCase):
         for previous, current in zip(runs, runs[1:]):
             self.assertAlmostEqual(previous["y"] - current["y"], 11 * 1.2)
 
+    def test_pdf_page_runs_tracks_leading_pypdf_forgets_on_td(self):
+        # pypdf does not update the text leading when TD sets it, so a T* later in the stream
+        # moves by the *first* TD's leading and throws the rest of the page hundreds of points
+        # off (negative y). The tracked matrix has to keep the paragraph on the page, spaced by
+        # the real leading rather than a guessed 1.2em.
+        text = "word " * 40
+
+        class FakePdfPage:
+            mediabox = SimpleNamespace(width=300.0)
+
+            def extract_text(self, visitor_text, visitor_operand_before=None):
+                identity = (1, 0, 0, 1, 0, 0)
+                visitor_operand_before(b"BT", [], identity, identity)
+                visitor_operand_before(b"Tm", [1, 0, 0, 1, 20.0, 500.0], identity, identity)
+                # A big first TD (the jump to the top of the text block) sets a huge leading,
+                # then the real line moves reset it to 15pt each.
+                visitor_operand_before(b"TD", [0, 60.0], identity, identity)
+                visitor_operand_before(b"Tj", [], identity, identity)
+                for _ in range(6):
+                    visitor_operand_before(b"TD", [0, -15.0], identity, identity)
+                    visitor_operand_before(b"Tj", [], identity, identity)
+                visitor_operand_before(b"T*", [], identity, identity)
+                visitor_operand_before(b"Tj", [], identity, identity)
+                # pypdf hands over its own (broken) matrix; the tracked one has to win.
+                visitor_text(text, identity, (1, 0, 0, 1, 20.0, -400.0), {}, 11)
+
+        runs = main.pdf_page_runs(FakePdfPage())
+
+        self.assertTrue(runs)
+        # Starts at the first tracked baseline (500 + 60), not pypdf's off-page -400.
+        self.assertAlmostEqual(runs[0]["y"], 560.0)
+        self.assertGreater(min(run["y"] for run in runs), 0.0)
+        for previous, current in zip(runs, runs[1:]):
+            self.assertAlmostEqual(previous["y"] - current["y"], 15.0)
+
     def test_pdf_page_runs_skips_hidden_text_anchored_at_origin(self):
         class FakePdfPage:
             mediabox = SimpleNamespace(width=595.0)
 
-            def extract_text(self, visitor_text):
+            def extract_text(self, visitor_text, visitor_operand_before=None):
                 visitor_text("hidden duplicate page text", (1, 0, 0, 1, 0, 0), (12, 0, 0, 12, 0, 0), {}, 12)
                 visitor_text("Visible", (1, 0, 0, 1, 0, 0), (11, 0, 0, 11, 90.0, 700.0), {}, 11)
 
