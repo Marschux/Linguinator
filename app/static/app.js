@@ -14,7 +14,6 @@ let languageData = null;
     const seenCompletedJobIds = new Set();
     const HISTORY_PAGE_SIZE = 5;
     const baseTitle = document.title || "Linguinator";
-    const originalExportExtensions = ["docx", "odt", "pptx", "csv", "xlsx", "html", "htm", "srt", "vtt", "json", "yaml", "yml", "po", "xlf", "xliff"];
     const outputFormatKeys = {txt: "formatTxt", md: "formatMarkdown", pdf: "formatPdf", doc: "formatDoc", original: "formatOriginal"};
     const uiText = {
       en: {
@@ -56,7 +55,6 @@ let languageData = null;
         jobFailed: "Job failed.",
         selectFileFirst: "Select a supported text, document, table, subtitle, or localization file first.",
         selectPdfFirst: "Select a PDF first.",
-        originalNeedsFile: "Original format export needs the loaded source file in the input tab.",
         extracting: "Extracting",
         starting: "Starting...",
         startingChunks: "Starting {count} chunks...",
@@ -109,7 +107,6 @@ let languageData = null;
         jobFailed: "Job fehlgeschlagen.",
         selectFileFirst: "Waehle zuerst eine unterstuetzte Text-, Dokument-, Tabellen-, Untertitel- oder Lokalisierungsdatei.",
         selectPdfFirst: "Waehle zuerst eine PDF aus.",
-        originalNeedsFile: "Originalformat-Export braucht die geladene Quelldatei im Eingabe-Tab.",
         extracting: "Extrahiere",
         starting: "Starte...",
         startingChunks: "Starte {count} Chunks...",
@@ -162,7 +159,6 @@ let languageData = null;
         jobFailed: "El trabajo fallo.",
         selectFileFirst: "Selecciona primero un archivo compatible de texto, documento, tabla, subtitulos o localizacion.",
         selectPdfFirst: "Selecciona primero un PDF.",
-        originalNeedsFile: "La exportacion en formato original necesita el archivo fuente cargado en la pestana de entrada.",
         extracting: "Extrayendo",
         starting: "Iniciando...",
         startingChunks: "Iniciando {count} fragmentos...",
@@ -215,7 +211,6 @@ let languageData = null;
         jobFailed: "Le job a echoue.",
         selectFileFirst: "Selectionne d'abord un fichier compatible texte, document, tableau, sous-titres ou localisation.",
         selectPdfFirst: "Selectionne d'abord un PDF.",
-        originalNeedsFile: "L'export au format original a besoin du fichier source charge dans l'onglet d'entree.",
         extracting: "Extraction",
         starting: "Demarrage...",
         startingChunks: "Demarrage de {count} segments...",
@@ -390,7 +385,6 @@ let languageData = null;
       setTitle("#uiLanguage", "uiLanguage");
       refreshInputLabels();
       refreshInputTabSelectLabels();
-      updateDownloadButtons();
       updateCounter();
       if (languageData) {
         renderSelect("source", document.getElementById("source").value);
@@ -770,7 +764,6 @@ let languageData = null;
       document.querySelectorAll(".file-extra").forEach((input) => {
         input.classList.toggle("visible", showSheet);
       });
-      updateDownloadButtons();
     }
 
     document.querySelectorAll("[data-input-tab]").forEach((button) => {
@@ -783,7 +776,6 @@ let languageData = null;
 
     function setResult(text) {
       fullResultText = text;
-      updateDownloadButtons();
     }
 
     function clearCurrentWork() {
@@ -800,139 +792,6 @@ let languageData = null;
       lastCompletedJob = null;
       renderOwnJobBanner();
       clearProgress();
-    }
-
-    const serverGeneratedFormats = {
-      pdf: {contentType: "application/pdf", endpoint: "export-pdf"},
-      doc: {
-        contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        endpoint: "export-doc",
-      },
-    };
-
-    function outputFormatDetails(format) {
-      if (format === "original") {
-        if (originalExportExtensions.includes(currentOriginalExtension)) {
-          return {extension: currentOriginalExtension, originalFile: true};
-        }
-        if (currentSourceFormat === "pdf") return {extension: "pdf", ...serverGeneratedFormats.pdf};
-        if (currentSourceFormat === "md") return {extension: "md", contentType: "text/markdown"};
-        return {extension: "txt", contentType: "text/plain"};
-      }
-      if (format in serverGeneratedFormats) return {extension: format, ...serverGeneratedFormats[format]};
-      if (format === "md") return {extension: "md", contentType: "text/markdown"};
-      return {extension: "txt", contentType: "text/plain"};
-    }
-
-    function canUseOriginalFormat() {
-      return currentSourceFormat === "pdf" ||
-        currentSourceFormat === "md" ||
-        originalExportExtensions.includes(currentOriginalExtension);
-    }
-
-    function updateDownloadButtons() {
-      const hasText = Boolean(fullResultText.trim());
-      const formats = {txt: currentSourceFormat !== "pdf", md: true, pdf: true, doc: true, original: canUseOriginalFormat()};
-      for (const format of Object.keys(formats)) {
-        const button = document.getElementById("download" + format.charAt(0).toUpperCase() + format.slice(1));
-        button.classList.toggle("hidden", !formats[format]);
-        button.disabled = !hasText;
-        button.textContent = format === "original"
-          ? t(outputFormatKeys[format]) + " (." + outputFormatDetails(format).extension + ")"
-          : t(outputFormatKeys[format]);
-      }
-    }
-
-    async function downloadFormat(format) {
-      const text = fullResultText;
-      if (!text.trim()) return;
-      // "PDF"/"Doc" are always the plain export; "Original Format" is the layout-preserving one
-      // for PDFs, which only the history route (server-side, source_meta-aware) can produce.
-      if (format === "original" && currentSourceFormat === "pdf" && lastCompletedJob && lastCompletedJob.history_id) {
-        window.location.href = "history/" + lastCompletedJob.history_id + "/export?format=original";
-        return;
-      }
-      const details = outputFormatDetails(format);
-      if (details.originalFile) {
-        await downloadOriginalFile(text, details);
-        return;
-      }
-      if (details.endpoint) {
-        const response = await fetch(details.endpoint, {
-          method: "POST",
-          headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({text})
-        });
-        if (!response.ok) {
-          const error = await response.text();
-          showProgress("failed", 0, errorTextFromResponse(error));
-          return;
-        }
-        saveBlob(await response.blob(), details.extension);
-        return;
-      }
-      saveBlob(new Blob([text], {type: details.contentType + ";charset=utf-8"}), details.extension);
-    }
-
-    document.querySelectorAll("#downloadActions button[data-format]").forEach((button) => {
-      button.addEventListener("click", () => downloadFormat(button.dataset.format));
-    });
-
-    function saveBlob(blob, extension) {
-      const link = document.createElement("a");
-      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-      const url = URL.createObjectURL(blob);
-      link.href = url;
-      link.download = "linguinator-result-" + stamp + "." + extension;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    }
-
-    function originalExportPath(extension) {
-      return {
-        docx: "export-docx",
-        odt: "export-odt",
-        pptx: "export-pptx",
-        csv: "export-csv",
-        xlsx: "export-xlsx",
-        html: "export-html",
-        htm: "export-html",
-        srt: "export-subtitle",
-        vtt: "export-subtitle",
-        json: "export-json",
-        yaml: "export-yaml",
-        yml: "export-yaml",
-        po: "export-po",
-        xlf: "export-xliff",
-        xliff: "export-xliff"
-      }[extension];
-    }
-
-    async function downloadOriginalFile(text, details) {
-      const file = document.getElementById("textFile").files[0];
-      const path = originalExportPath(details.extension);
-      if (!file || !path) {
-        showProgress("failed", 0, t("originalNeedsFile"));
-        return;
-      }
-      const form = new FormData();
-      form.append("file", file);
-      form.append("text", text);
-      if (details.extension === "csv" || details.extension === "xlsx") {
-        form.append("columns", document.getElementById("csvColumns").value);
-      }
-      if (details.extension === "xlsx") {
-        form.append("sheet_name", document.getElementById("sheetName").value);
-      }
-      const response = await fetch(path, {method: "POST", body: form});
-      if (!response.ok) {
-        const error = await response.text();
-        showProgress("failed", 0, errorTextFromResponse(error));
-        return;
-      }
-      saveBlob(await response.blob(), details.extension);
     }
 
     async function loadTextFile() {
