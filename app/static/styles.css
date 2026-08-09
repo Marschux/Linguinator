@@ -641,6 +641,7 @@
       display: grid;
       gap: .55rem;
       margin-top: .8rem;
+      min-height: 24rem;
     }
 
     .history-toggle {

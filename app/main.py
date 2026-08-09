@@ -179,7 +179,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.4.8", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.4.9", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -2755,6 +2755,7 @@ def run_pdf_translate_job(
     target: str,
     filename: str,
     page_range: str = "",
+    layout_fallback: bool = False,
 ):
     try:
         update_job(job_id, status="running", message="Extracting PDF", started_at=time.time())
@@ -2774,10 +2775,14 @@ def run_pdf_translate_job(
 
         result = "\n\n".join(pages)
         history_id = save_history("pdf", result, source, target, filename, content, "pdf")
+        complete_message = (
+            "Complete (no positioned text on the selected pages, used plain export instead of layout)"
+            if layout_fallback else "Complete"
+        )
         update_job(
             job_id,
             status="complete",
-            message="Complete",
+            message=complete_message,
             current=total,
             result=result,
             history_id=history_id,
@@ -2809,7 +2814,7 @@ def run_pdf_layout_translate_job(
                 raise
             # Scanned/image-only PDF: no positioned text to lay a translation back over, so this
             # falls back to the plain extract-then-translate pipeline, which has an OCR fallback.
-            run_pdf_translate_job(job_id, content, "application/pdf", source, target, filename, page_range)
+            run_pdf_translate_job(job_id, content, "application/pdf", source, target, filename, page_range, layout_fallback=True)
             return
         wait_if_paused_or_cancelled(job_id)
         paragraphs = [paragraph["text"] for page in pages for paragraph in page["paragraphs"]]
