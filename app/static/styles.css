@@ -17,6 +17,7 @@
       --bg-1: #101216;
       --bg-2: #151922;
       --bg-3: #11151a;
+      --theme-preview-bg: #eef1f6;
     }
 
     :root[data-theme="light"] {
@@ -38,6 +39,7 @@
       --bg-1: #f5f7fb;
       --bg-2: #eef2f9;
       --bg-3: #eef1f6;
+      --theme-preview-bg: #20252d;
     }
 
     * { box-sizing: border-box; }
@@ -135,12 +137,24 @@
       justify-content: center;
       line-height: 0;
       min-height: 0;
+      overflow: hidden;
       padding: 0;
       position: relative;
       width: 3.1rem;
     }
 
     .theme-toggle:hover { background: var(--panel-soft); border-color: var(--accent); transform: none; }
+
+    .theme-toggle::before {
+      background: var(--theme-preview-bg);
+      clip-path: polygon(100% 100%, 100% 100%, 100% 100%, 100% 100%);
+      content: "";
+      inset: 0;
+      position: absolute;
+      transition: clip-path .25s ease;
+    }
+
+    .theme-toggle:hover::before { clip-path: polygon(100% 100%, 0% 100%, 100% 0%, 100% 100%); }
 
     .theme-icon {
       clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%);
@@ -152,6 +166,7 @@
       transform: translate(-50%, -50%);
       transition: clip-path .25s ease;
       width: 1.5rem;
+      z-index: 1;
     }
 
     /* Nightmode (Standard): Mond ist aktiv, Sonne ist ausgeblendet. */
