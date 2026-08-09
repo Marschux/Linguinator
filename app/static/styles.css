@@ -58,8 +58,16 @@
       width: 1px;
     }
 
+    html {
+      /* Keep the scrollbar's width reserved, otherwise collapsing a panel removes the
+         scrollbar and shifts the whole page sideways. */
+      scrollbar-gutter: stable;
+    }
+
     body {
-      align-items: center;
+      /* Anchored to the top, not centred: centring re-positions the card whenever its height
+         changes, so collapsing History made the whole page jump. */
+      align-items: flex-start;
       background:
         radial-gradient(circle at top left, rgba(47, 125, 246, .18), transparent 32rem),
         linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 55%, var(--bg-3) 100%);

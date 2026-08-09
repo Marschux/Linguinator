@@ -179,7 +179,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.4.13", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.4.15", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -1626,7 +1626,18 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
             # would overflow off the page and never wrap. Wrapped by this run's own (source PDF)
             # font metrics, not our output font (pdf_measure_text/wrap_text_to_width) - those
             # disagree on where a word fits, which left lines still overflowing.
-            available = max(page_width - matrix[4], 10.0)
+            # The tracked baselines are where the source PDF actually drew this block's lines.
+            distinct: List[Tuple[float, float]] = []
+            for spot in baselines:
+                if not distinct or abs(distinct[-1][1] - spot[1]) > 0.5:
+                    distinct.append(spot)
+            # A block often starts mid-line (a fragment at the right edge) and only then returns
+            # to the paragraph's left margin. Wrapping every line against that first x leaves a
+            # sliver of usable width and explodes one paragraph into dozens of stub lines, so
+            # only the first line uses it and the rest use the block's real left edge.
+            left_edge = min((spot[0] for spot in distinct), default=matrix[4])
+            first_available = max(page_width - matrix[4], 10.0)
+            rest_available = max(page_width - left_edge, 10.0)
             stripped = text.strip()
             cjk = detect_pdf_script(stripped) == "cjk"
             units = list(stripped) if cjk else stripped.split()
@@ -1636,6 +1647,7 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
             for unit in units:
                 candidate = current + separator + unit if current else unit
                 candidate_width, _ = pdf_run_width(candidate, size, font_dict, width_cache)
+                available = first_available if not wrapped_lines else rest_available
                 if current and candidate_width > available:
                     wrapped_lines.append(current)
                     current = unit
@@ -1643,13 +1655,9 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
                     current = candidate
             if current:
                 wrapped_lines.append(current)
-            # The tracked baselines are where the source PDF actually drew its lines. Re-wrapping
-            # rarely reproduces its exact line count, so take the real line spacing from them
-            # (and the exact baseline whenever the counts do line up) instead of guessing 1.2em.
-            distinct: List[Tuple[float, float]] = []
-            for spot in baselines:
-                if not distinct or abs(distinct[-1][1] - spot[1]) > 0.5:
-                    distinct.append(spot)
+            # Re-wrapping rarely reproduces the source's exact line count, so take the real line
+            # spacing from the baselines (and the exact baseline when the counts do line up)
+            # instead of guessing 1.2em.
             steps = sorted(distinct[index][1] - distinct[index + 1][1] for index in range(len(distinct) - 1))
             line_height = steps[len(steps) // 2] if steps else size * 1.2
             if not 0 < line_height < 4 * size:
@@ -1659,7 +1667,8 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
                 if len(distinct) == len(wrapped_lines):
                     line_x, line_y = distinct[index]
                 else:
-                    line_x, line_y = matrix[4], matrix[5] - index * line_height
+                    line_x = matrix[4] if index == 0 else left_edge
+                    line_y = matrix[5] - index * line_height
                 runs.append({
                     "text": wrapped_line,
                     "x": line_x,

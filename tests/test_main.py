@@ -883,6 +883,36 @@ class MainTests(unittest.TestCase):
         for previous, current in zip(runs, runs[1:]):
             self.assertAlmostEqual(previous["y"] - current["y"], 15.0)
 
+    def test_pdf_page_runs_wraps_a_block_starting_mid_line_at_its_left_edge(self):
+        # A text block often starts as a fragment at the right edge of a line and only then
+        # returns to the paragraph's left margin. Wrapping every line against that first x
+        # leaves a sliver of width and explodes the paragraph into dozens of stub lines that
+        # march off the bottom of the page.
+        text = "word " * 60
+
+        class FakePdfPage:
+            mediabox = SimpleNamespace(width=300.0)
+
+            def extract_text(self, visitor_text, visitor_operand_before=None):
+                identity = (1, 0, 0, 1, 0, 0)
+                visitor_operand_before(b"BT", [], identity, identity)
+                # First a fragment at x=270 (25pt of usable width), then the block's real
+                # left margin at x=20 for every following line.
+                visitor_operand_before(b"Tm", [1, 0, 0, 1, 270.0, 500.0], identity, identity)
+                visitor_operand_before(b"Tj", [], identity, identity)
+                for step in range(1, 8):
+                    visitor_operand_before(b"Tm", [1, 0, 0, 1, 20.0, 500.0 - step * 15.0], identity, identity)
+                    visitor_operand_before(b"Tj", [], identity, identity)
+                visitor_text(text, identity, (1, 0, 0, 1, 270.0, 500.0), {}, 11)
+
+        runs = main.pdf_page_runs(FakePdfPage())
+
+        self.assertEqual(runs[0]["x"], 270.0)
+        self.assertTrue(all(run["x"] == 20.0 for run in runs[1:]))
+        # Wrapped against the real left edge, this stays a handful of lines instead of ~60.
+        self.assertLess(len(runs), 20)
+        self.assertGreater(min(run["y"] for run in runs), 0.0)
+
     def test_pdf_page_runs_skips_hidden_text_anchored_at_origin(self):
         class FakePdfPage:
             mediabox = SimpleNamespace(width=595.0)
