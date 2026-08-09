@@ -455,6 +455,37 @@ let languageData = null;
       localStorage.setItem(recentLanguagesKey(), JSON.stringify(recent));
     }
 
+    // Linguinator has no user accounts (Basic Auth, when enabled, shares one credential pair
+    // and /jobs is one shared queue with no owner field), so "my jobs" can only mean "jobs this
+    // browser started". Tracked here via localStorage; it does not follow you across devices.
+    function getOwnJobIds() {
+      try {
+        return new Set(JSON.parse(localStorage.getItem("linguinator_own_jobs") || "[]"));
+      } catch {
+        return new Set();
+      }
+    }
+
+    function rememberOwnJob(jobId) {
+      const ids = getOwnJobIds();
+      ids.add(jobId);
+      localStorage.setItem("linguinator_own_jobs", JSON.stringify([...ids]));
+    }
+
+    function getOwnHistoryIds() {
+      try {
+        return new Set(JSON.parse(localStorage.getItem("linguinator_own_history") || "[]"));
+      } catch {
+        return new Set();
+      }
+    }
+
+    function rememberOwnHistory(historyId) {
+      const ids = getOwnHistoryIds();
+      ids.add(historyId);
+      localStorage.setItem("linguinator_own_history", JSON.stringify([...ids]));
+    }
+
     function getFavoriteLanguages() {
       const favorites = getRecentLanguages().slice(0, FAVORITE_LANGUAGE_COUNT);
       for (const code of defaultFavoriteLanguages) {
@@ -1016,10 +1047,14 @@ let languageData = null;
       if (!response.ok) return;
       const data = await response.json();
       let hasNewlyCompleted = false;
+      const ownJobIds = getOwnJobIds();
       for (const job of data.items) {
         if (job.status === "complete" && !seenCompletedJobIds.has(job.id)) {
           seenCompletedJobIds.add(job.id);
           hasNewlyCompleted = true;
+          // Catches a job this browser started that finished after a reload, when pollJob is no
+          // longer actively watching it.
+          if (job.history_id && ownJobIds.has(job.id)) rememberOwnHistory(job.history_id);
         }
       }
       if (hasNewlyCompleted) loadHistory();
@@ -1129,6 +1164,7 @@ let languageData = null;
         if (job.status === "complete") {
           setResult(job.result || "");
           lastCompletedJob = job;
+          if (job.history_id && getOwnJobIds().has(job.id)) rememberOwnHistory(job.history_id);
           renderOwnJobBanner();
           loadHistory();
           loadQueue();
@@ -1201,6 +1237,7 @@ let languageData = null;
       }
       const data = await response.json();
       ensureAudioContext();
+      rememberOwnJob(data.job_id);
       activeJobId = data.job_id;
       const token = ++pollToken;
       loadQueue();
@@ -1251,6 +1288,7 @@ let languageData = null;
       }
       const data = await response.json();
       ensureAudioContext();
+      rememberOwnJob(data.job_id);
       activeJobId = data.job_id;
       const token = ++pollToken;
       loadQueue();
@@ -1318,6 +1356,11 @@ let languageData = null;
     function buildHistoryRow(item) {
       const row = document.createElement("div");
       row.className = "history-row";
+      if (lastCompletedJob && lastCompletedJob.history_id === item.id) {
+        row.classList.add("history-row-own-current");
+      } else if (getOwnHistoryIds().has(item.id)) {
+        row.classList.add("history-row-own");
+      }
       const main = document.createElement("div");
       main.className = "history-main";
       const link = document.createElement("a");
