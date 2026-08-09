@@ -428,6 +428,7 @@
     .actions-right { justify-content: flex-end; }
     .section { margin-top: 1.4rem; }
     .hidden { display: none; }
+    .invisible { visibility: hidden; }
     .tabs {
       display: flex;
       gap: .5rem;

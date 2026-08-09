@@ -1446,12 +1446,12 @@ let languageData = null;
       const filtered = filteredHistoryItems();
       if (!historyItems.length) {
         history.textContent = t("noHistory");
-        pagination.classList.add("hidden");
+        pagination.classList.add("invisible");
         return;
       }
       if (!filtered.length) {
         history.textContent = t("noHistoryMatch");
-        pagination.classList.add("hidden");
+        pagination.classList.add("invisible");
         return;
       }
       const totalPages = Math.max(1, Math.ceil(filtered.length / HISTORY_PAGE_SIZE));
@@ -1511,7 +1511,7 @@ let languageData = null;
         row.appendChild(actions);
         history.appendChild(row);
       }
-      pagination.classList.toggle("hidden", totalPages <= 1);
+      pagination.classList.toggle("invisible", totalPages <= 1);
       pageInfo.textContent = t("pageInfo", {page: historyPage + 1, total: totalPages});
       prevPage.disabled = historyPage <= 0;
       nextPage.disabled = historyPage >= totalPages - 1;
