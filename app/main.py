@@ -43,6 +43,7 @@ MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
 MAX_ZIP_UNCOMPRESSED_BYTES = MAX_FILE_BYTES * 10
 HISTORY_DAYS = int(env_value("LINGUINATOR_HISTORY_DAYS", "7"))
 HISTORY_DIR = Path(env_value("LINGUINATOR_HISTORY_DIR", "/data/history"))
+HISTORY_TIMEZONE = env_value("LINGUINATOR_TIMEZONE", "UTC")
 JOB_WORKERS = max(1, int(env_value("LINGUINATOR_JOB_WORKERS", "1")))
 JOBS_DIR = Path(env_value("LINGUINATOR_JOBS_DIR", str(HISTORY_DIR / "jobs")))
 CPU_THREADS = int(env_value("LINGUINATOR_CPU_THREADS", "0"))
@@ -178,7 +179,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.4.4", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.4.5", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -2882,6 +2883,7 @@ def health():
         "root_path": ROOT_PATH,
         "public_url": PUBLIC_URL,
         "trust_proxy_headers": TRUST_PROXY_HEADERS,
+        "timezone": HISTORY_TIMEZONE,
     }
 
 

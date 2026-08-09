@@ -71,6 +71,7 @@ The `.env` file is grouped by topic:
 | `LINGUINATOR_CPU_INTEROP_THREADS` | `0` | Optional Torch inter-op thread count. `0` keeps library defaults. |
 | `LINGUINATOR_HISTORY_DAYS` | `7` | Number of days to keep saved translation history, including retained source files. |
 | `LINGUINATOR_HISTORY_DIR` | `/data/history` | Directory for saved history files, source files, and metadata inside the container. |
+| `LINGUINATOR_TIMEZONE` | `UTC` | IANA timezone name (e.g. `Europe/Berlin`) used to display the completion time next to each history entry. |
 | `LINGUINATOR_JOB_WORKERS` | `1` | Number of queued translation jobs that may run in parallel. Higher values can use more CPU/RAM. |
 | `LINGUINATOR_JOBS_DIR` | `/data/history/jobs` | Directory for persisted queue metadata and pending PDF payloads. |
 | `LINGUINATOR_DEFAULT_SOURCE` | `eng_Latn` | Default source language code. |

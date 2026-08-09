@@ -8,7 +8,9 @@ let languageData = null;
     let fullResultText = "";
     let currentUiLanguage = localStorage.getItem("linguinator_ui_language") || "en";
     let historyItems = [];
-    let historyVisibleCount = 5;
+    let historyPage = 0;
+    let historyFilterText = "";
+    let historyTimezone = "UTC";
     const seenCompletedJobIds = new Set();
     const HISTORY_PAGE_SIZE = 5;
     const baseTitle = document.title || "Linguinator";
@@ -44,7 +46,8 @@ let languageData = null;
         history: "History",
         noQueuedJobs: "No queued jobs.",
         noHistory: "No saved translations yet.",
-        loadMore: "Load more",
+        noHistoryMatch: "No history entries match this filter.",
+        pageInfo: "Page {page} / {total}",
         queued: "Queued",
         queuePosition: "Queue position #{position}",
         watchJob: "Click to track this job in the progress bar and tab title.",
@@ -96,7 +99,8 @@ let languageData = null;
         history: "History",
         noQueuedJobs: "Keine wartenden Jobs.",
         noHistory: "Noch keine gespeicherten Uebersetzungen.",
-        loadMore: "Mehr laden",
+        noHistoryMatch: "Kein History-Eintrag passt zu diesem Filter.",
+        pageInfo: "Seite {page} / {total}",
         queued: "Eingereiht",
         queuePosition: "Warteschlangenposition #{position}",
         watchJob: "Klicken, um diesen Job im Fortschrittsbalken und Tab-Titel zu verfolgen.",
@@ -148,7 +152,8 @@ let languageData = null;
         history: "Historial",
         noQueuedJobs: "No hay trabajos en cola.",
         noHistory: "Aun no hay traducciones guardadas.",
-        loadMore: "Cargar mas",
+        noHistoryMatch: "Ningun elemento del historial coincide con este filtro.",
+        pageInfo: "Pagina {page} / {total}",
         queued: "En cola",
         queuePosition: "Posicion en cola #{position}",
         watchJob: "Haz clic para seguir este trabajo en la barra de progreso y el titulo de la pestana.",
@@ -200,7 +205,8 @@ let languageData = null;
         history: "Historique",
         noQueuedJobs: "Aucun job en file.",
         noHistory: "Aucune traduction enregistree.",
-        loadMore: "Charger plus",
+        noHistoryMatch: "Aucun element de l'historique ne correspond a ce filtre.",
+        pageInfo: "Page {page} / {total}",
         queued: "En file",
         queuePosition: "Position en file #{position}",
         watchJob: "Cliquer pour suivre ce job dans la barre de progression et le titre de l'onglet.",
@@ -1030,6 +1036,7 @@ let languageData = null;
       const response = await fetch("health");
       const data = await response.json();
       maxChars = data.max_chars || 0;
+      historyTimezone = data.timezone || "UTC";
       updateCounter();
       const versionEl = document.getElementById("appVersion");
       if (versionEl && data.version) versionEl.textContent = " v" + data.version;
@@ -1386,16 +1393,24 @@ let languageData = null;
 
     function formatHistoryDate(isoString) {
       try {
-        return new Intl.DateTimeFormat(currentUiLanguage, {year: "numeric", month: "2-digit", day: "2-digit"}).format(new Date(isoString));
+        return new Intl.DateTimeFormat(currentUiLanguage, {year: "numeric", month: "2-digit", day: "2-digit", timeZone: historyTimezone}).format(new Date(isoString));
       } catch {
         return (isoString || "").slice(0, 10);
       }
     }
 
+    function formatHistoryTime(isoString) {
+      try {
+        return new Intl.DateTimeFormat(currentUiLanguage, {hour: "2-digit", minute: "2-digit", timeZone: historyTimezone}).format(new Date(isoString));
+      } catch {
+        return "";
+      }
+    }
+
     function historyDisplayName(item) {
       const date = formatHistoryDate(item.created_at);
-      const code = item.code ? " (" + item.code + ")" : "";
-      return item.original_name + " — " + date + code;
+      const time = formatHistoryTime(item.created_at);
+      return item.original_name + " — " + date + (time ? " " + time : "");
     }
 
     function formatBytes(bytes) {
@@ -1409,20 +1424,39 @@ let languageData = null;
       const response = await fetch("history");
       const data = await response.json();
       historyItems = data.items || [];
-      historyVisibleCount = Math.min(historyVisibleCount || HISTORY_PAGE_SIZE, Math.max(historyItems.length, HISTORY_PAGE_SIZE));
       renderHistory();
+    }
+
+    function filteredHistoryItems() {
+      const needle = historyFilterText.trim().toLowerCase();
+      if (!needle) return historyItems;
+      return historyItems.filter((item) => {
+        const haystack = [item.original_name, item.source, item.target].join(" ").toLowerCase();
+        return haystack.includes(needle);
+      });
     }
 
     function renderHistory() {
       const history = document.getElementById("history");
-      const loadMore = document.getElementById("loadMoreHistory");
+      const pagination = document.getElementById("historyPagination");
+      const pageInfo = document.getElementById("historyPageInfo");
+      const prevPage = document.getElementById("historyPrevPage");
+      const nextPage = document.getElementById("historyNextPage");
       history.innerHTML = "";
+      const filtered = filteredHistoryItems();
       if (!historyItems.length) {
         history.textContent = t("noHistory");
-        loadMore.classList.add("hidden");
+        pagination.classList.add("hidden");
         return;
       }
-      const visibleItems = historyItems.slice(0, historyVisibleCount);
+      if (!filtered.length) {
+        history.textContent = t("noHistoryMatch");
+        pagination.classList.add("hidden");
+        return;
+      }
+      const totalPages = Math.max(1, Math.ceil(filtered.length / HISTORY_PAGE_SIZE));
+      historyPage = Math.min(historyPage, totalPages - 1);
+      const visibleItems = filtered.slice(historyPage * HISTORY_PAGE_SIZE, historyPage * HISTORY_PAGE_SIZE + HISTORY_PAGE_SIZE);
       for (const item of visibleItems) {
         const row = document.createElement("div");
         row.className = "history-row";
@@ -1477,13 +1511,25 @@ let languageData = null;
         row.appendChild(actions);
         history.appendChild(row);
       }
-      loadMore.textContent = t("loadMore");
-      loadMore.title = t("loadMore");
-      loadMore.classList.toggle("hidden", historyVisibleCount >= historyItems.length);
+      pagination.classList.toggle("hidden", totalPages <= 1);
+      pageInfo.textContent = t("pageInfo", {page: historyPage + 1, total: totalPages});
+      prevPage.disabled = historyPage <= 0;
+      nextPage.disabled = historyPage >= totalPages - 1;
     }
 
-    document.getElementById("loadMoreHistory").addEventListener("click", () => {
-      historyVisibleCount += HISTORY_PAGE_SIZE;
+    document.getElementById("historyFilter").addEventListener("input", (event) => {
+      historyFilterText = event.target.value || "";
+      historyPage = 0;
+      renderHistory();
+    });
+
+    document.getElementById("historyPrevPage").addEventListener("click", () => {
+      historyPage = Math.max(0, historyPage - 1);
+      renderHistory();
+    });
+
+    document.getElementById("historyNextPage").addEventListener("click", () => {
+      historyPage += 1;
       renderHistory();
     });
 

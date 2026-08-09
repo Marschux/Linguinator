@@ -486,6 +486,19 @@
     .section-heading label { margin-bottom: 0; }
     .section-heading button { min-height: 2.25rem; padding: .4rem .75rem; }
     .section-heading .actions { margin-top: 0; }
+    .section-meta { color: var(--muted); font-size: .85rem; }
+    .history-pagination { align-items: center; justify-content: center; }
+    .history-pagination button { min-height: 2.25rem; padding: .4rem .75rem; }
+    #historyFilter {
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--text);
+      font: inherit;
+      margin-top: .8rem;
+      padding: .6rem .8rem;
+      width: 100%;
+    }
     .counter {
       color: var(--muted);
       font-size: .9rem;
