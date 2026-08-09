@@ -18,6 +18,7 @@
       --bg-2: #151922;
       --bg-3: #11151a;
       --theme-preview-bg: #eef1f6;
+      --theme-preview-text: #12161c;
     }
 
     :root[data-theme="light"] {
@@ -40,6 +41,7 @@
       --bg-2: #eef2f9;
       --bg-3: #eef1f6;
       --theme-preview-bg: #20252d;
+      --theme-preview-text: #f2f5f8;
     }
 
     * { box-sizing: border-box; }
@@ -143,7 +145,7 @@
       width: 3.1rem;
     }
 
-    .theme-toggle:hover { background: var(--panel-soft); border-color: var(--accent); transform: none; }
+    .theme-toggle:hover { background: var(--panel-soft); border-color: var(--accent); color: var(--theme-preview-text); transform: none; }
 
     .theme-toggle::before {
       background: var(--theme-preview-bg);
@@ -154,7 +156,7 @@
       transition: clip-path .25s ease;
     }
 
-    .theme-toggle:hover::before { clip-path: polygon(100% 100%, 0% 100%, 100% 0%, 100% 100%); }
+    .theme-toggle:hover::before { clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%); }
 
     .theme-icon {
       clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%);
@@ -177,11 +179,11 @@
     :root[data-theme="light"] .theme-toggle .icon-sun { clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%); }
     :root[data-theme="light"] .theme-toggle .icon-moon { clip-path: polygon(100% 100%, 100% 100%, 100% 100%, 100% 100%); }
 
-    /* Hover: beide Icons je zur Hälfte, schräg geteilt. */
-    .theme-toggle:hover .icon-moon { clip-path: polygon(0% 0%, 100% 0%, 0% 100%, 0% 100%); }
-    .theme-toggle:hover .icon-sun { clip-path: polygon(100% 100%, 0% 100%, 100% 0%, 100% 100%); }
-    :root[data-theme="light"] .theme-toggle:hover .icon-sun { clip-path: polygon(0% 0%, 100% 0%, 0% 100%, 0% 100%); }
-    :root[data-theme="light"] .theme-toggle:hover .icon-moon { clip-path: polygon(100% 100%, 0% 100%, 100% 0%, 100% 100%); }
+    /* Hover: Button und Icon wechseln komplett zur Vorschau des anderen Modus. */
+    .theme-toggle:hover .icon-moon { clip-path: polygon(100% 100%, 100% 100%, 100% 100%, 100% 100%); }
+    .theme-toggle:hover .icon-sun { clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%); }
+    :root[data-theme="light"] .theme-toggle:hover .icon-sun { clip-path: polygon(100% 100%, 100% 100%, 100% 100%, 100% 100%); }
+    :root[data-theme="light"] .theme-toggle:hover .icon-moon { clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%); }
 
     .header-controls label {
       color: var(--muted);
