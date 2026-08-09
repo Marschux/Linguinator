@@ -136,15 +136,37 @@
       line-height: 0;
       min-height: 0;
       padding: 0;
+      position: relative;
       width: 3.1rem;
     }
 
     .theme-toggle:hover { background: var(--panel-soft); border-color: var(--accent); transform: none; }
 
-    .theme-icon { display: block; flex: 0 0 auto; height: 1.5rem; width: 1.5rem; }
-    .theme-toggle .icon-moon { display: none; }
-    :root[data-theme="light"] .theme-toggle .icon-sun { display: none; }
-    :root[data-theme="light"] .theme-toggle .icon-moon { display: block; }
+    .theme-icon {
+      clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%);
+      display: block;
+      height: 1.5rem;
+      left: 50%;
+      position: absolute;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      transition: clip-path .25s ease;
+      width: 1.5rem;
+    }
+
+    /* Nightmode (Standard): Mond ist aktiv, Sonne ist ausgeblendet. */
+    .theme-toggle .icon-moon { clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%); }
+    .theme-toggle .icon-sun { clip-path: polygon(100% 100%, 100% 100%, 100% 100%, 100% 100%); }
+
+    /* Lightmode: umgekehrt, Sonne aktiv. */
+    :root[data-theme="light"] .theme-toggle .icon-sun { clip-path: polygon(0% 0%, 100% 0%, 100% 100%, 0% 100%); }
+    :root[data-theme="light"] .theme-toggle .icon-moon { clip-path: polygon(100% 100%, 100% 100%, 100% 100%, 100% 100%); }
+
+    /* Hover: beide Icons je zur Hälfte, schräg geteilt. */
+    .theme-toggle:hover .icon-moon { clip-path: polygon(0% 0%, 100% 0%, 0% 100%, 0% 100%); }
+    .theme-toggle:hover .icon-sun { clip-path: polygon(100% 100%, 0% 100%, 100% 0%, 100% 100%); }
+    :root[data-theme="light"] .theme-toggle:hover .icon-sun { clip-path: polygon(0% 0%, 100% 0%, 0% 100%, 0% 100%); }
+    :root[data-theme="light"] .theme-toggle:hover .icon-moon { clip-path: polygon(100% 100%, 0% 100%, 100% 0%, 100% 100%); }
 
     .header-controls label {
       color: var(--muted);
