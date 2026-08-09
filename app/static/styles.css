@@ -124,6 +124,8 @@
     }
     h2 { font-size: 1.05rem; margin-top: .25rem; }
     .subtle { color: var(--muted); margin: .5rem 0 0; }
+    .hint-dedicated { color: #22c55e; }
+    .hint-fallback { color: #eab308; }
 
     .brand-logo {
       flex: 0 0 auto;
@@ -537,6 +539,8 @@
       margin: 0 0 1.2rem;
       padding: .7rem .85rem;
     }
+    .own-job-banner p { margin: 0 0 .5rem; }
+    .own-job-banner .history-row { background: transparent; border-color: rgba(var(--overlay-rgb), .15); }
 
     .progress:empty { display: none; }
     .progress-top {

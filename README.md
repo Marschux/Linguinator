@@ -35,7 +35,7 @@ http://localhost:5051/
    - `Text Field`: translate pasted or typed text directly.
    - `Text`: load plain text and supported structured text files.
    - `Markdown`: load Markdown files.
-   - `Doc File`: load DOCX or ODT files.
+   - `DOC File`: load DOCX or ODT files.
    - `PowerPoint`: load PPTX files.
    - `CSV File`: load CSV or XLSX files and optionally limit translation to selected columns.
    - `PDF`: extract and translate PDF pages.

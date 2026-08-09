@@ -30,7 +30,7 @@ let languageData = null;
         textField: "Text Field",
         text: "Text",
         markdown: "Markdown",
-        officeDoc: "Doc File",
+        officeDoc: "DOC File",
         pptxFile: "PowerPoint",
         csvFile: "CSV File",
         pdf: "PDF",
@@ -606,6 +606,8 @@ let languageData = null;
       const target = document.getElementById("target").value;
       const dedicated = pairs.some((pair) => pair[0] === source && pair[1] === target);
       hint.textContent = t(dedicated ? "modelDedicated" : "modelFallback");
+      hint.classList.toggle("hint-dedicated", dedicated);
+      hint.classList.toggle("hint-fallback", !dedicated);
     }
 
     function closeLanguageMenus() {
@@ -830,7 +832,7 @@ let languageData = null;
 
     function updateDownloadButtons() {
       const hasText = Boolean(fullResultText.trim());
-      const formats = {txt: true, md: true, pdf: true, doc: true, original: canUseOriginalFormat()};
+      const formats = {txt: currentSourceFormat !== "pdf", md: true, pdf: true, doc: true, original: canUseOriginalFormat()};
       for (const format of Object.keys(formats)) {
         const button = document.getElementById("download" + format.charAt(0).toUpperCase() + format.slice(1));
         button.classList.toggle("hidden", !formats[format]);
@@ -1124,13 +1126,30 @@ let languageData = null;
 
     function renderOwnJobBanner() {
       const banner = document.getElementById("ownJobBanner");
-      if (!lastCompletedJob) {
+      const primaryActions = document.getElementById("primaryActions");
+      banner.innerHTML = "";
+      const historyItem = lastCompletedJob && lastCompletedJob.history_id
+        ? historyItems.find((item) => item.id === lastCompletedJob.history_id)
+        : null;
+      if (!historyItem) {
         banner.classList.add("hidden");
-        banner.innerHTML = "";
+        primaryActions.classList.remove("hidden");
         return;
       }
       banner.classList.remove("hidden");
-      banner.textContent = t("ownJobDone") + " " + (lastCompletedJob.label || lastCompletedJob.kind);
+      primaryActions.classList.add("hidden");
+      const label = document.createElement("p");
+      label.className = "subtle";
+      label.textContent = t("ownJobDone") + " " + (lastCompletedJob.label || lastCompletedJob.kind) + " (" + t("history") + ")";
+      const row = buildHistoryRow(historyItem);
+      row.querySelector(".history-download").addEventListener("click", () => {
+        setTimeout(() => {
+          lastCompletedJob = null;
+          renderOwnJobBanner();
+        }, 0);
+      });
+      banner.appendChild(label);
+      banner.appendChild(row);
     }
 
     async function loadQueue() {
@@ -1425,6 +1444,7 @@ let languageData = null;
       const data = await response.json();
       historyItems = data.items || [];
       renderHistory();
+      renderOwnJobBanner();
     }
 
     function filteredHistoryItems() {
@@ -1434,6 +1454,61 @@ let languageData = null;
         const haystack = [item.original_name, item.source, item.target].join(" ").toLowerCase();
         return haystack.includes(needle);
       });
+    }
+
+    function buildHistoryRow(item) {
+      const row = document.createElement("div");
+      row.className = "history-row";
+      const main = document.createElement("div");
+      main.className = "history-main";
+      const link = document.createElement("a");
+      link.href = "history/" + item.id;
+      link.textContent = historyDisplayName(item);
+      link.download = item.original_name;
+      const meta = document.createElement("div");
+      meta.className = "history-meta";
+      meta.textContent = item.source + " -> " + item.target + " | " + formatBytes(item.size_bytes);
+      const format = document.createElement("select");
+      format.className = "history-format";
+      format.title = "Select the history download format.";
+      const hasOriginal = item.has_source_file && item.source_extension;
+      const historyFormats = ["md", "txt", "pdf", "doc"];
+      if (hasOriginal) {
+        historyFormats.push("original");
+      }
+      for (const optionFormat of historyFormats) {
+        const option = document.createElement("option");
+        option.value = optionFormat;
+        option.textContent = optionFormat === "original"
+          ? t("formatOriginal") + " (." + item.source_extension + ")"
+          : t(outputFormatKeys[optionFormat]);
+        format.appendChild(option);
+      }
+      const download = document.createElement("a");
+      download.className = "history-download secondary-link";
+      download.textContent = t("download");
+      download.title = "Download this history item.";
+      const syncDownloadHref = () => {
+        if (format.value === "md") {
+          download.href = "history/" + item.id;
+          download.download = item.filename;
+        } else {
+          download.href = "history/" + item.id + "/export?format=" + encodeURIComponent(format.value);
+          download.download = "";
+        }
+      };
+      if (hasOriginal) format.value = "original";
+      syncDownloadHref();
+      format.addEventListener("change", syncDownloadHref);
+      main.appendChild(link);
+      main.appendChild(meta);
+      const actions = document.createElement("div");
+      actions.className = "history-actions";
+      actions.appendChild(format);
+      actions.appendChild(download);
+      row.appendChild(main);
+      row.appendChild(actions);
+      return row;
     }
 
     function renderHistory() {
@@ -1458,58 +1533,7 @@ let languageData = null;
       historyPage = Math.min(historyPage, totalPages - 1);
       const visibleItems = filtered.slice(historyPage * HISTORY_PAGE_SIZE, historyPage * HISTORY_PAGE_SIZE + HISTORY_PAGE_SIZE);
       for (const item of visibleItems) {
-        const row = document.createElement("div");
-        row.className = "history-row";
-        const main = document.createElement("div");
-        main.className = "history-main";
-        const link = document.createElement("a");
-        link.href = "history/" + item.id;
-        link.textContent = historyDisplayName(item);
-        link.download = item.original_name;
-        const meta = document.createElement("div");
-        meta.className = "history-meta";
-        meta.textContent = item.source + " -> " + item.target + " | " + formatBytes(item.size_bytes);
-        const format = document.createElement("select");
-        format.className = "history-format";
-        format.title = "Select the history download format.";
-        const hasOriginal = item.has_source_file && item.source_extension;
-        const historyFormats = ["md", "txt", "pdf", "doc"];
-        if (hasOriginal) {
-          historyFormats.push("original");
-        }
-        for (const optionFormat of historyFormats) {
-          const option = document.createElement("option");
-          option.value = optionFormat;
-          option.textContent = optionFormat === "original"
-            ? t("formatOriginal") + " (." + item.source_extension + ")"
-            : t(outputFormatKeys[optionFormat]);
-          format.appendChild(option);
-        }
-        const download = document.createElement("a");
-        download.className = "history-download secondary-link";
-        download.textContent = t("download");
-        download.title = "Download this history item.";
-        const syncDownloadHref = () => {
-          if (format.value === "md") {
-            download.href = "history/" + item.id;
-            download.download = item.filename;
-          } else {
-            download.href = "history/" + item.id + "/export?format=" + encodeURIComponent(format.value);
-            download.download = "";
-          }
-        };
-        if (hasOriginal) format.value = "original";
-        syncDownloadHref();
-        format.addEventListener("change", syncDownloadHref);
-        main.appendChild(link);
-        main.appendChild(meta);
-        const actions = document.createElement("div");
-        actions.className = "history-actions";
-        actions.appendChild(format);
-        actions.appendChild(download);
-        row.appendChild(main);
-        row.appendChild(actions);
-        history.appendChild(row);
+        history.appendChild(buildHistoryRow(item));
       }
       pagination.classList.toggle("invisible", totalPages <= 1);
       pageInfo.textContent = t("pageInfo", {page: historyPage + 1, total: totalPages});
