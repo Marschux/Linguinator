@@ -32,21 +32,7 @@
     </header>
 
     <div id="progress" class="progress workspace-section"></div>
-
-    <section id="queuePanel" class="section workspace-section">
-      <div class="section-heading">
-        <div class="section-heading-label">
-          <label for="queue">Queue</label>
-          <span id="queueWorkers" class="section-meta"></span>
-        </div>
-        <div class="actions">
-          <button id="pauseJob" class="secondary" disabled title="Pause the entire queue.">Pause</button>
-          <button id="resumeJob" class="secondary" disabled title="Resume the entire queue.">Resume</button>
-          <button id="stopJob" class="secondary" disabled title="Cancel the entire queue.">Stop</button>
-        </div>
-      </div>
-      <div id="queue" class="queue"></div>
-    </section>
+    <div id="ownJobBanner" class="own-job-banner hidden"></div>
 
     <section class="grid workspace-section">
       <div class="row">
@@ -119,6 +105,21 @@
       <button id="downloadDoc" class="secondary" type="button" disabled data-format="doc" title="Download as a plain-text Word document, without the original layout.">Plain Doc</button>
       <button id="downloadOriginal" class="secondary" type="button" disabled data-format="original" title="Download with the original layout/format preserved.">Original Format</button>
     </div>
+
+    <section id="queuePanel" class="section workspace-section">
+      <div class="section-heading">
+        <div class="section-heading-label">
+          <label for="queue">Queue</label>
+          <span id="queueWorkers" class="section-meta"></span>
+        </div>
+        <div class="actions">
+          <button id="pauseJob" class="secondary" disabled title="Pause the entire queue.">Pause</button>
+          <button id="resumeJob" class="secondary" disabled title="Resume the entire queue.">Resume</button>
+          <button id="stopJob" class="secondary" disabled title="Cancel the entire queue.">Stop</button>
+        </div>
+      </div>
+      <div id="queue" class="queue"></div>
+    </section>
 
     <section id="historyPanel" class="section workspace-section">
       <div class="section-heading">

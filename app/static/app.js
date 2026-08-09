@@ -66,7 +66,9 @@ let languageData = null;
         formatDoc: "Plain Doc",
         formatOriginal: "Original Format",
         modelDedicated: "Dedicated model for this language pair.",
-        modelFallback: "No dedicated model for this pair, using the multilingual fallback."
+        modelFallback: "No dedicated model for this pair, using the multilingual fallback.",
+        ownJobDone: "Your job is done:",
+        dismiss: "Dismiss"
       },
       de: {
         uiLanguage: "UI-Sprache",
@@ -119,7 +121,9 @@ let languageData = null;
         formatDoc: "Nur Text-Doc",
         formatOriginal: "Originalformat",
         modelDedicated: "Eigenes Modell fuer dieses Sprachpaar.",
-        modelFallback: "Kein eigenes Modell fuer dieses Paar, nutzt den mehrsprachigen Fallback."
+        modelFallback: "Kein eigenes Modell fuer dieses Paar, nutzt den mehrsprachigen Fallback.",
+        ownJobDone: "Dein Job ist fertig:",
+        dismiss: "Ausblenden"
       },
       es: {
         uiLanguage: "Idioma de UI",
@@ -172,7 +176,9 @@ let languageData = null;
         formatDoc: "Doc simple",
         formatOriginal: "Formato original",
         modelDedicated: "Modelo dedicado para este par de idiomas.",
-        modelFallback: "Sin modelo dedicado para este par, se usa el alternativo multilingue."
+        modelFallback: "Sin modelo dedicado para este par, se usa el alternativo multilingue.",
+        ownJobDone: "Tu trabajo esta listo:",
+        dismiss: "Ocultar"
       },
       fr: {
         uiLanguage: "Langue UI",
@@ -225,7 +231,9 @@ let languageData = null;
         formatDoc: "Doc simple",
         formatOriginal: "Format original",
         modelDedicated: "Modele dedie pour cette paire de langues.",
-        modelFallback: "Pas de modele dedie pour cette paire, utilise le modele multilingue."
+        modelFallback: "Pas de modele dedie pour cette paire, utilise le modele multilingue.",
+        ownJobDone: "Ton job est termine :",
+        dismiss: "Masquer"
       }
     };
     const FAVORITE_LANGUAGE_COUNT = 4;
@@ -396,6 +404,7 @@ let languageData = null;
       }
       loadQueue().catch(() => {});
       loadHistory().catch(() => {});
+      renderOwnJobBanner();
     }
 
     function setupUiLanguagePicker() {
@@ -793,6 +802,7 @@ let languageData = null;
       updateCounter();
       setResult("");
       lastCompletedJob = null;
+      renderOwnJobBanner();
       clearProgress();
     }
 
@@ -1110,9 +1120,27 @@ let languageData = null;
       return button;
     }
 
-    function queuePauseResumeButton(job) {
-      const isPaused = job.status === "paused";
-      return queueActionButton(job, isPaused ? "resume" : "pause", isPaused ? t("resume") : t("pause"), ["queued", "running", "paused"]);
+    function renderOwnJobBanner() {
+      const banner = document.getElementById("ownJobBanner");
+      if (!lastCompletedJob) {
+        banner.classList.add("hidden");
+        banner.innerHTML = "";
+        return;
+      }
+      banner.classList.remove("hidden");
+      banner.innerHTML = "";
+      const text = document.createElement("span");
+      text.textContent = t("ownJobDone") + " " + (lastCompletedJob.label || lastCompletedJob.kind);
+      const dismiss = document.createElement("button");
+      dismiss.type = "button";
+      dismiss.className = "secondary own-job-dismiss";
+      dismiss.textContent = t("dismiss");
+      dismiss.addEventListener("click", () => {
+        lastCompletedJob = null;
+        renderOwnJobBanner();
+      });
+      banner.appendChild(text);
+      banner.appendChild(dismiss);
     }
 
     async function loadQueue() {
@@ -1162,7 +1190,6 @@ let languageData = null;
         progress.textContent = progressLabel + " | " + (job.current || 0) + " / " + (job.total || 0) + " " + t("chunks") + " | " + (job.message || "");
         const actions = document.createElement("div");
         actions.className = "queue-actions";
-        actions.appendChild(queuePauseResumeButton(job));
         actions.appendChild(queueActionButton(job, "cancel", t("skip"), ["queued", "running", "paused"]));
         main.appendChild(title);
         main.appendChild(meta);
@@ -1236,6 +1263,7 @@ let languageData = null;
         if (job.status === "complete") {
           setResult(job.result || "");
           lastCompletedJob = job;
+          renderOwnJobBanner();
           loadHistory();
           loadQueue();
           playNotificationSound();
@@ -1276,6 +1304,7 @@ let languageData = null;
       }
       setResult("");
       lastCompletedJob = null;
+      renderOwnJobBanner();
       showProgress("queued", 0, chunks > 1 ? t("startingChunks", {count: chunks}) : t("starting"));
       let response;
       if (sourceFile) {
@@ -1342,6 +1371,7 @@ let languageData = null;
       form.append("page_range", document.getElementById("pageRange").value);
       setResult("");
       lastCompletedJob = null;
+      renderOwnJobBanner();
       showProgress("extracting", 0, t("uploadingPdf"));
       // Always the layout-preserving job: it falls back to the plain/OCR pipeline server-side
       // for scanned PDFs. Plain output stays available afterwards via the TXT/Markdown/PDF/Doc
