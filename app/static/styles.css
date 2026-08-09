@@ -444,7 +444,6 @@
     .tab[data-input-tab="pdf"] { --tab-color: #f87171; --tab-rgb: 248, 113, 113; }
 
     .tab {
-      --tab-text: var(--muted);
       align-items: center;
       background: transparent;
       border-color: var(--line);
@@ -457,31 +456,17 @@
     }
 
     .tab-label {
-      background: linear-gradient(90deg, var(--tab-text) 0%, var(--tab-text) 40%, var(--tab-color) 50%, var(--tab-text) 60%, var(--tab-text) 100%);
-      background-clip: text;
-      background-position: 100% 0;
-      background-size: 250% 100%;
-      color: transparent;
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
       font-size: .85rem;
       font-weight: 700;
-      transition: background-position .5s ease;
       white-space: nowrap;
     }
 
     .tab.active,
     .tab:hover {
-      --tab-text: var(--text);
       background: rgba(var(--tab-rgb), .16);
       border-color: var(--tab-color);
       color: var(--text);
       transform: none;
-    }
-
-    .tab.active .tab-label,
-    .tab:hover .tab-label {
-      background-position: 0 0;
     }
 
     .tab-panel { display: none; }
