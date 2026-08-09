@@ -109,7 +109,7 @@
     }
 
     .header-right {
-      align-items: center;
+      align-items: flex-end;
       display: flex;
       flex-shrink: 1;
       gap: .6rem;
