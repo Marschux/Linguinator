@@ -111,11 +111,14 @@
     .header-right {
       align-items: center;
       display: flex;
+      flex-shrink: 1;
       gap: .6rem;
+      min-width: 0;
     }
 
     .header-controls {
-      flex: 0 0 13rem;
+      flex: 0 1 13rem;
+      min-width: 8rem;
     }
 
     .theme-toggle {
