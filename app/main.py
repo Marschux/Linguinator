@@ -127,35 +127,18 @@ def detect_pdf_script(text: str) -> str:
         if 0x0590 <= codepoint <= 0x05FF:
             return "hebrew"
     return ""
-def parse_core_languages(value: str, default: Dict[str, str]) -> Dict[str, str]:
-    """iso-639-1 code -> internal deu_Latn-style code. LINGUINATOR_LANGUAGES, if set, replaces
-    the built-in list entirely; each entry is "xx:xxx_Scr" (e.g. "de:deu_Latn")."""
-    if not value.strip():
-        return default
-    result = {}
-    for entry in value.split(","):
-        entry = entry.strip()
-        if not entry:
-            continue
-        short, _, internal = entry.partition(":")
-        if not internal:
-            raise ValueError(f"LINGUINATOR_LANGUAGES entry {entry!r} must be formatted as xx:xxx_Scr")
-        result[short] = internal
-    return result
-
-
 # The language picker's contents, and simultaneously the alias table used to look up OPUS-MT
 # pair models (whose ids use iso-639-1 codes) and to build the >>xxx<< prefix token for the
 # multilingual fallback model. Restricted to languages with at least one bilingual OPUS-MT
-# model against English; override entirely via LINGUINATOR_LANGUAGES.
-CORE_LANGUAGES = parse_core_languages(env_value("LINGUINATOR_LANGUAGES", ""), {
+# model against English.
+CORE_LANGUAGES = {
     "en": "eng_Latn", "de": "deu_Latn", "fr": "fra_Latn", "es": "spa_Latn", "it": "ita_Latn",
     "nl": "nld_Latn", "pt": "por_Latn", "pl": "pol_Latn", "ru": "rus_Cyrl", "uk": "ukr_Cyrl",
     "cs": "ces_Latn", "sv": "swe_Latn", "da": "dan_Latn", "fi": "fin_Latn", "el": "ell_Grek",
     "ro": "ron_Latn", "hu": "hun_Latn", "bg": "bul_Cyrl", "hr": "hrv_Latn", "sk": "slk_Latn",
     "et": "est_Latn", "ar": "arb_Arab", "zh": "zho_Hans", "ja": "jpn_Jpan", "he": "heb_Hebr",
     "hi": "hin_Deva", "vi": "vie_Latn", "id": "ind_Latn",
-})
+}
 INTERNAL_TO_ISO_639_1 = {internal: short for short, internal in CORE_LANGUAGES.items()}
 
 if CPU_THREADS > 0:
@@ -179,7 +162,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.4.19", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.4.20", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
