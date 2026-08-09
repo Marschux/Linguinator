@@ -112,7 +112,7 @@
       align-items: flex-end;
       display: flex;
       flex-shrink: 1;
-      gap: .6rem;
+      gap: 1.8rem;
       min-width: 0;
     }
 
