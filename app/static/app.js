@@ -1484,6 +1484,18 @@ let languageData = null;
 
     setHistoryCollapsed(localStorage.getItem("linguinator_history_collapsed") === "1");
 
+    function setTheme(theme) {
+      document.documentElement.dataset.theme = theme;
+      document.getElementById("themeToggle").setAttribute("aria-pressed", theme === "light" ? "true" : "false");
+      localStorage.setItem("linguinator_theme", theme);
+    }
+
+    document.getElementById("themeToggle").addEventListener("click", () => {
+      setTheme(document.documentElement.dataset.theme === "light" ? "dark" : "light");
+    });
+
+    setTheme(localStorage.getItem("linguinator_theme") || "dark");
+
     document.getElementById("pauseJob").addEventListener("click", () => controlQueue("pause"));
     document.getElementById("resumeJob").addEventListener("click", () => controlQueue("resume"));
     document.getElementById("stopJob").addEventListener("click", () => controlQueue("cancel"));

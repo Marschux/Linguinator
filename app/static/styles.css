@@ -9,6 +9,35 @@
       --accent: #2f7df6;
       --accent-hover: #1f6be2;
       --warn: #f5c542;
+      --link: #8ec5ff;
+      --ok-text: #86efac;
+      --err-text: #fca5a5;
+      --overlay-rgb: 255, 255, 255;
+      --panel-rgb: 24, 28, 34;
+      --bg-1: #101216;
+      --bg-2: #151922;
+      --bg-3: #11151a;
+    }
+
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f5f7fb;
+      --panel: #ffffff;
+      --panel-soft: #eef1f6;
+      --line: #d7dce4;
+      --text: #12161c;
+      --muted: #5b6472;
+      --accent: #2f7df6;
+      --accent-hover: #1f6be2;
+      --warn: #b45309;
+      --link: #1d4ed8;
+      --ok-text: #15803d;
+      --err-text: #b91c1c;
+      --overlay-rgb: 15, 23, 32;
+      --panel-rgb: 255, 255, 255;
+      --bg-1: #f5f7fb;
+      --bg-2: #eef2f9;
+      --bg-3: #eef1f6;
     }
 
     * { box-sizing: border-box; }
@@ -17,7 +46,7 @@
       align-items: center;
       background:
         radial-gradient(circle at top left, rgba(47, 125, 246, .18), transparent 32rem),
-        linear-gradient(135deg, #101216 0%, #151922 55%, #11151a 100%);
+        linear-gradient(135deg, var(--bg-1) 0%, var(--bg-2) 55%, var(--bg-3) 100%);
       color: var(--text);
       display: flex;
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -29,8 +58,8 @@
     }
 
     .app {
-      background: rgba(24, 28, 34, .95);
-      border: 1px solid rgba(255, 255, 255, .08);
+      background: rgba(var(--panel-rgb), .95);
+      border: 1px solid rgba(var(--overlay-rgb), .08);
       border-radius: 8px;
       box-shadow: 0 24px 70px rgba(0, 0, 0, .35);
       max-width: 980px;
@@ -40,7 +69,7 @@
 
     header {
       align-items: start;
-      border-bottom: 1px solid rgba(255, 255, 255, .08);
+      border-bottom: 1px solid rgba(var(--overlay-rgb), .08);
       display: flex;
       gap: 1rem;
       justify-content: space-between;
@@ -82,6 +111,33 @@
     .header-controls {
       flex: 0 0 13rem;
     }
+
+    .header-controls-row {
+      display: flex;
+      justify-content: flex-end;
+      margin-bottom: .6rem;
+    }
+
+    .theme-toggle {
+      align-items: center;
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--text);
+      display: flex;
+      height: 2.35rem;
+      justify-content: center;
+      min-height: 0;
+      padding: 0;
+      width: 2.35rem;
+    }
+
+    .theme-toggle:hover { background: var(--panel-soft); border-color: var(--accent); transform: none; }
+
+    .theme-icon { height: 1.2rem; width: 1.2rem; }
+    .theme-toggle .icon-moon { display: none; }
+    :root[data-theme="light"] .theme-toggle .icon-sun { display: none; }
+    :root[data-theme="light"] .theme-toggle .icon-moon { display: block; }
 
     .header-controls label {
       color: var(--muted);
@@ -172,7 +228,7 @@
     }
 
     .language-menu {
-      background: #15191e;
+      background: var(--panel-soft);
       border: 1px solid var(--line);
       border-radius: 8px;
       box-shadow: 0 20px 50px rgba(0, 0, 0, .45);
@@ -228,7 +284,7 @@
     .language-option:hover,
     .language-option.active {
       background: rgba(47, 125, 246, .18);
-      color: #fff;
+      color: var(--text);
       transform: none;
     }
 
@@ -241,7 +297,7 @@
     }
 
     .language-divider {
-      border-top: 1px solid rgba(255, 255, 255, .08);
+      border-top: 1px solid rgba(var(--overlay-rgb), .08);
       margin: .35rem 0;
     }
 
@@ -291,7 +347,7 @@
 
     .grid { display: grid; gap: 1rem; }
     .workspace-section {
-      border-top: 1px solid rgba(255, 255, 255, .1);
+      border-top: 1px solid rgba(var(--overlay-rgb), .1);
       margin-top: 1.35rem;
       padding-top: 1.45rem;
     }
@@ -331,7 +387,7 @@
     }
 
     .tab-badge {
-      background: rgba(255, 255, 255, .1);
+      background: rgba(var(--overlay-rgb), .1);
       border-radius: 4px;
       font-size: .7rem;
       font-weight: 700;
@@ -385,8 +441,8 @@
     .counter.over { color: var(--warn); }
 
     .progress {
-      background: rgba(255, 255, 255, .04);
-      border: 1px solid rgba(255, 255, 255, .07);
+      background: rgba(var(--overlay-rgb), .04);
+      border: 1px solid rgba(var(--overlay-rgb), .07);
       border-radius: 8px;
       color: var(--muted);
       margin: 0 0 1.2rem;
@@ -406,7 +462,7 @@
     .progress-status { font-weight: 800; text-transform: capitalize; }
     .progress-info { overflow-wrap: anywhere; text-align: right; }
     .progress-track {
-      background: rgba(255, 255, 255, .08);
+      background: rgba(var(--overlay-rgb), .08);
       border-radius: 999px;
       height: .55rem;
       overflow: hidden;
@@ -436,10 +492,10 @@
     .progress.paused .progress-fill { background: var(--warn); }
     .progress.failed .progress-fill,
     .progress.cancelled .progress-fill { background: #ef4444; }
-    .progress.complete .progress-status { color: #86efac; }
+    .progress.complete .progress-status { color: var(--ok-text); }
     .progress.paused .progress-status { color: var(--warn); }
     .progress.failed .progress-status,
-    .progress.cancelled .progress-status { color: #fca5a5; }
+    .progress.cancelled .progress-status { color: var(--err-text); }
 
     .queue {
       display: grid;
@@ -451,8 +507,8 @@
 
     .queue-row {
       align-items: center;
-      background: rgba(255, 255, 255, .04);
-      border: 1px solid rgba(255, 255, 255, .07);
+      background: rgba(var(--overlay-rgb), .04);
+      border: 1px solid rgba(var(--overlay-rgb), .07);
       border-radius: 8px;
       color: var(--muted);
       cursor: pointer;
@@ -474,7 +530,7 @@
     }
 
     .queue-type-badge {
-      background: rgba(255, 255, 255, .1);
+      background: rgba(var(--overlay-rgb), .1);
       border-radius: 4px;
       color: var(--muted);
       font-size: .7rem;
@@ -531,12 +587,12 @@
 
     .history-toggle-icon.collapsed { transform: rotate(-90deg); }
 
-    .history a { color: #8ec5ff; font-weight: 700; overflow-wrap: anywhere; text-decoration: none; }
+    .history a { color: var(--link); font-weight: 700; overflow-wrap: anywhere; text-decoration: none; }
     .history a:hover { text-decoration: underline; }
     .history-row {
       align-items: center;
-      background: rgba(255, 255, 255, .04);
-      border: 1px solid rgba(255, 255, 255, .07);
+      background: rgba(var(--overlay-rgb), .04);
+      border: 1px solid rgba(var(--overlay-rgb), .07);
       border-radius: 8px;
       color: var(--muted);
       display: flex;
@@ -627,8 +683,8 @@
       .input-tab-select { display: block; }
 
       .primary-actions {
-        background: rgba(24, 28, 34, .98);
-        border-top: 1px solid rgba(255, 255, 255, .08);
+        background: rgba(var(--panel-rgb), .98);
+        border-top: 1px solid rgba(var(--overlay-rgb), .08);
         bottom: 0;
         display: grid;
         gap: .5rem;
