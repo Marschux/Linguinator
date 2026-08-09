@@ -108,17 +108,19 @@
 
     <section id="queuePanel" class="section workspace-section">
       <div class="section-heading">
-        <div class="section-heading-label">
+        <button id="queueCollapse" class="history-toggle" type="button" title="Show or hide the queue list.">
           <label for="queue">Queue</label>
-          <span id="queueWorkers" class="section-meta"></span>
-        </div>
+          <span id="queueCollapseIcon" class="history-toggle-icon">&#9660;</span>
+        </button>
         <div class="actions">
           <button id="pauseJob" class="secondary" disabled title="Pause the entire queue.">Pause</button>
           <button id="resumeJob" class="secondary" disabled title="Resume the entire queue.">Resume</button>
           <button id="stopJob" class="secondary" disabled title="Cancel the entire queue.">Stop</button>
         </div>
       </div>
-      <div id="queue" class="queue"></div>
+      <div id="queueBody">
+        <div id="queue" class="queue"></div>
+      </div>
     </section>
 
     <section id="historyPanel" class="section workspace-section">

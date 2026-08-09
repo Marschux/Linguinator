@@ -50,8 +50,6 @@ let languageData = null;
         watchJob: "Click to track this job in the progress bar and tab title.",
         started: "Started",
         chunks: "chunks",
-        workerSingular: "worker",
-        workerPlural: "workers",
         jobFailed: "Job failed.",
         selectFileFirst: "Select a supported text, document, table, subtitle, or localization file first.",
         selectPdfFirst: "Select a PDF first.",
@@ -105,8 +103,6 @@ let languageData = null;
         watchJob: "Klicken, um diesen Job im Fortschrittsbalken und Tab-Titel zu verfolgen.",
         started: "Gestartet",
         chunks: "Chunks",
-        workerSingular: "Worker",
-        workerPlural: "Worker",
         jobFailed: "Job fehlgeschlagen.",
         selectFileFirst: "Waehle zuerst eine unterstuetzte Text-, Dokument-, Tabellen-, Untertitel- oder Lokalisierungsdatei.",
         selectPdfFirst: "Waehle zuerst eine PDF aus.",
@@ -160,8 +156,6 @@ let languageData = null;
         watchJob: "Haz clic para seguir este trabajo en la barra de progreso y el titulo de la pestana.",
         started: "Iniciado",
         chunks: "fragmentos",
-        workerSingular: "worker",
-        workerPlural: "workers",
         jobFailed: "El trabajo fallo.",
         selectFileFirst: "Selecciona primero un archivo compatible de texto, documento, tabla, subtitulos o localizacion.",
         selectPdfFirst: "Selecciona primero un PDF.",
@@ -215,8 +209,6 @@ let languageData = null;
         watchJob: "Cliquer pour suivre ce job dans la barre de progression et le titre de l'onglet.",
         started: "Demarre",
         chunks: "segments",
-        workerSingular: "worker",
-        workerPlural: "workers",
         jobFailed: "Le job a echoue.",
         selectFileFirst: "Selectionne d'abord un fichier compatible texte, document, tableau, sous-titres ou localisation.",
         selectPdfFirst: "Selectionne d'abord un PDF.",
@@ -1156,9 +1148,7 @@ let languageData = null;
       }
       if (hasNewlyCompleted) loadHistory();
       const queue = document.getElementById("queue");
-      const workers = document.getElementById("queueWorkers");
       queue.innerHTML = "";
-      workers.textContent = data.workers + " " + t(data.workers === 1 ? "workerSingular" : "workerPlural");
       const visibleItems = data.items.filter((job) => !["complete", "failed", "cancelled"].includes(job.status));
       updateQueueControlButtons(visibleItems);
       if (!visibleItems.length) {
@@ -1499,20 +1489,24 @@ let languageData = null;
       renderHistory();
     });
 
-    function setHistoryCollapsed(collapsed) {
-      const body = document.getElementById("historyBody");
-      const icon = document.getElementById("historyCollapseIcon");
+    function setPanelCollapsed(bodyId, iconId, storageKey, collapsed) {
+      const body = document.getElementById(bodyId);
+      const icon = document.getElementById(iconId);
       body.classList.toggle("hidden", collapsed);
       icon.classList.toggle("collapsed", collapsed);
-      localStorage.setItem("linguinator_history_collapsed", collapsed ? "1" : "0");
+      localStorage.setItem(storageKey, collapsed ? "1" : "0");
     }
 
-    document.getElementById("historyCollapse").addEventListener("click", () => {
-      const body = document.getElementById("historyBody");
-      setHistoryCollapsed(!body.classList.contains("hidden"));
-    });
+    function setupPanelCollapse(toggleId, bodyId, iconId, storageKey) {
+      document.getElementById(toggleId).addEventListener("click", () => {
+        const body = document.getElementById(bodyId);
+        setPanelCollapsed(bodyId, iconId, storageKey, !body.classList.contains("hidden"));
+      });
+      setPanelCollapsed(bodyId, iconId, storageKey, localStorage.getItem(storageKey) === "1");
+    }
 
-    setHistoryCollapsed(localStorage.getItem("linguinator_history_collapsed") === "1");
+    setupPanelCollapse("historyCollapse", "historyBody", "historyCollapseIcon", "linguinator_history_collapsed");
+    setupPanelCollapse("queueCollapse", "queueBody", "queueCollapseIcon", "linguinator_queue_collapsed");
 
     function setTheme(theme) {
       document.documentElement.dataset.theme = theme;

@@ -483,11 +483,9 @@
       margin-bottom: .45rem;
     }
 
-    .section-heading-label { align-items: center; display: flex; gap: 1rem; }
     .section-heading label { margin-bottom: 0; }
     .section-heading button { min-height: 2.25rem; padding: .4rem .75rem; }
     .section-heading .actions { margin-top: 0; }
-    .section-meta { color: var(--muted); font-size: .85rem; }
     .counter {
       color: var(--muted);
       font-size: .9rem;
