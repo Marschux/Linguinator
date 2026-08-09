@@ -638,6 +638,7 @@
     }
 
     .history {
+      align-content: start;
       display: grid;
       gap: .55rem;
       margin-top: .8rem;
