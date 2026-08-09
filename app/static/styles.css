@@ -130,18 +130,18 @@
       box-sizing: border-box;
       color: var(--text);
       display: flex;
-      flex: 0 0 2.35rem;
-      height: 2.35rem;
+      flex: 0 0 3.1rem;
+      height: 3.1rem;
       justify-content: center;
       line-height: 0;
       min-height: 0;
       padding: 0;
-      width: 2.35rem;
+      width: 3.1rem;
     }
 
     .theme-toggle:hover { background: var(--panel-soft); border-color: var(--accent); transform: none; }
 
-    .theme-icon { display: block; flex: 0 0 auto; height: 1.2rem; width: 1.2rem; }
+    .theme-icon { display: block; flex: 0 0 auto; height: 1.5rem; width: 1.5rem; }
     .theme-toggle .icon-moon { display: none; }
     :root[data-theme="light"] .theme-toggle .icon-sun { display: none; }
     :root[data-theme="light"] .theme-toggle .icon-moon { display: block; }
