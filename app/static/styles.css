@@ -108,13 +108,18 @@
       width: .92em;
     }
 
+    .header-right {
+      align-items: center;
+      display: flex;
+      gap: .6rem;
+    }
+
     .header-controls {
       flex: 0 0 13rem;
     }
 
     .theme-toggle {
       align-items: center;
-      align-self: center;
       appearance: none;
       background: var(--panel-soft);
       border: 1px solid var(--line);
