@@ -85,7 +85,6 @@
 
     header {
       align-items: start;
-      border-bottom: 1px solid rgba(var(--overlay-rgb), .08);
       display: flex;
       gap: 1rem;
       justify-content: space-between;
@@ -411,12 +410,20 @@
     }
 
     /* Progress hat keinen Trennstrich oben, alle anderen Sections einen */
-    #progress {
+    #progress,
+    .grid.workspace-section {
       border-top: none;
       margin-top: 0;
       padding-top: 0;
     }
-    .row { display: grid; gap: 1rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .row {
+      border-top: 1px solid rgba(var(--overlay-rgb), .1);
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      margin-top: 1.35rem;
+      padding-top: 1.45rem;
+    }
     .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
     .actions-right { justify-content: flex-end; }
     .section { margin-top: 1.4rem; }
