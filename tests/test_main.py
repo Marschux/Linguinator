@@ -975,7 +975,8 @@ class MainTests(unittest.TestCase):
     def test_export_pdf_layout_with_translated_text_respects_page_range(self):
         # A job translated with page_range="2" only produced translations for page 2's
         # paragraphs; re-export must extract page 2 only too, or the translation (meant for
-        # page 2) gets matched against page 1's paragraphs instead.
+        # page 2) gets matched against page 1's paragraphs instead. Only the selected pages
+        # are exported, so an untranslated page 1 does not make the result look unconverted.
         source = main.create_pdf_from_pages([
             {
                 "width": 400, "height": 300, "margin": 40,
@@ -994,9 +995,9 @@ class MainTests(unittest.TestCase):
         # The white cover only hides the original text visually; the underlying text layer is
         # still extractable, so assert on presence rather than absence.
         pages_text = [page.extract_text() or "" for page in main.PdfReader(BytesIO(overlay)).pages]
-        self.assertIn("First page original", pages_text[0])
-        self.assertNotIn("translated", pages_text[0])
-        self.assertIn("Second page translated", pages_text[1])
+        self.assertEqual(len(pages_text), 1)
+        self.assertIn("Second page translated", pages_text[0])
+        self.assertNotIn("First page original", pages_text[0])
 
     def test_pdf_layout_roundtrip_replaces_text_and_keeps_page_size(self):
         source = main.create_pdf_from_pages([{

@@ -179,7 +179,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.4.10", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.4.11", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -1837,12 +1837,11 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
     overlay_reader = PdfReader(BytesIO(create_pdf_from_pages(overlay_pages)))
     reader = PdfReader(BytesIO(content))
     writer = PdfWriter()
-    selected = {page["number"] for page in pages}
-    overlays = {page["number"]: overlay_reader.pages[position] for position, page in enumerate(pages)}
-    for number in range(1, len(reader.pages) + 1):
-        original = reader.pages[number - 1]
-        if number in selected:
-            original.merge_page(overlays[number])
+    # Only the selected pages are translated, so only those are exported. Keeping the untouched
+    # rest would make a single-page selection look like the unconverted original.
+    for position, page in enumerate(pages):
+        original = reader.pages[page["number"] - 1]
+        original.merge_page(overlay_reader.pages[position])
         writer.add_page(original)
     output = BytesIO()
     writer.write(output)
