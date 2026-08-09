@@ -178,7 +178,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.4.2", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.4.3", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -975,7 +975,7 @@ def save_history(
 def history_items():
     cleanup_history()
     items = []
-    for meta_path in sorted(HISTORY_DIR.glob("*.json"), reverse=True):
+    for meta_path in HISTORY_DIR.glob("*.json"):
         try:
             item = json.loads(meta_path.read_text(encoding="utf-8"))
             md_path = HISTORY_DIR / f"{item['id']}.md"
@@ -986,6 +986,7 @@ def history_items():
             items.append(item)
         except Exception:
             continue
+    items.sort(key=lambda item: item.get("created_at", ""), reverse=True)
     return items
 
 

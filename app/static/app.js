@@ -65,8 +65,7 @@ let languageData = null;
         formatOriginal: "Original Format",
         modelDedicated: "Dedicated model for this language pair.",
         modelFallback: "No dedicated model for this pair, using the multilingual fallback.",
-        ownJobDone: "Your job is done:",
-        dismiss: "Dismiss"
+        ownJobDone: "Your job is done:"
       },
       de: {
         uiLanguage: "UI-Sprache",
@@ -118,8 +117,7 @@ let languageData = null;
         formatOriginal: "Originalformat",
         modelDedicated: "Eigenes Modell fuer dieses Sprachpaar.",
         modelFallback: "Kein eigenes Modell fuer dieses Paar, nutzt den mehrsprachigen Fallback.",
-        ownJobDone: "Dein Job ist fertig:",
-        dismiss: "Ausblenden"
+        ownJobDone: "Dein Job ist fertig:"
       },
       es: {
         uiLanguage: "Idioma de UI",
@@ -171,8 +169,7 @@ let languageData = null;
         formatOriginal: "Formato original",
         modelDedicated: "Modelo dedicado para este par de idiomas.",
         modelFallback: "Sin modelo dedicado para este par, se usa el alternativo multilingue.",
-        ownJobDone: "Tu trabajo esta listo:",
-        dismiss: "Ocultar"
+        ownJobDone: "Tu trabajo esta listo:"
       },
       fr: {
         uiLanguage: "Langue UI",
@@ -224,8 +221,7 @@ let languageData = null;
         formatOriginal: "Format original",
         modelDedicated: "Modele dedie pour cette paire de langues.",
         modelFallback: "Pas de modele dedie pour cette paire, utilise le modele multilingue.",
-        ownJobDone: "Ton job est termine :",
-        dismiss: "Masquer"
+        ownJobDone: "Ton job est termine :"
       }
     };
     const FAVORITE_LANGUAGE_COUNT = 4;
@@ -975,6 +971,13 @@ let languageData = null;
     document.getElementById("loadTextFile").addEventListener("click", loadTextFile);
     document.getElementById("clearInput").addEventListener("click", clearCurrentWork);
 
+    function clearOwnJobOnNewFile() {
+      lastCompletedJob = null;
+      renderOwnJobBanner();
+    }
+    document.getElementById("textFile").addEventListener("change", clearOwnJobOnNewFile);
+    document.getElementById("pdf").addEventListener("change", clearOwnJobOnNewFile);
+
     function errorTextFromResponse(text) {
       try {
         const data = JSON.parse(text);
@@ -1120,19 +1123,7 @@ let languageData = null;
         return;
       }
       banner.classList.remove("hidden");
-      banner.innerHTML = "";
-      const text = document.createElement("span");
-      text.textContent = t("ownJobDone") + " " + (lastCompletedJob.label || lastCompletedJob.kind);
-      const dismiss = document.createElement("button");
-      dismiss.type = "button";
-      dismiss.className = "secondary own-job-dismiss";
-      dismiss.textContent = t("dismiss");
-      dismiss.addEventListener("click", () => {
-        lastCompletedJob = null;
-        renderOwnJobBanner();
-      });
-      banner.appendChild(text);
-      banner.appendChild(dismiss);
+      banner.textContent = t("ownJobDone") + " " + (lastCompletedJob.label || lastCompletedJob.kind);
     }
 
     async function loadQueue() {
