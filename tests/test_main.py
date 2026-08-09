@@ -9,6 +9,7 @@ import uuid
 import zipfile
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from xml.etree import ElementTree
 
@@ -815,6 +816,8 @@ class MainTests(unittest.TestCase):
         ]
 
         class FakePdfPage:
+            mediabox = SimpleNamespace(width=595.0)
+
             def extract_text(self, visitor_text):
                 for text, x, y, size in calls:
                     visitor_text(text, (1, 0, 0, 1, 0, 0), (size, 0, 0, size, x, y), {}, size)
@@ -823,8 +826,32 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual([run["text"] for run in runs], ["P", "r "])
 
+    def test_pdf_page_runs_splits_a_multiline_paragraph_reported_as_one_run(self):
+        # pypdf's extract_text only flushes visitor_text on a font/BT/ET/cm change, not on every
+        # Td/T* line move, so a whole paragraph drawn in one uninterrupted text block can arrive
+        # as a single run with one position and an absurd combined width.
+        text = "word " * 40
+
+        class FakePdfPage:
+            mediabox = SimpleNamespace(width=300.0)
+
+            def extract_text(self, visitor_text):
+                visitor_text(text, (1, 0, 0, 1, 0, 0), (1, 0, 0, 1, 20.0, 500.0), {}, 11)
+
+        runs = main.pdf_page_runs(FakePdfPage())
+
+        self.assertGreater(len(runs), 1)
+        self.assertEqual(" ".join(run["text"] for run in runs).split(), text.split())
+        self.assertEqual(runs[0]["y"], 500.0)
+        for run in runs:
+            self.assertLessEqual(run["x"] + run["width"], 300.0)
+        for previous, current in zip(runs, runs[1:]):
+            self.assertAlmostEqual(previous["y"] - current["y"], 11 * 1.2)
+
     def test_pdf_page_runs_skips_hidden_text_anchored_at_origin(self):
         class FakePdfPage:
+            mediabox = SimpleNamespace(width=595.0)
+
             def extract_text(self, visitor_text):
                 visitor_text("hidden duplicate page text", (1, 0, 0, 1, 0, 0), (12, 0, 0, 12, 0, 0), {}, 12)
                 visitor_text("Visible", (1, 0, 0, 1, 0, 0), (11, 0, 0, 11, 90.0, 700.0), {}, 11)

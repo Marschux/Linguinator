@@ -178,7 +178,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.3.16", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.3.17", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -1499,6 +1499,7 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
     """Every text run on the page with its position on the page and its rendered font size."""
     runs: List[Dict[str, Any]] = []
     width_cache: Dict[int, Any] = {}
+    page_width = float(page.mediabox.width)
 
     def visitor(text, cm, tm, font_dict, font_size):
         if not text or not text.strip():
@@ -1524,6 +1525,42 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
                 if len(text) > len(previous["text"]):
                     previous["text"] = text
                 return
+        if matrix[4] + width > page_width:
+            # pypdf's extract_text only flushes a run on a font/BT/ET/cm change, not on every
+            # Td/T* line move, so a whole multi-line paragraph drawn in one uninterrupted text
+            # block (same font throughout) can arrive as a single run with one position. Split
+            # it back into page-width-bounded lines instead of one absurdly wide "line" that
+            # would overflow off the page and never wrap. Wrapped by this run's own (source PDF)
+            # font metrics, not our output font (pdf_measure_text/wrap_text_to_width) - those
+            # disagree on where a word fits, which left lines still overflowing.
+            available = max(page_width - matrix[4], 10.0)
+            stripped = text.strip()
+            cjk = detect_pdf_script(stripped) == "cjk"
+            units = list(stripped) if cjk else stripped.split()
+            separator = "" if cjk else " "
+            wrapped_lines: List[str] = []
+            current = ""
+            for unit in units:
+                candidate = current + separator + unit if current else unit
+                candidate_width, _ = pdf_run_width(candidate, size, font_dict, width_cache)
+                if current and candidate_width > available:
+                    wrapped_lines.append(current)
+                    current = unit
+                else:
+                    current = candidate
+            if current:
+                wrapped_lines.append(current)
+            for index, wrapped_line in enumerate(wrapped_lines):
+                line_width, line_exact = pdf_run_width(wrapped_line, size, font_dict, width_cache)
+                runs.append({
+                    "text": wrapped_line,
+                    "x": matrix[4],
+                    "y": matrix[5] - index * size * 1.2,
+                    "size": size,
+                    "width": line_width,
+                    "exact": line_exact,
+                })
+            return
         runs.append({
             "text": text,
             "x": matrix[4],
