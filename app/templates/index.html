@@ -99,10 +99,6 @@
       <label for="pdf">PDF</label>
       <input id="pdf" type="file" accept="application/pdf" title="Select the PDF to translate.">
       <input id="pageRange" type="text" placeholder="Pages, e.g. 1-3,5" title="Optional page range, e.g. 1-3,5. Leave empty to translate all pages.">
-      <div class="check-row" title="If unchecked, the PDF keeps its original look, just translated (slower, whole PDF only). If checked, export as plain translated text instead.">
-        <input id="pdfPlaintext" type="checkbox">
-        <label for="pdfPlaintext">Plaintext</label>
-      </div>
     </section>
 
     <div class="actions actions-right primary-actions workspace-section">
@@ -113,9 +109,9 @@
     <div id="downloadActions" class="actions actions-right workspace-section">
       <button id="downloadTxt" class="secondary" type="button" disabled data-format="txt" title="Download as TXT.">TXT</button>
       <button id="downloadMd" class="secondary" type="button" disabled data-format="md" title="Download as Markdown.">Markdown</button>
-      <button id="downloadPdf" class="secondary" type="button" disabled data-format="pdf" title="Download as PDF.">PDF</button>
-      <button id="downloadDoc" class="secondary" type="button" disabled data-format="doc" title="Download as a Word document.">Doc</button>
-      <button id="downloadOriginal" class="secondary" type="button" disabled data-format="original" title="Download in the original file format.">Original Format</button>
+      <button id="downloadPdf" class="secondary" type="button" disabled data-format="pdf" title="Download as a plain-text PDF, without the original layout.">Plain PDF</button>
+      <button id="downloadDoc" class="secondary" type="button" disabled data-format="doc" title="Download as a plain-text Word document, without the original layout.">Plain Doc</button>
+      <button id="downloadOriginal" class="secondary" type="button" disabled data-format="original" title="Download with the original layout/format preserved.">Original Format</button>
     </div>
 
     <section id="historyPanel" class="section workspace-section">

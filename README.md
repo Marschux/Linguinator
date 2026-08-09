@@ -20,7 +20,7 @@ http://localhost:5051/
 
 - Text and document translation with progress, pause, resume, and stop.
 - PDF extraction, PDF translation, and PDF download.
-- Layout-preserving PDF translation: the translation is placed back into the original lines, images and graphics stay untouched. Tick `Plaintext` for a plain text export instead.
+- Layout-preserving PDF translation: the translation is placed back into the original lines, images and graphics stay untouched. Falls back automatically to a plain OCR-capable extraction for scanned/image-only PDFs. A plain text/Markdown/PDF/DOCX version is always available afterwards via the download buttons.
 - Original-format export for DOCX, ODT, PPTX, CSV, XLSX, HTML, SRT/VTT, JSON/YAML, PO, and XLIFF.
 - Local history with configurable retention, retained source files, and Markdown, TXT, PDF, DOCX, or original-format downloads.
 - Persistent global job queue with configurable worker count.

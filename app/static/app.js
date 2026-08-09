@@ -35,7 +35,6 @@ let languageData = null;
         textFile: "Text File",
         markdownFile: "Markdown File",
         loadFile: "Load File",
-        plaintext: "Plaintext",
         translateInput: "Translate Input",
         clear: "Clear",
         pause: "Pause",
@@ -63,8 +62,8 @@ let languageData = null;
         uploadingPdf: "Uploading PDF...",
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
-        formatPdf: "PDF",
-        formatDoc: "Doc",
+        formatPdf: "Plain PDF",
+        formatDoc: "Plain Doc",
         formatOriginal: "Original Format",
         modelDedicated: "Dedicated model for this language pair.",
         modelFallback: "No dedicated model for this pair, using the multilingual fallback."
@@ -89,7 +88,6 @@ let languageData = null;
         textFile: "Textdatei",
         markdownFile: "Markdown-Datei",
         loadFile: "Datei laden",
-        plaintext: "Klartext",
         translateInput: "Eingabe uebersetzen",
         clear: "Leeren",
         pause: "Pause",
@@ -117,8 +115,8 @@ let languageData = null;
         uploadingPdf: "Lade PDF hoch...",
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
-        formatPdf: "PDF",
-        formatDoc: "Doc",
+        formatPdf: "Nur Text-PDF",
+        formatDoc: "Nur Text-Doc",
         formatOriginal: "Originalformat",
         modelDedicated: "Eigenes Modell fuer dieses Sprachpaar.",
         modelFallback: "Kein eigenes Modell fuer dieses Paar, nutzt den mehrsprachigen Fallback."
@@ -143,7 +141,6 @@ let languageData = null;
         textFile: "Archivo de texto",
         markdownFile: "Archivo Markdown",
         loadFile: "Cargar archivo",
-        plaintext: "Texto plano",
         translateInput: "Traducir entrada",
         clear: "Limpiar",
         pause: "Pausar",
@@ -171,8 +168,8 @@ let languageData = null;
         uploadingPdf: "Subiendo PDF...",
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
-        formatPdf: "PDF",
-        formatDoc: "Doc",
+        formatPdf: "PDF simple",
+        formatDoc: "Doc simple",
         formatOriginal: "Formato original",
         modelDedicated: "Modelo dedicado para este par de idiomas.",
         modelFallback: "Sin modelo dedicado para este par, se usa el alternativo multilingue."
@@ -197,7 +194,6 @@ let languageData = null;
         textFile: "Fichier texte",
         markdownFile: "Fichier Markdown",
         loadFile: "Charger le fichier",
-        plaintext: "Texte brut",
         translateInput: "Traduire l'entree",
         clear: "Effacer",
         pause: "Pause",
@@ -225,8 +221,8 @@ let languageData = null;
         uploadingPdf: "Televersement du PDF...",
         formatTxt: "TXT",
         formatMarkdown: "Markdown",
-        formatPdf: "PDF",
-        formatDoc: "Doc",
+        formatPdf: "PDF simple",
+        formatDoc: "Doc simple",
         formatOriginal: "Format original",
         modelDedicated: "Modele dedie pour cette paire de langues.",
         modelFallback: "Pas de modele dedie pour cette paire, utilise le modele multilingue."
@@ -382,7 +378,6 @@ let languageData = null;
       setText('[data-input-tab="pdf"] .tab-label', "pdf");
       setText('label[for="text"]', "textField");
       setText('label[for="pdf"]', "pdf");
-      setText('label[for="pdfPlaintext"]', "plaintext");
       setText("#loadTextFile", "loadFile");
       setText("#translate", "translateInput");
       setText("#clearInput", "clear");
@@ -793,7 +788,6 @@ let languageData = null;
       document.getElementById("pageRange").value = "";
       document.getElementById("sheetName").value = "";
       document.getElementById("csvColumns").value = "";
-      document.getElementById("pdfPlaintext").checked = false;
       currentSourceFormat = (inputTabs[currentInputTab] || inputTabs.textarea).sourceFormat;
       currentOriginalExtension = currentSourceFormat;
       updateCounter();
@@ -846,16 +840,18 @@ let languageData = null;
     async function downloadFormat(format) {
       const text = fullResultText;
       if (!text.trim()) return;
+      // "PDF"/"Doc" are always the plain export; "Original Format" is the layout-preserving one
+      // for PDFs, which only the history route (server-side, source_meta-aware) can produce.
+      if (format === "original" && currentSourceFormat === "pdf" && lastCompletedJob && lastCompletedJob.history_id) {
+        window.location.href = "history/" + lastCompletedJob.history_id + "/export?format=original";
+        return;
+      }
       const details = outputFormatDetails(format);
       if (details.originalFile) {
         await downloadOriginalFile(text, details);
         return;
       }
       if (details.endpoint) {
-        if (format === "pdf" && currentSourceFormat === "pdf" && lastCompletedJob && lastCompletedJob.kind === "translate-pdf-layout" && lastCompletedJob.history_id) {
-          window.location.href = "history/" + lastCompletedJob.history_id + "/export?format=original";
-          return;
-        }
         const response = await fetch(details.endpoint, {
           method: "POST",
           headers: {"Content-Type": "application/json"},
@@ -1339,7 +1335,6 @@ let languageData = null;
       renderSelect("source", source);
       renderSelect("target", target);
       currentSourceFormat = "pdf";
-      const layoutMode = !document.getElementById("pdfPlaintext").checked;
       const form = new FormData();
       form.append("file", file);
       form.append("source", source);
@@ -1348,7 +1343,10 @@ let languageData = null;
       setResult("");
       lastCompletedJob = null;
       showProgress("extracting", 0, t("uploadingPdf"));
-      const response = await fetch(layoutMode ? "jobs/translate-pdf-layout" : "jobs/translate-pdf", {method: "POST", body: form});
+      // Always the layout-preserving job: it falls back to the plain/OCR pipeline server-side
+      // for scanned PDFs. Plain output stays available afterwards via the TXT/Markdown/PDF/Doc
+      // download buttons, which work from the stored result text regardless of which pipeline ran.
+      const response = await fetch("jobs/translate-pdf-layout", {method: "POST", body: form});
       if (!response.ok) {
         const text = await response.text();
         showProgress("failed", 0, errorTextFromResponse(text));

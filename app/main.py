@@ -178,7 +178,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.3.18", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.3.19", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -2800,7 +2800,15 @@ def run_pdf_layout_translate_job(
 ):
     try:
         update_job(job_id, status="running", message="Reading PDF layout", started_at=time.time())
-        pages = extract_pdf_layout(content, page_range)
+        try:
+            pages = extract_pdf_layout(content, page_range)
+        except HTTPException as exc:
+            if exc.status_code != 422:
+                raise
+            # Scanned/image-only PDF: no positioned text to lay a translation back over, so this
+            # falls back to the plain extract-then-translate pipeline, which has an OCR fallback.
+            run_pdf_translate_job(job_id, content, "application/pdf", source, target, filename, page_range)
+            return
         wait_if_paused_or_cancelled(job_id)
         paragraphs = [paragraph["text"] for page in pages for paragraph in page["paragraphs"]]
         # One paragraph per chunk: the overlay maps translations back to paragraphs by position,

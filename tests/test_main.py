@@ -1054,6 +1054,29 @@ class MainTests(unittest.TestCase):
                 main.JOB_RUNNERS.clear()
             shutil.rmtree(temp_dir.parent, ignore_errors=True)
 
+    def test_run_pdf_layout_translate_job_falls_back_to_plain_pipeline_for_scanned_pdfs(self):
+        # extract_pdf_layout raises 422 when a PDF has no positioned text at all (scanned/
+        # image-only). The layout job used to just fail there; the plain pipeline has an OCR
+        # fallback, so it now takes over transparently instead of the user needing a "Plaintext"
+        # checkbox to pick it themselves.
+        temp_dir = test_temp_dir()
+        try:
+            with main.JOBS_LOCK:
+                main.JOBS.clear()
+                main.JOB_RUNNERS.clear()
+            job_id = main.create_job("translate-pdf-layout", "eng_Latn", "deu_Latn", "scan.pdf")
+            no_positioned_text = HTTPException(status_code=422, detail="No positioned text found.")
+            with patch.object(main, "extract_pdf_layout", side_effect=no_positioned_text):
+                with patch.object(main, "run_pdf_translate_job") as fallback_mock:
+                    main.run_pdf_layout_translate_job(job_id, b"content", "eng_Latn", "deu_Latn", "scan.pdf", "1-2")
+
+            fallback_mock.assert_called_once_with(job_id, b"content", "application/pdf", "eng_Latn", "deu_Latn", "scan.pdf", "1-2")
+        finally:
+            with main.JOBS_LOCK:
+                main.JOBS.clear()
+                main.JOB_RUNNERS.clear()
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
     def test_pdf_text_object_encodes_unicode(self):
         with patch.object(main, "load_embedded_font", return_value=None):
             self.assertEqual(main.pdf_text_object("Grusse"), "(Grusse)")
