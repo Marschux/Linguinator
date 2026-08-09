@@ -178,7 +178,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.3.15", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.3.16", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -2636,8 +2636,14 @@ def run_text_job(
 
 
 def pdf_sections(markdown: str):
+    parts = re.split(r"(?m)^# Page ", markdown)
+    if len(parts) <= 1:
+        # No "# Page N" marker anywhere, e.g. any non-PDF-sourced translation: re.split still
+        # returns the whole text as one part, which used to get its first line torn off and
+        # misread as a page number/heading instead of being treated as plain body text.
+        return []
     sections = []
-    for section in re.split(r"(?m)^# Page ", markdown):
+    for section in parts:
         section = section.strip()
         if not section:
             continue

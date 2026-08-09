@@ -696,6 +696,18 @@ class MainTests(unittest.TestCase):
         self.assertIn(b"/F2 15 Tf", content)
         self.assertIn("Title", pdf_text(content))
 
+    def test_pdf_sections_returns_none_without_page_markers(self):
+        # re.split returns the whole string as a single part when its pattern never matches;
+        # without this check that part's first line was misread as a fake page-number heading
+        # for any translation not sourced from a PDF (plain text, DOCX, ...).
+        self.assertEqual(main.pdf_sections("Just a single line of translated text."), [])
+        self.assertEqual(main.pdf_sections("First line\n\nSecond paragraph"), [])
+
+    def test_markdown_page_sections_keeps_plain_text_as_one_section_without_heading(self):
+        sections = main.markdown_page_sections("Hello world, this is the whole translation.")
+
+        self.assertEqual(sections, [{"page_number": "", "text": "Hello world, this is the whole translation."}])
+
     def test_create_text_pdf_embeds_font_for_non_latin_text(self):
         if not main.load_embedded_font(False):
             self.skipTest("no TrueType font available on this machine")
