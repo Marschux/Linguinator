@@ -1070,7 +1070,9 @@ class MainTests(unittest.TestCase):
                 with patch.object(main, "run_pdf_translate_job") as fallback_mock:
                     main.run_pdf_layout_translate_job(job_id, b"content", "eng_Latn", "deu_Latn", "scan.pdf", "1-2")
 
-            fallback_mock.assert_called_once_with(job_id, b"content", "application/pdf", "eng_Latn", "deu_Latn", "scan.pdf", "1-2")
+            fallback_mock.assert_called_once_with(
+                job_id, b"content", "application/pdf", "eng_Latn", "deu_Latn", "scan.pdf", "1-2", layout_fallback=True
+            )
         finally:
             with main.JOBS_LOCK:
                 main.JOBS.clear()
