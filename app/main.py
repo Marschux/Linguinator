@@ -148,10 +148,9 @@ CORE_LANGUAGES = {
     "en": "eng_Latn", "de": "deu_Latn", "fr": "fra_Latn", "es": "spa_Latn", "it": "ita_Latn",
     "nl": "nld_Latn", "pt": "por_Latn", "pl": "pol_Latn", "ru": "rus_Cyrl", "uk": "ukr_Cyrl",
     "cs": "ces_Latn", "sv": "swe_Latn", "da": "dan_Latn", "fi": "fin_Latn", "el": "ell_Grek",
-    "ro": "ron_Latn", "hu": "hun_Latn", "bg": "bul_Cyrl", "hr": "hrv_Latn", "sk": "slk_Latn",
+    "hu": "hun_Latn", "bg": "bul_Cyrl", "sk": "slk_Latn",
     "et": "est_Latn", "ar": "arb_Arab", "zh": "zho_Hans", "ja": "jpn_Jpan", "he": "heb_Hebr",
-    "hi": "hin_Deva", "vi": "vie_Latn", "id": "ind_Latn", "tr": "tur_Latn", "no": "nob_Latn",
-    "sq": "sqi_Latn", "th": "tha_Thai",
+    "hi": "hin_Deva", "vi": "vie_Latn", "id": "ind_Latn", "tr": "tur_Latn", "sq": "sqi_Latn",
 }
 INTERNAL_TO_ISO_639_1 = {internal: short for short, internal in CORE_LANGUAGES.items()}
 
@@ -176,7 +175,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.5.9", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.5.10", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
