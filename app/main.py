@@ -427,29 +427,10 @@ def normalize_translated_text(text: str) -> str:
     return re.sub(r"([.!?])(?=[A-ZÄÖÜ])", r"\1 ", text)
 
 
-# The multilingual fallback model's vocabulary does not cover every CORE_LANGUAGES language as a
-# translation signal at all (checked directly against its tokenizer: no >>kor<< token, unlike the
-# other non-English additions). A pair involving one of these that has no dedicated model would
-# otherwise silently fall back to a model that cannot produce that language and emit text in some
-# other language entirely, so it is routed through English as a pivot instead.
-FALLBACK_UNSUPPORTED_LANGUAGES = {"kor_Hang"}
+def translate_one(text: str, source: str, target: str) -> str:
+    if not text:
+        return ""
 
-
-def translation_hops(source: str, target: str) -> List[Tuple[str, str]]:
-    """Normally a single (source, target) hop; two hops via English when the direct pair has no
-    dedicated model and would otherwise fall back to a model that cannot handle one of the two
-    languages at all (see FALLBACK_UNSUPPORTED_LANGUAGES)."""
-    if source == target or source == "eng_Latn" or target == "eng_Latn":
-        return [(source, target)]
-    _model_id, dedicated = resolve_model(source, target)
-    if dedicated:
-        return [(source, target)]
-    if source in FALLBACK_UNSUPPORTED_LANGUAGES or target in FALLBACK_UNSUPPORTED_LANGUAGES:
-        return [(source, "eng_Latn"), ("eng_Latn", target)]
-    return [(source, target)]
-
-
-def translate_one_hop(text: str, source: str, target: str) -> str:
     model_id, _dedicated = resolve_model(source, target)
     begin_model_use()
     try:
@@ -469,15 +450,7 @@ def translate_one_hop(text: str, source: str, target: str) -> str:
         end_model_use()
 
 
-def translate_one(text: str, source: str, target: str) -> str:
-    if not text:
-        return ""
-    for hop_source, hop_target in translation_hops(source, target):
-        text = translate_one_hop(text, hop_source, hop_target)
-    return text
-
-
-def translate_batch_one_hop(texts: List[str], source: str, target: str) -> List[str]:
+def translate_batch(texts: List[str], source: str, target: str) -> List[str]:
     """Translate several short texts in a single model.generate() call (real tensor batching,
     not string concatenation, so each result maps back to its input by position)."""
     indices = [i for i, text in enumerate(texts) if text]
@@ -505,13 +478,6 @@ def translate_batch_one_hop(texts: List[str], source: str, target: str) -> List[
     results = ["" for _ in texts]
     for i, text in zip(indices, decoded):
         results[i] = normalize_translated_text(text)
-    return results
-
-
-def translate_batch(texts: List[str], source: str, target: str) -> List[str]:
-    results = list(texts)
-    for hop_source, hop_target in translation_hops(source, target):
-        results = translate_batch_one_hop(results, hop_source, hop_target)
     return results
 
 
