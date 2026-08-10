@@ -1046,10 +1046,10 @@ class MainTests(unittest.TestCase):
         restored = Image.frombytes("RGB", (pixel_width, pixel_height), zlib.decompress(data))
         self.assertEqual(restored.getpixel((0, 0)), (51, 102, 204))
 
-    def test_pdf_page_pixel_cropper_blurs_away_thin_text_strokes(self):
-        # A crop containing a thin dark line on a light background (a stand-in for a covered text
-        # stroke) must not survive the downsample as a sharp, legible line, or the "cover" would
-        # just redraw a picture of the very text it is meant to hide.
+    def test_pdf_page_pixel_cropper_ignores_text_strokes_on_a_light_background(self):
+        # A crop containing dark strokes on a light background (a stand-in for the text being
+        # covered) must come back as the pure background colour. Averaging the region instead
+        # blends the glyphs in and paints a grey band across an otherwise white page.
         from PIL import Image, ImageDraw
 
         image = Image.new("RGB", (200, 200), (255, 255, 255))
@@ -1059,10 +1059,41 @@ class MainTests(unittest.TestCase):
 
         data, pixel_width, pixel_height = crop(x=0.0, y=80.0, width=200.0, height=40.0)
         restored = Image.frombytes("RGB", (pixel_width, pixel_height), zlib.decompress(data))
-        darkest = min(sum(restored.getpixel((px, py))) for px in range(pixel_width) for py in range(pixel_height))
-        # Fully black (0) would mean the stroke survived crisply; a heavily lightened minimum means
-        # it was averaged into the background instead.
-        self.assertGreater(darkest, 255 * 3 * 0.5)
+        cells = {restored.getpixel((px, py)) for px in range(pixel_width) for py in range(pixel_height)}
+
+        self.assertEqual(cells, {(255, 255, 255)})
+
+    def test_pdf_page_pixel_cropper_keeps_a_dark_background_dark(self):
+        # The mirror case: light text on a dark panel must not lighten the cover. Anything keyed
+        # to "backgrounds are bright" would invert this one.
+        from PIL import Image, ImageDraw
+
+        image = Image.new("RGB", (200, 200), (20, 24, 40))
+        draw = ImageDraw.Draw(image)
+        draw.line([(20, 100), (180, 100)], fill=(250, 250, 250), width=2)
+        crop = main.pdf_page_pixel_cropper(image, page_width=200.0, page_height=200.0)
+
+        data, pixel_width, pixel_height = crop(x=0.0, y=80.0, width=200.0, height=40.0)
+        restored = Image.frombytes("RGB", (pixel_width, pixel_height), zlib.decompress(data))
+        cells = {restored.getpixel((px, py)) for px in range(pixel_width) for py in range(pixel_height)}
+
+        self.assertEqual(cells, {(20, 24, 40)})
+
+    def test_pdf_page_pixel_cropper_follows_a_gradient_across_the_box(self):
+        # The reason covers are a grid of samples rather than one flat fill: a box spanning a
+        # colour transition has to shift across it instead of picking a single average.
+        from PIL import Image
+
+        image = Image.new("RGB", (200, 40))
+        for x in range(200):
+            for y in range(40):
+                image.putpixel((x, y), (x + 25, 60, 200 - x))
+        crop = main.pdf_page_pixel_cropper(image, page_width=200.0, page_height=40.0)
+
+        data, pixel_width, _pixel_height = crop(x=0.0, y=0.0, width=200.0, height=40.0)
+        restored = Image.frombytes("RGB", (pixel_width, 1), zlib.decompress(data)[:pixel_width * 3])
+        self.assertGreater(pixel_width, 1)
+        self.assertLess(restored.getpixel((0, 0))[0], restored.getpixel((pixel_width - 1, 0))[0])
 
     def test_pdf_page_pixel_cropper_returns_none_without_an_image(self):
         self.assertIsNone(main.pdf_page_pixel_cropper(None, 200.0, 200.0))

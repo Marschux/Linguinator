@@ -176,7 +176,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.5.6", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.5.7", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -1493,11 +1493,19 @@ def pdf_page_pixel_cropper(image: Optional[Any], page_width: float, page_height:
     average) while blurring thin text strokes away. Returns None if there is no image to sample."""
     if image is None or page_width <= 0 or page_height <= 0:
         return None
-    from PIL import Image as PILImage
 
     scale_x = image.width / page_width
     scale_y = image.height / page_height
-    resample = getattr(PILImage, "Resampling", PILImage).BOX
+
+    def background_color(box: Tuple[int, int, int, int]) -> Tuple[int, int, int]:
+        """The most common colour in a region, i.e. its background. Averaging instead (the
+        obvious choice) blends the very glyphs being covered into the result and paints a grey
+        band over a white page; the background wins on pixel count in any region holding text."""
+        cell = image.crop(box)
+        colors = cell.getcolors(maxcolors=cell.width * cell.height + 1)
+        if not colors:
+            return (255, 255, 255)
+        return max(colors)[1]
 
     def crop(x: float, y: float, width: float, height: float) -> Optional[Tuple[bytes, int, int]]:
         left = max(0, min(image.width - 1, int(x * scale_x)))
@@ -1507,12 +1515,25 @@ def pdf_page_pixel_cropper(image: Optional[Any], page_width: float, page_height:
         bottom = max(top + 1, min(image.height, int((page_height - y) * scale_y)))
         if right <= left or bottom <= top:
             return None
-        # Fixed small grid regardless of absolute pixel size: cover boxes scale with font size, so
-        # this keeps the same blur-to-text-size ratio for headings and body text alike.
-        target_width = max(1, min(12, round((right - left) / 8)))
-        target_height = max(1, min(4, round((bottom - top) / 8)))
-        blurred = image.resize((target_width, target_height), resample=resample, box=(left, top, right, bottom))
-        return zlib.compress(blurred.tobytes()), target_width, target_height
+        # A coarse grid of background samples rather than one flat fill, so gradients/photos behind
+        # the box still shift across it. Capped small: each cell must stay wide enough to contain
+        # more background than glyph, or its mode stops being the background.
+        target_width = max(1, min(12, round((right - left) / 16)))
+        target_height = max(1, min(3, round((bottom - top) / 16)))
+        cell_width = (right - left) / target_width
+        cell_height = (bottom - top) / target_height
+        pixels = bytearray()
+        for row in range(target_height):
+            for column in range(target_width):
+                cell_left = left + int(column * cell_width)
+                cell_top = top + int(row * cell_height)
+                pixels.extend(background_color((
+                    cell_left,
+                    cell_top,
+                    max(cell_left + 1, left + int((column + 1) * cell_width)),
+                    max(cell_top + 1, top + int((row + 1) * cell_height)),
+                )))
+        return zlib.compress(bytes(pixels)), target_width, target_height
 
     return crop
 
