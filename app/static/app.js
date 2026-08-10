@@ -476,6 +476,9 @@ let languageData = null;
     }
 
     function saveRecentLanguage(code) {
+      // Auto-detect is not a language and never belongs in the recents: the source menu already
+      // pins it above the favourites, so storing it there listed it a second time.
+      if (code === AUTO_LANGUAGE.code) return;
       const recent = [code, ...getRecentLanguages().filter((item) => item !== code)].slice(0, FAVORITE_LANGUAGE_COUNT * 2);
       localStorage.setItem(recentLanguagesKey(), JSON.stringify(recent));
     }
@@ -512,7 +515,11 @@ let languageData = null;
     }
 
     function getFavoriteLanguages() {
-      const favorites = getRecentLanguages().slice(0, FAVORITE_LANGUAGE_COUNT);
+      // Filtered on read as well, so browsers that already stored it from an earlier version
+      // do not keep showing the duplicate.
+      const favorites = getRecentLanguages()
+        .filter((code) => code !== AUTO_LANGUAGE.code)
+        .slice(0, FAVORITE_LANGUAGE_COUNT);
       for (const code of defaultFavoriteLanguages) {
         if (favorites.length >= FAVORITE_LANGUAGE_COUNT) break;
         if (!favorites.includes(code)) favorites.push(code);
@@ -710,7 +717,7 @@ let languageData = null;
       const select = document.getElementById(id);
       const menu = document.getElementById(id + "Menu");
       const favoriteCodes = getFavoriteLanguages();
-      const favorites = favoriteCodes.map(languageByCode).filter(Boolean).filter((language) => id === "source" || language.code !== AUTO_LANGUAGE.code);
+      const favorites = favoriteCodes.map(languageByCode).filter(Boolean).filter((language) => language.code !== AUTO_LANGUAGE.code);
       select.innerHTML = "";
       menu.innerHTML = "";
 
