@@ -10,10 +10,10 @@ import zipfile
 import zlib
 from io import BytesIO
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from xml.etree import ElementTree
 
+import pymupdf
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
@@ -31,13 +31,44 @@ class FakePage:
     def __init__(self, text):
         self.text = text
 
-    def extract_text(self):
+    def get_text(self, kind="text"):
         return self.text
 
 
-class FakeReader:
+class FakeDocument:
+    """Stand-in for a pymupdf.Document; the extractor only counts and indexes pages."""
+
     def __init__(self, pages):
         self.pages = pages
+        self.page_count = len(pages)
+
+    def __getitem__(self, index):
+        return self.pages[index]
+
+
+def mupdf_span(text, x, y, size=11.0, bold=False, direction=(1.0, 0.0)):
+    """One span as PyMuPDF reports it: baseline origin and bbox in MuPDF's top-down space."""
+    width = 0.5 * size * len(text)
+    return {
+        "text": text,
+        "origin": (x, y),
+        "bbox": (x, y - size, x + width, y + 0.2 * size),
+        "size": size,
+        "flags": main.MUPDF_BOLD_FLAG if bold else 0,
+        "dir": direction,
+    }
+
+
+class FakeMuPdfPage:
+    """Shaped like a PyMuPDF page: one line per span, plus the page's y-flip matrix."""
+
+    def __init__(self, spans, height=800.0):
+        self.spans = spans
+        self.transformation_matrix = pymupdf.Matrix(1, 0, 0, -1, 0, height)
+
+    def get_text(self, kind):
+        lines = [{"dir": span["dir"], "spans": [span]} for span in self.spans]
+        return {"blocks": [{"lines": lines}]}
 
 
 class FakeInputs(dict):
@@ -645,9 +676,9 @@ class MainTests(unittest.TestCase):
         self.assertFalse(tokenizer_loader.cleared)
 
     def test_pdf_extraction_marks_empty_pages(self):
-        reader = FakeReader([FakePage("Hello PDF\n"), FakePage("")])
+        document = FakeDocument([FakePage("Hello PDF\n"), FakePage("")])
 
-        with patch.object(main, "PdfReader", return_value=reader):
+        with patch.object(main.pymupdf, "open", return_value=document):
             with patch.object(main, "ocr_pdf_page", return_value=""):
                 markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
 
@@ -657,18 +688,18 @@ class MainTests(unittest.TestCase):
         self.assertIn("No extractable text found", markdown)
 
     def test_pdf_extraction_marks_low_text_pages(self):
-        reader = FakeReader([FakePage("tiny")])
+        document = FakeDocument([FakePage("tiny")])
 
-        with patch.object(main, "PdfReader", return_value=reader):
+        with patch.object(main.pymupdf, "open", return_value=document):
             with patch.object(main, "ocr_pdf_page", return_value=""):
                 markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
 
         self.assertIn("tiny", markdown)
 
     def test_pdf_extraction_uses_page_range(self):
-        reader = FakeReader([FakePage("Page one long text, well over the OCR threshold"), FakePage("Page two long text, well over the OCR threshold")])
+        document = FakeDocument([FakePage("Page one long text, well over the OCR threshold"), FakePage("Page two long text, well over the OCR threshold")])
 
-        with patch.object(main, "PdfReader", return_value=reader):
+        with patch.object(main.pymupdf, "open", return_value=document):
             markdown = main.extract_pdf_markdown_from_bytes(b"%PDF", page_range="2")
 
         self.assertNotIn("# Page 1", markdown)
@@ -701,9 +732,9 @@ class MainTests(unittest.TestCase):
             main.parse_page_range("0-2", 5)
 
     def test_pdf_extraction_reports_scanned_pdf(self):
-        reader = FakeReader([FakePage(""), FakePage(None)])
+        document = FakeDocument([FakePage(""), FakePage(None)])
 
-        with patch.object(main, "PdfReader", return_value=reader):
+        with patch.object(main.pymupdf, "open", return_value=document):
             with patch.object(main, "ocr_pdf_page", return_value=""):
                 with self.assertRaises(HTTPException) as raised:
                     main.extract_pdf_markdown_from_bytes(b"%PDF")
@@ -720,9 +751,9 @@ class MainTests(unittest.TestCase):
         self.assertIn("Rebuild or restart from a current image that includes the OCR binaries", raised.exception.detail)
 
     def test_pdf_extraction_uses_ocr_for_empty_pages(self):
-        reader = FakeReader([FakePage("")])
+        document = FakeDocument([FakePage("")])
 
-        with patch.object(main, "PdfReader", return_value=reader):
+        with patch.object(main.pymupdf, "open", return_value=document):
             with patch.object(main, "ocr_pdf_page", return_value="OCR text") as mocked_ocr:
                 markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
 
@@ -858,125 +889,52 @@ class MainTests(unittest.TestCase):
         overlay_mock.assert_called_once_with(b"source pdf", "text", "2-5")
         self.assertEqual(result, b"overlay pdf")
 
+    def test_pdf_page_runs_maps_baselines_back_into_pdf_user_space(self):
+        # MuPDF counts y downwards from the top of the page, the overlay is drawn in PDF user
+        # space. Getting this flip wrong mirrors every cover box to the other end of the page.
+        runs = main.pdf_page_runs(FakeMuPdfPage([mupdf_span("Visible", 90.0, 100.0)]))
+
+        self.assertEqual(len(runs), 1)
+        self.assertAlmostEqual(runs[0]["x"], 90.0)
+        self.assertAlmostEqual(runs[0]["y"], 700.0)  # page height 800 - 100
+
     def test_pdf_page_runs_collapses_synthetic_bold_double_strokes(self):
         # Fake bold draws each glyph twice at the identical position, sometimes with a trailing
         # space on only one of the two copies (e.g. "r" then "r ").
-        calls = [
-            ("P", 200.0, 670.0, 48.0),
-            ("P", 200.0, 670.0, 48.0),
-            ("r", 316.0, 670.0, 48.0),
-            ("r ", 316.0, 670.0, 48.0),
-        ]
+        page = FakeMuPdfPage([
+            mupdf_span("P", 200.0, 130.0),
+            mupdf_span("P", 200.0, 130.0),
+            mupdf_span("r ", 316.0, 130.0),
+            mupdf_span("r ", 316.0, 130.0),
+        ])
 
-        class FakePdfPage:
-            mediabox = SimpleNamespace(width=595.0)
-
-            def extract_text(self, visitor_text, visitor_operand_before=None):
-                for text, x, y, size in calls:
-                    visitor_text(text, (1, 0, 0, 1, 0, 0), (size, 0, 0, size, x, y), {}, size)
-
-        runs = main.pdf_page_runs(FakePdfPage())
-
-        self.assertEqual([run["text"] for run in runs], ["P", "r "])
-
-    def test_pdf_page_runs_splits_a_multiline_paragraph_reported_as_one_run(self):
-        # pypdf's extract_text only flushes visitor_text on a font/BT/ET/cm change, not on every
-        # Td/T* line move, so a whole paragraph drawn in one uninterrupted text block can arrive
-        # as a single run with one position and an absurd combined width.
-        text = "word " * 40
-
-        class FakePdfPage:
-            mediabox = SimpleNamespace(width=300.0)
-
-            def extract_text(self, visitor_text, visitor_operand_before=None):
-                visitor_text(text, (1, 0, 0, 1, 0, 0), (1, 0, 0, 1, 20.0, 500.0), {}, 11)
-
-        runs = main.pdf_page_runs(FakePdfPage())
-
-        self.assertGreater(len(runs), 1)
-        self.assertEqual(" ".join(run["text"] for run in runs).split(), text.split())
-        self.assertEqual(runs[0]["y"], 500.0)
-        for run in runs:
-            self.assertLessEqual(run["x"] + run["width"], 300.0)
-        for previous, current in zip(runs, runs[1:]):
-            self.assertAlmostEqual(previous["y"] - current["y"], 11 * 1.2)
-
-    def test_pdf_page_runs_tracks_leading_pypdf_forgets_on_td(self):
-        # pypdf does not update the text leading when TD sets it, so a T* later in the stream
-        # moves by the *first* TD's leading and throws the rest of the page hundreds of points
-        # off (negative y). The tracked matrix has to keep the paragraph on the page, spaced by
-        # the real leading rather than a guessed 1.2em.
-        text = "word " * 40
-
-        class FakePdfPage:
-            mediabox = SimpleNamespace(width=300.0)
-
-            def extract_text(self, visitor_text, visitor_operand_before=None):
-                identity = (1, 0, 0, 1, 0, 0)
-                visitor_operand_before(b"BT", [], identity, identity)
-                visitor_operand_before(b"Tm", [1, 0, 0, 1, 20.0, 500.0], identity, identity)
-                # A big first TD (the jump to the top of the text block) sets a huge leading,
-                # then the real line moves reset it to 15pt each.
-                visitor_operand_before(b"TD", [0, 60.0], identity, identity)
-                visitor_operand_before(b"Tj", [], identity, identity)
-                for _ in range(6):
-                    visitor_operand_before(b"TD", [0, -15.0], identity, identity)
-                    visitor_operand_before(b"Tj", [], identity, identity)
-                visitor_operand_before(b"T*", [], identity, identity)
-                visitor_operand_before(b"Tj", [], identity, identity)
-                # pypdf hands over its own (broken) matrix; the tracked one has to win.
-                visitor_text(text, identity, (1, 0, 0, 1, 20.0, -400.0), {}, 11)
-
-        runs = main.pdf_page_runs(FakePdfPage())
-
-        self.assertTrue(runs)
-        # Starts at the first tracked baseline (500 + 60), not pypdf's off-page -400.
-        self.assertAlmostEqual(runs[0]["y"], 560.0)
-        self.assertGreater(min(run["y"] for run in runs), 0.0)
-        for previous, current in zip(runs, runs[1:]):
-            self.assertAlmostEqual(previous["y"] - current["y"], 15.0)
-
-    def test_pdf_page_runs_wraps_a_block_starting_mid_line_at_its_left_edge(self):
-        # A text block often starts as a fragment at the right edge of a line and only then
-        # returns to the paragraph's left margin. Wrapping every line against that first x
-        # leaves a sliver of width and explodes the paragraph into dozens of stub lines that
-        # march off the bottom of the page.
-        text = "word " * 60
-
-        class FakePdfPage:
-            mediabox = SimpleNamespace(width=300.0)
-
-            def extract_text(self, visitor_text, visitor_operand_before=None):
-                identity = (1, 0, 0, 1, 0, 0)
-                visitor_operand_before(b"BT", [], identity, identity)
-                # First a fragment at x=270 (25pt of usable width), then the block's real
-                # left margin at x=20 for every following line.
-                visitor_operand_before(b"Tm", [1, 0, 0, 1, 270.0, 500.0], identity, identity)
-                visitor_operand_before(b"Tj", [], identity, identity)
-                for step in range(1, 8):
-                    visitor_operand_before(b"Tm", [1, 0, 0, 1, 20.0, 500.0 - step * 15.0], identity, identity)
-                    visitor_operand_before(b"Tj", [], identity, identity)
-                visitor_text(text, identity, (1, 0, 0, 1, 270.0, 500.0), {}, 11)
-
-        runs = main.pdf_page_runs(FakePdfPage())
-
-        self.assertEqual(runs[0]["x"], 270.0)
-        self.assertTrue(all(run["x"] == 20.0 for run in runs[1:]))
-        # Wrapped against the real left edge, this stays a handful of lines instead of ~60.
-        self.assertLess(len(runs), 20)
-        self.assertGreater(min(run["y"] for run in runs), 0.0)
+        self.assertEqual([run["text"] for run in main.pdf_page_runs(page)], ["P", "r "])
 
     def test_pdf_page_runs_skips_hidden_text_anchored_at_origin(self):
-        class FakePdfPage:
-            mediabox = SimpleNamespace(width=595.0)
+        page = FakeMuPdfPage([
+            mupdf_span("hidden duplicate page text", 0.0, 800.0),  # user-space (0, 0)
+            mupdf_span("Visible", 90.0, 100.0),
+        ])
 
-            def extract_text(self, visitor_text, visitor_operand_before=None):
-                visitor_text("hidden duplicate page text", (1, 0, 0, 1, 0, 0), (12, 0, 0, 12, 0, 0), {}, 12)
-                visitor_text("Visible", (1, 0, 0, 1, 0, 0), (11, 0, 0, 11, 90.0, 700.0), {}, 11)
+        self.assertEqual([run["text"] for run in main.pdf_page_runs(page)], ["Visible"])
 
-        runs = main.pdf_page_runs(FakePdfPage())
+    def test_pdf_page_runs_reads_bold_from_the_mupdf_span_flag(self):
+        page = FakeMuPdfPage([
+            mupdf_span("Heading", 50.0, 100.0, bold=True),
+            mupdf_span("Body", 50.0, 120.0),
+        ])
 
-        self.assertEqual([run["text"] for run in runs], ["Visible"])
+        self.assertEqual([run["bold"] for run in main.pdf_page_runs(page)], [True, False])
+
+    def test_pdf_page_runs_skips_rotated_and_vertical_lines(self):
+        # The overlay is stamped horizontally, so sideways text has to keep its original.
+        page = FakeMuPdfPage([
+            mupdf_span("sideways", 50.0, 100.0, direction=(0.0, 1.0)),
+            mupdf_span("upside down", 50.0, 200.0, direction=(-1.0, 0.0)),
+            mupdf_span("Horizontal", 50.0, 300.0),
+        ])
+
+        self.assertEqual([run["text"] for run in main.pdf_page_runs(page)], ["Horizontal"])
 
     def test_group_pdf_lines_merges_runs_on_the_same_baseline(self):
         runs = [
@@ -1032,36 +990,6 @@ class MainTests(unittest.TestCase):
         self.assertGreaterEqual(placed[0]["size"], 11.0 * main.PDF_LAYOUT_MIN_SCALE)
         self.assertGreater(len(placed), 2)
         self.assertEqual(" ".join(line["text"] for line in placed).split(), long_text.split())
-
-    def test_pdf_font_is_bold_reads_the_base_font_name(self):
-        for name in ("/Arial-BoldMT", "/ABCDEF+Helvetica-Bold", "/Foo,Bold", "/Roboto-Black", "/X-Heavy"):
-            with self.subTest(base_font=name):
-                self.assertTrue(main.pdf_font_is_bold({"/BaseFont": name}))
-        for name in ("/ArialMT", "/Helvetica", "/ABCDEF+Times-Roman", "/Foo-Italic"):
-            with self.subTest(base_font=name):
-                self.assertFalse(main.pdf_font_is_bold({"/BaseFont": name}))
-
-    def test_pdf_font_is_bold_falls_back_to_the_descriptor(self):
-        # Fonts whose name gives nothing away still declare themselves in the descriptor.
-        self.assertTrue(main.pdf_font_is_bold({
-            "/BaseFont": "/Subset01", "/FontDescriptor": {"/Flags": main.FORCE_BOLD_FLAG},
-        }))
-        self.assertTrue(main.pdf_font_is_bold({
-            "/BaseFont": "/Subset01", "/FontDescriptor": {"/StemV": 165},
-        }))
-        self.assertFalse(main.pdf_font_is_bold({
-            "/BaseFont": "/Subset01", "/FontDescriptor": {"/StemV": 80, "/Flags": 4},
-        }))
-
-    def test_pdf_font_is_bold_never_raises_on_odd_font_dictionaries(self):
-        # Extraction must survive any PDF; an unreadable font just means "not bold".
-        class Hostile:
-            def get(self, *_args, **_kwargs):
-                raise RuntimeError("broken font")
-
-        for font_dict in (None, {}, {"/FontDescriptor": None}, Hostile()):
-            with self.subTest(font_dict=type(font_dict).__name__):
-                self.assertFalse(main.pdf_font_is_bold(font_dict))
 
     def test_group_pdf_lines_marks_a_line_bold_by_majority_of_its_text(self):
         mostly_bold = main.group_pdf_lines([

@@ -29,6 +29,9 @@ from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
 from langdetect import DetectorFactory, LangDetectException, detect
 from pydantic import BaseModel
+# Text extraction runs on PyMuPDF (it decodes subset fonts pypdf silently drops words from and
+# reports position, size and bold in one pass); pypdf still does the overlay merge.
+import pymupdf
 from pypdf import PdfReader, PdfWriter
 
 DetectorFactory.seed = 0  # deterministic detection results across runs
@@ -1566,19 +1569,18 @@ def extract_pdf_markdown_from_bytes(
         raise HTTPException(status_code=413, detail=f"PDF exceeds {MAX_FILE_MB} MB")
 
     try:
-        reader = PdfReader(BytesIO(content))
+        document = pymupdf.open(stream=content, filetype="pdf")
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read PDF: {exc}") from exc
 
-    if not reader.pages:
+    if not document.page_count:
         raise HTTPException(status_code=422, detail="PDF has no pages")
 
-    selected_pages = parse_page_range(page_range, len(reader.pages))
+    selected_pages = parse_page_range(page_range, document.page_count)
     pages = []
     pages_with_text = 0
     for index in selected_pages:
-        page = reader.pages[index - 1]
-        text = page.extract_text() or ""
+        text = document[index - 1].get_text() or ""
         text = re.sub(r"[ \t]+\n", "\n", text).strip()
         needs_ocr = not text or len(text) < PDF_LOW_TEXT_CHARS
         if needs_ocr:
@@ -1602,228 +1604,53 @@ def extract_pdf_markdown_from_bytes(
     return markdown
 
 
-IDENTITY_MATRIX: Tuple[float, ...] = (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
-
-
-def multiply_matrix(a: Tuple[float, ...], b: Tuple[float, ...]) -> Tuple[float, ...]:
-    return (
-        a[0] * b[0] + a[1] * b[2],
-        a[0] * b[1] + a[1] * b[3],
-        a[2] * b[0] + a[3] * b[2],
-        a[2] * b[1] + a[3] * b[3],
-        a[4] * b[0] + a[5] * b[2] + b[4],
-        a[4] * b[1] + a[5] * b[3] + b[5],
-    )
-
-
-def pdf_font_widths(font_dict: Any) -> Tuple[Dict[Any, float], Dict[str, str]]:
-    """Glyph widths of a font used in the source PDF, plus the mapping from the extracted
-    text back to the keys those widths are stored under."""
-    from pypdf._cmap import build_char_map_from_dict, build_font_width_map
-
-    _, _, _, character_map = build_char_map_from_dict(200.0, font_dict)
-    reverse_map: Dict[str, str] = {}
-    for key, value in character_map.items():
-        reverse_map.setdefault(value, key)
-    return build_font_width_map(font_dict, 400.0), reverse_map
-
-
-def pdf_run_width(text: str, size: float, font_dict: Any, cache: Dict[int, Any]) -> Tuple[float, bool]:
-    """Width of an extracted run in the *original* font, and whether it could be measured.
-
-    Falls back to an estimate from our own font metrics for fonts without usable width
-    information. Only that estimate needs a safety margin when covering the original text.
-    """
-    from pypdf._cmap import compute_font_width
-
-    key = id(font_dict)
-    if key not in cache:
-        try:
-            cache[key] = pdf_font_widths(font_dict)
-        except Exception:
-            cache[key] = None
-    entry = cache[key]
-    if not entry:
-        return pdf_measure_text(text, size), False
-    width_map, reverse_map = entry
-    try:
-        total = sum(compute_font_width(width_map, reverse_map.get(char, char)) for char in text)
-    except Exception:
-        return pdf_measure_text(text, size), False
-    return total * size / 1000.0, True
-
-
-FORCE_BOLD_FLAG = 1 << 18  # /FontDescriptor /Flags bit 19, per the PDF spec's font flags table
-
-
-def pdf_font_is_bold(font_dict: Any) -> bool:
-    """Whether an extracted run's font is a bold face.
-
-    Read off /BaseFont first, which is where it is legible in practice ("Arial-BoldMT",
-    "Helvetica-Bold", "ABCDEF+Foo,Bold"); the descriptor's ForceBold flag and a heavy stem width
-    cover the fonts whose name says nothing. Never raises: a PDF with an odd or missing font
-    dictionary must still extract, just without bold.
-    """
-    if not font_dict:
-        return False
-    try:
-        name = str(font_dict.get("/BaseFont", "")).lower()
-        if any(marker in name for marker in ("bold", "black", "heavy", "semibd", "-bd")):
-            return True
-        descriptor = font_dict.get("/FontDescriptor")
-        descriptor = descriptor.get_object() if hasattr(descriptor, "get_object") else descriptor
-        if not descriptor:
-            return False
-        if int(descriptor.get("/Flags", 0)) & FORCE_BOLD_FLAG:
-            return True
-        # StemV is the vertical stem thickness in 1/1000 em; regular text sits near 80, bold
-        # around 140 and up. Only consulted when nothing more explicit said so.
-        return float(descriptor.get("/StemV", 0) or 0) >= 120
-    except Exception:
-        return False
+MUPDF_BOLD_FLAG = 1 << 4  # span flag bit 4, per PyMuPDF's text-extraction flag table
 
 
 def pdf_page_runs(page) -> List[Dict[str, Any]]:
-    """Every text run on the page with its position on the page and its rendered font size."""
+    """Every text run on a PyMuPDF page, positioned in PDF user space.
+
+    MuPDF hands over text already split into lines and spans, each with its baseline origin,
+    measured bounding box, rendered size and font flags. Its own coordinates count downwards
+    from the top-left of the page, so every point is mapped back through the inverse page
+    transformation into the user space the overlay is later drawn in.
+    """
     runs: List[Dict[str, Any]] = []
-    width_cache: Dict[int, Any] = {}
-    page_width = float(page.mediabox.width)
-    # pypdf does not update the text leading when a TD operator sets it, so a T* later in the
-    # stream moves by whatever leading the *first* TD happened to set, which drops whole
-    # paragraphs hundreds of points off the page. The text matrix is tracked here instead, and
-    # the baselines seen while a run accumulates are used to place its lines.
-    text_state: Dict[str, Any] = {"tm": IDENTITY_MATRIX, "tlm": IDENTITY_MATRIX, "leading": 0.0}
-    pending_baselines: List[Tuple[float, float]] = []
-
-    def track(operator, operands, cm, tm):
-        name = operator.decode() if isinstance(operator, bytes) else str(operator)
-        if name == "BT":
-            text_state["tm"] = IDENTITY_MATRIX
-            text_state["tlm"] = IDENTITY_MATRIX
-        elif name == "Tm" and len(operands) == 6:
-            matrix = tuple(float(value) for value in operands)
-            text_state["tm"] = matrix
-            text_state["tlm"] = matrix
-        elif name == "TL" and operands:
-            text_state["leading"] = float(operands[0])
-        elif name in ("Td", "TD") and len(operands) == 2:
-            offset_x, offset_y = float(operands[0]), float(operands[1])
-            if name == "TD":
-                text_state["leading"] = -offset_y
-            moved = multiply_matrix((1.0, 0.0, 0.0, 1.0, offset_x, offset_y), text_state["tlm"])
-            text_state["tm"] = moved
-            text_state["tlm"] = moved
-        elif name in ("T*", "'", '"'):
-            moved = multiply_matrix((1.0, 0.0, 0.0, 1.0, 0.0, -text_state["leading"]), text_state["tlm"])
-            text_state["tm"] = moved
-            text_state["tlm"] = moved
-        if name in ("Tj", "TJ", "'", '"'):
-            placed = multiply_matrix(text_state["tm"], tuple(cm))
-            pending_baselines.append((placed[4], placed[5]))
-
-    def visitor(text, cm, tm, font_dict, font_size):
-        baselines = list(pending_baselines)
-        pending_baselines.clear()
-        if not text or not text.strip():
-            return
-        matrix = multiply_matrix(tuple(tm), tuple(cm))
-        if abs(matrix[4]) < 0.01 and abs(matrix[5]) < 0.01:
-            # Some PDF generators dump a hidden duplicate of the whole page's text anchored at
-            # the origin (accessibility/search layer). It is never real, visible page content.
-            return
-        if baselines:
-            # pypdf reports the matrix from the start of the accumulated run, so the first
-            # tracked baseline is the corrected equivalent of what it just handed over.
-            matrix = matrix[:4] + baselines[0]
-        scale = math.sqrt(abs(matrix[0] * matrix[3] - matrix[1] * matrix[2])) or 1.0
-        size = abs(float(font_size or PDF_FONT_SIZE)) * scale or PDF_FONT_SIZE
-        width, exact = pdf_run_width(text.strip(), size, font_dict, width_cache)
-        bold = pdf_font_is_bold(font_dict)
-        # Synthetic bold (no real bold font available) is commonly faked by drawing the same
-        # glyphs twice at the same spot; keep only one copy or lines double up into "PPoowweerr".
-        if runs:
-            previous = runs[-1]
-            if (
-                previous["text"].strip() == text.strip()
-                and abs(previous["x"] - matrix[4]) < 0.5
-                and abs(previous["y"] - matrix[5]) < 0.5
-            ):
-                # Keep whichever stroke carries the trailing space, e.g. "r" vs "r ".
-                if len(text) > len(previous["text"]):
-                    previous["text"] = text
-                return
-        if matrix[4] + width > page_width:
-            # pypdf's extract_text only flushes a run on a font/BT/ET/cm change, not on every
-            # Td/T* line move, so a whole multi-line paragraph drawn in one uninterrupted text
-            # block (same font throughout) can arrive as a single run with one position. Split
-            # it back into page-width-bounded lines instead of one absurdly wide "line" that
-            # would overflow off the page and never wrap. Wrapped by this run's own (source PDF)
-            # font metrics, not our output font (pdf_measure_text/wrap_text_to_width) - those
-            # disagree on where a word fits, which left lines still overflowing.
-            # The tracked baselines are where the source PDF actually drew this block's lines.
-            distinct: List[Tuple[float, float]] = []
-            for spot in baselines:
-                if not distinct or abs(distinct[-1][1] - spot[1]) > 0.5:
-                    distinct.append(spot)
-            # A block often starts mid-line (a fragment at the right edge) and only then returns
-            # to the paragraph's left margin. Wrapping every line against that first x leaves a
-            # sliver of usable width and explodes one paragraph into dozens of stub lines, so
-            # only the first line uses it and the rest use the block's real left edge.
-            left_edge = min((spot[0] for spot in distinct), default=matrix[4])
-            first_available = max(page_width - matrix[4], 10.0)
-            rest_available = max(page_width - left_edge, 10.0)
-            stripped = text.strip()
-            cjk = detect_pdf_script(stripped) == "cjk"
-            units = list(stripped) if cjk else stripped.split()
-            separator = "" if cjk else " "
-            wrapped_lines: List[str] = []
-            current = ""
-            for unit in units:
-                candidate = current + separator + unit if current else unit
-                candidate_width, _ = pdf_run_width(candidate, size, font_dict, width_cache)
-                available = first_available if not wrapped_lines else rest_available
-                if current and candidate_width > available:
-                    wrapped_lines.append(current)
-                    current = unit
-                else:
-                    current = candidate
-            if current:
-                wrapped_lines.append(current)
-            # Re-wrapping rarely reproduces the source's exact line count, so take the real line
-            # spacing from the baselines (and the exact baseline when the counts do line up)
-            # instead of guessing 1.2em.
-            steps = sorted(distinct[index][1] - distinct[index + 1][1] for index in range(len(distinct) - 1))
-            line_height = steps[len(steps) // 2] if steps else size * 1.2
-            if not 0 < line_height < 4 * size:
-                line_height = size * 1.2
-            for index, wrapped_line in enumerate(wrapped_lines):
-                line_width, line_exact = pdf_run_width(wrapped_line, size, font_dict, width_cache)
-                if len(distinct) == len(wrapped_lines):
-                    line_x, line_y = distinct[index]
-                else:
-                    line_x = matrix[4] if index == 0 else left_edge
-                    line_y = matrix[5] - index * line_height
+    inverse = ~page.transformation_matrix
+    for block in page.get_text("dict")["blocks"]:
+        for line in block.get("lines", []):
+            # The overlay is drawn horizontally; rotated or vertical text keeps its original.
+            if abs(line["dir"][1]) > 0.01 or line["dir"][0] <= 0:
+                continue
+            for span in line["spans"]:
+                text = span["text"]
+                if not text.strip():
+                    continue
+                x, y = pymupdf.Point(span["origin"]) * inverse
+                if abs(x) < 0.01 and abs(y) < 0.01:
+                    # Some generators dump a hidden duplicate of the page's text anchored at the
+                    # origin (accessibility/search layer). It is never real, visible content.
+                    continue
+                # Synthetic bold (no real bold face available) is faked by drawing the same
+                # glyphs twice at the same spot; one copy is enough, or lines double up into
+                # "PPoowweerr".
+                if runs:
+                    previous = runs[-1]
+                    if (
+                        previous["text"].strip() == text.strip()
+                        and abs(previous["x"] - x) < 0.5
+                        and abs(previous["y"] - y) < 0.5
+                    ):
+                        continue
                 runs.append({
-                    "text": wrapped_line,
-                    "x": line_x,
-                    "y": line_y,
-                    "size": size,
-                    "width": line_width,
-                    "exact": line_exact,
-                    "bold": bold,
+                    "text": text,
+                    "x": x,
+                    "y": y,
+                    "size": span["size"],
+                    "width": span["bbox"][2] - span["bbox"][0],
+                    "exact": True,  # measured by MuPDF from the real font, never estimated
+                    "bold": bool(span["flags"] & MUPDF_BOLD_FLAG),
                 })
-            return
-        runs.append({
-            "text": text,
-            "x": matrix[4],
-            "y": matrix[5],
-            "size": size,
-            "width": width,
-            "exact": exact,
-            "bold": bold,
-        })
-
-    page.extract_text(visitor_text=visitor, visitor_operand_before=track)
     return runs
 
 
@@ -1906,18 +1733,18 @@ def group_pdf_paragraphs(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, Any]]:
     try:
-        reader = PdfReader(BytesIO(content))
+        document = pymupdf.open(stream=content, filetype="pdf")
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read PDF: {exc}") from exc
-    if not reader.pages:
+    if not document.page_count:
         raise HTTPException(status_code=422, detail="PDF has no pages")
 
     pages = []
-    for index in parse_page_range(page_range, len(reader.pages)):
-        page = reader.pages[index - 1]
+    for index in parse_page_range(page_range, document.page_count):
+        page = document[index - 1]
         box = page.mediabox
         # Rotated pages would need the whole overlay transformed; they keep their original text.
-        rotated = int(page.get("/Rotate", 0) or 0) % 360 != 0
+        rotated = page.rotation % 360 != 0
         lines = [] if rotated else group_pdf_lines(pdf_page_runs(page))
         pages.append({
             "number": index,
