@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import shutil
+import socket
 import sys
 import time
 import unittest
@@ -705,6 +706,199 @@ class MainTests(unittest.TestCase):
 
         self.assertNotIn("# Page 1", markdown)
         self.assertIn("# Page 2", markdown)
+
+    def test_ensure_public_url_rejects_addresses_inside_the_network(self):
+        # Whoever reaches the UI decides what the container fetches. Without this, that includes
+        # the router, a sibling container, and the app's own endpoints - returned as a tidy PDF.
+        blocked = {
+            "http://localhost:5051/health": "127.0.0.1",
+            "http://127.0.0.1/": "127.0.0.1",
+            "http://10.0.0.5/admin": "10.0.0.5",
+            "http://192.168.2.1/": "192.168.2.1",
+            "http://172.17.0.2/": "172.17.0.2",
+            "http://169.254.169.254/latest/meta-data/": "169.254.169.254",
+            "http://nas.local/": "192.168.2.50",
+        }
+        for url, address in blocked.items():
+            with self.subTest(url=url):
+                resolved = [(socket.AF_INET, None, None, "", (address, 80))]
+                with patch.object(main.socket, "getaddrinfo", return_value=resolved):
+                    with self.assertRaises(HTTPException) as raised:
+                        main.ensure_public_url(url)
+                self.assertEqual(raised.exception.status_code, 400)
+
+    def test_ensure_public_url_rejects_other_schemes(self):
+        for url in ("file:///etc/passwd", "ftp://example.com/x", "gopher://example.com", "javascript:alert(1)"):
+            with self.subTest(url=url):
+                with self.assertRaises(HTTPException):
+                    main.ensure_public_url(url)
+
+    def test_ensure_public_url_accepts_a_public_address(self):
+        resolved = [(socket.AF_INET, None, None, "", ("93.184.216.34", 443))]
+        with patch.object(main.socket, "getaddrinfo", return_value=resolved):
+            self.assertEqual(main.ensure_public_url("  https://example.com/a  "), "https://example.com/a")
+
+    def test_ensure_public_url_checks_every_resolved_address(self):
+        # A name can answer with both a public and a private address; one bad answer is enough.
+        resolved = [
+            (socket.AF_INET, None, None, "", ("93.184.216.34", 80)),
+            (socket.AF_INET, None, None, "", ("127.0.0.1", 80)),
+        ]
+        with patch.object(main.socket, "getaddrinfo", return_value=resolved):
+            with self.assertRaises(HTTPException):
+                main.ensure_public_url("http://sneaky.example/")
+
+    def test_fetch_web_page_rechecks_every_redirect(self):
+        """A redirect to an internal address is the ordinary way past an address check.
+
+        The public page answers "302 -> http://127.0.0.1:5051/health". Only re-checking each hop
+        catches it, which is why redirects are followed by hand instead of by httpx.
+        """
+        class FakeResponse:
+            def __init__(self, location):
+                self.is_redirect = True
+                self.status_code = 302
+                self.headers = {"location": location}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        class FakeClient:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def stream(self, _method, _url, **_kwargs):
+                return FakeResponse("http://127.0.0.1:5051/health")
+
+        def fake_getaddrinfo(host, *_args, **_kwargs):
+            address = "127.0.0.1" if host == "127.0.0.1" else "93.184.216.34"
+            return [(socket.AF_INET, None, None, "", (address, 80))]
+
+        with patch.object(main.httpx, "Client", FakeClient):
+            with patch.object(main.socket, "getaddrinfo", side_effect=fake_getaddrinfo):
+                with self.assertRaises(HTTPException) as raised:
+                    main.fetch_web_page("http://example.com/redirects-inward")
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertIn("your own network", raised.exception.detail)
+
+    def test_run_url_translate_job_keeps_headings_and_lists(self):
+        # The markers must survive the model: a translated "## Abschnitt" that comes back without
+        # its "##" lands in the finished PDF as ordinary body text.
+        markdown = "# Titel\n\n## Abschnitt\n\nEin Absatz.\n\n- Erster Punkt"
+        temp_dir = test_temp_dir()
+        try:
+            with patch.object(main, "HISTORY_DIR", temp_dir):
+                with patch.object(main, "JOBS_DIR", temp_dir / "jobs"):
+                    with main.JOBS_LOCK:
+                        main.JOBS.clear()
+                        main.JOB_RUNNERS.clear()
+                    job_id = main.create_job("translate-url", "deu_Latn", "eng_Latn", "example.com")
+                    with patch.object(main, "fetch_web_page", return_value=(b"<html></html>", "https://example.com/a")):
+                        with patch.object(main, "extract_web_page_markdown", return_value=(markdown, "Titel")):
+                            with patch.object(main, "translate_batch", side_effect=lambda texts, *_a: [f"EN {t}" for t in texts]):
+                                main.run_url_translate_job(job_id, "https://example.com/a", "deu_Latn", "eng_Latn")
+                    job = main.get_job(job_id)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+        self.assertEqual(job["status"], "complete")
+        self.assertEqual(
+            job["result"],
+            "# EN Titel\n\n## EN Abschnitt\n\nEN Ein Absatz.\n\n- EN Erster Punkt",
+        )
+
+    def test_split_markdown_blocks_keeps_markers_out_of_the_text(self):
+        markdown = "# Titel\n\n## Abschnitt\n\nEin Absatz.\n- Erster Punkt\n2. Zweiter\n> Zitat"
+
+        blocks = main.split_markdown_blocks(markdown)
+
+        self.assertEqual(blocks[0], ("# ", "Titel"))
+        self.assertEqual(blocks[2], ("## ", "Abschnitt"))
+        self.assertEqual(blocks[4], ("", "Ein Absatz."))
+        self.assertEqual(blocks[5], ("- ", "Erster Punkt"))
+        self.assertEqual(blocks[6], ("2. ", "Zweiter"))
+        self.assertEqual(blocks[7], ("> ", "Zitat"))
+        # Reassembling must give back exactly what went in, or the document shifts.
+        self.assertEqual("\n".join(prefix + text for prefix, text in blocks), markdown)
+
+    def test_extract_web_page_markdown_keeps_the_structure(self):
+        html = (
+            "<html><head><title>Beispielseite</title></head><body>"
+            "<nav>Startseite Kontakt Impressum</nav>"
+            "<article><h1>Die Ueberschrift</h1>"
+            "<p>Ein erster Absatz mit Inhalt der lang genug ist um erkannt zu werden.</p>"
+            "<h2>Zweiter Abschnitt</h2><ul><li>Erster Punkt</li><li>Zweiter Punkt</li></ul>"
+            "<p>Noch ein Absatz mit ausreichend Text damit die Heuristik ihn behaelt.</p>"
+            "</article><footer>Copyright 2026</footer></body></html>"
+        ).encode("utf-8")
+
+        markdown, title = main.extract_web_page_markdown(html, "https://example.com/seite")
+
+        self.assertIn("Die Ueberschrift", title)
+        self.assertIn("## Zweiter Abschnitt", markdown)
+        self.assertIn("- Erster Punkt", markdown)
+        # Navigation and footer are what a reader view is for.
+        self.assertNotIn("Impressum", markdown)
+        self.assertNotIn("Copyright 2026", markdown)
+
+    def test_extract_web_page_markdown_strips_leftover_html_and_emphasis(self):
+        """Headings must survive, inline markup must not.
+
+        The reader output leaves footnote markup like <sup>[1]</sup> in place, which prints
+        verbatim in the PDF, and inline bold does not survive translation - the model returned
+        "*Reproduzierbare Builds**" for "**Reproducible builds**".
+        """
+        html = (
+            "<html><head><title>Seite</title></head><body><article>"
+            "<h1>Die Ueberschrift</h1>"
+            "<p><b>Fetter Anfang</b> und ein Absatz mit genug Inhalt damit er erkannt wird"
+            " und eine Fussnote<sup>[1]</sup> traegt.</p>"
+            "<h2>Zweiter Abschnitt</h2>"
+            "<p>Noch ein Absatz mit ausreichend Text damit die Heuristik ihn behaelt und nicht verwirft.</p>"
+            "</article></body></html>"
+        ).encode("utf-8")
+
+        markdown, _title = main.extract_web_page_markdown(html, "https://example.com/seite")
+
+        self.assertIn("## Zweiter Abschnitt", markdown)   # structure kept
+        self.assertNotIn("<sup>", markdown)               # raw html gone
+        self.assertNotIn("**", markdown)                  # inline emphasis gone
+        self.assertIn("Fetter Anfang", markdown)          # its text stays
+
+    def test_extract_web_page_markdown_rejects_a_javascript_redirect_stub(self):
+        # blog.rust-lang.org redirects with JavaScript: the fetched body is a stub that extracts
+        # to a couple of dozen characters. Shipping that as a translation would be worse than
+        # saying it did not work.
+        html = (
+            b"<!doctype html><meta charset='utf-8'><title>Redirect</title>"
+            b"<script>window.location.replace('https://example.com/real');</script>"
+        )
+
+        with self.assertRaises(HTTPException) as raised:
+            main.extract_web_page_markdown(html, "https://example.com/stub")
+
+        self.assertEqual(raised.exception.status_code, 422)
+        self.assertIn("JavaScript", raised.exception.detail)
+
+    def test_extract_web_page_markdown_explains_an_empty_page(self):
+        # A page that builds itself with JavaScript must say so, not yield an empty document.
+        html = b"<html><head><title>App</title></head><body><div id='root'></div></body></html>"
+
+        with self.assertRaises(HTTPException) as raised:
+            main.extract_web_page_markdown(html, "https://example.com/app")
+
+        self.assertEqual(raised.exception.status_code, 422)
+        self.assertIn("JavaScript", raised.exception.detail)
 
     def test_parse_page_range_clamps_a_range_to_the_document_end(self):
         # "the first 5 pages" is a reasonable request for a shorter document; it used to be

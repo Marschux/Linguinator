@@ -35,7 +35,9 @@ let languageData = null;
         csvFile: "CSV File",
         pdf: "PDF",
         website: "Website",
-        websiteSoon: "Paste a page address here and the printable view of that page gets translated. Not built yet.",
+        websiteHint: "Reads the article out of a public page - no login, no paywall - and translates it. Download as PDF, Word or text.",
+        fetchingPage: "Fetching page...",
+        websiteInvalid: "Enter a public page address starting with http:// or https://",
         textFile: "Text File",
         markdownFile: "Markdown File",
         loadFile: "Load File",
@@ -91,7 +93,9 @@ let languageData = null;
         csvFile: "CSV-Datei",
         pdf: "PDF",
         website: "Webseite",
-        websiteSoon: "Hier kommt eine Adresse rein, uebersetzt wird die Druckansicht der Seite. Noch nicht gebaut.",
+        websiteHint: "Holt den Artikel aus einer oeffentlich erreichbaren Seite - ohne Login, ohne Paywall - und uebersetzt ihn. Download als PDF, Word oder Text.",
+        fetchingPage: "Hole Seite...",
+        websiteInvalid: "Trage eine oeffentlich erreichbare Adresse ein, die mit http:// oder https:// beginnt.",
         textFile: "Textdatei",
         markdownFile: "Markdown-Datei",
         loadFile: "Datei laden",
@@ -147,7 +151,9 @@ let languageData = null;
         csvFile: "Archivo CSV",
         pdf: "PDF",
         website: "Sitio web",
-        websiteSoon: "Pega aqui la direccion de una pagina y se traducira su vista de impresion. Aun no implementado.",
+        websiteHint: "Extrae el articulo de una pagina publica - sin inicio de sesion ni muro de pago - y lo traduce. Descarga en PDF, Word o texto.",
+        fetchingPage: "Obteniendo pagina...",
+        websiteInvalid: "Introduce una direccion publica que empiece por http:// o https://",
         textFile: "Archivo de texto",
         markdownFile: "Archivo Markdown",
         loadFile: "Cargar archivo",
@@ -203,7 +209,9 @@ let languageData = null;
         csvFile: "Fichier CSV",
         pdf: "PDF",
         website: "Site web",
-        websiteSoon: "Colle ici l'adresse d'une page, c'est sa vue imprimable qui sera traduite. Pas encore realise.",
+        websiteHint: "Recupere l'article d'une page publique - sans connexion ni paywall - et le traduit. Telechargement en PDF, Word ou texte.",
+        fetchingPage: "Recuperation de la page...",
+        websiteInvalid: "Saisis une adresse publique commencant par http:// ou https://",
         textFile: "Fichier texte",
         markdownFile: "Fichier Markdown",
         loadFile: "Charger le fichier",
@@ -389,7 +397,7 @@ let languageData = null;
       setText('[data-input-tab="website"] .tab-label', "website");
       setText('[data-input-tab="pdf"] .tab-label', "pdf");
       setText("#websiteUrlLabel", "website");
-      setText("#websiteHint", "websiteSoon");
+      setText("#websiteHint", "websiteHint");
       setText('label[for="text"]', "textField");
       setText('label[for="pdf"]', "pdf");
       setText("#loadTextFile", "loadFile");
@@ -1291,6 +1299,10 @@ let languageData = null;
     }
 
     async function startCurrentJob() {
+      if (currentInputTab === "website") {
+        await postUrlJob();
+        return;
+      }
       if (currentInputTab === "pdf") {
         await postPdfJob();
         return;
@@ -1299,6 +1311,43 @@ let languageData = null;
     }
 
     document.getElementById("translate").addEventListener("click", startCurrentJob);
+
+    async function postUrlJob() {
+      const url = document.getElementById("websiteUrl").value.trim();
+      if (!/^https?:\/\/\S+$/i.test(url)) {
+        showProgress("failed", 0, t("websiteInvalid"));
+        return;
+      }
+      const source = document.getElementById("source").value;
+      const target = document.getElementById("target").value;
+      saveRecent("source", source);
+      saveRecent("target", target);
+      renderSelect("source", source);
+      renderSelect("target", target);
+      currentSourceFormat = "md";
+      const form = new FormData();
+      form.append("url", url);
+      form.append("source", source);
+      form.append("target", target);
+      setResult("");
+      lastCompletedJob = null;
+      renderOwnJobBanner();
+      showProgress("extracting", 0, t("fetchingPage"));
+      const response = await fetch("jobs/translate-url", {method: "POST", body: form});
+      if (!response.ok) {
+        const text = await response.text();
+        showProgress("failed", 0, errorTextFromResponse(text));
+        setResult("");
+        return;
+      }
+      const data = await response.json();
+      ensureAudioContext();
+      rememberOwnJob(data.job_id);
+      activeJobId = data.job_id;
+      const token = ++pollToken;
+      loadQueue();
+      await pollJob(data.job_id, token);
+    }
 
     async function postPdfJob() {
       const file = document.getElementById("pdf").files[0];
