@@ -642,6 +642,13 @@ let languageData = null;
       return "extract-docx";
     }
 
+    function languagesByDisplayName() {
+      // The server hands the list back sorted by language code, which puts Greek under "ell"
+      // and Dutch under "nld". The menu shows names, so it sorts by name.
+      return [...languageData.languages].sort((a, b) =>
+        languageDisplayName(a.code).name.localeCompare(languageDisplayName(b.code).name, "en"));
+    }
+
     function languageByCode(code) {
       if (code === AUTO_LANGUAGE.code) return AUTO_LANGUAGE;
       return languageData.languages.find((language) => language.code === code);
@@ -725,10 +732,11 @@ let languageData = null;
       select.innerHTML = "";
       menu.innerHTML = "";
 
+      const ordered = languagesByDisplayName();
       if (id === "source") {
         addOption(select, AUTO_LANGUAGE);
       }
-      for (const language of languageData.languages) {
+      for (const language of ordered) {
         addOption(select, language);
       }
 
@@ -759,7 +767,7 @@ let languageData = null;
       divider.className = "language-divider";
       menu.appendChild(divider);
       addLanguageGroup(menu, t("allLanguages"));
-      for (const language of languageData.languages) {
+      for (const language of ordered) {
         if (!favoriteCodes.includes(language.code)) {
           addLanguageMenuOption(menu, id, language, selectedValue);
         }
