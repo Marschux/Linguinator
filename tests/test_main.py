@@ -428,7 +428,7 @@ class MainTests(unittest.TestCase):
         self.assertIn('fetch("jobs/translate-file"', script)
         self.assertIn('document.getElementById("inputTabSelect").addEventListener("change"', script)
         self.assertIn('document.getElementById("clearInput").addEventListener("click", clearCurrentWork)', script)
-        self.assertIn('download.href = "history/" + item.id + "/export?format="', script)
+        self.assertIn('"history/" + item.id + "/export?format="', script)
         self.assertIn('historyFormats.push("original")', script)
         self.assertIn("linguinator_ui_language", script)
 

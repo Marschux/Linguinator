@@ -1397,9 +1397,7 @@ let languageData = null;
       const main = document.createElement("div");
       main.className = "history-main";
       const link = document.createElement("a");
-      link.href = "history/" + item.id;
       link.textContent = historyDisplayName(item);
-      link.download = item.original_name;
       const meta = document.createElement("div");
       meta.className = "history-meta";
       meta.textContent = item.source + " -> " + item.target + " | " + formatBytes(item.size_bytes);
@@ -1424,13 +1422,14 @@ let languageData = null;
       download.textContent = t("download");
       download.title = "Download this history item.";
       const syncDownloadHref = () => {
-        if (format.value === "md") {
-          download.href = "history/" + item.id;
-          download.download = item.filename;
-        } else {
-          download.href = "history/" + item.id + "/export?format=" + encodeURIComponent(format.value);
-          download.download = "";
-        }
+        const href = format.value === "md"
+          ? "history/" + item.id
+          : "history/" + item.id + "/export?format=" + encodeURIComponent(format.value);
+        const filename = format.value === "md" ? item.filename : "";
+        download.href = href;
+        download.download = filename;
+        link.href = href;
+        link.download = filename;
       };
       if (hasOriginal) format.value = "original";
       syncDownloadHref();
