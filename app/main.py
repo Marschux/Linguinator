@@ -65,7 +65,6 @@ CPU_THREADS = int(env_value("LINGUINATOR_CPU_THREADS", "0"))
 CPU_INTEROP_THREADS = int(env_value("LINGUINATOR_CPU_INTEROP_THREADS", "0"))
 DEFAULT_SOURCE = env_value("LINGUINATOR_DEFAULT_SOURCE", "eng_Latn")
 DEFAULT_TARGET = env_value("LINGUINATOR_DEFAULT_TARGET", "deu_Latn")
-OCR_LANGUAGE = env_value("LINGUINATOR_OCR_LANGUAGE", "deu+eng")
 AUTH_ENABLED = env_value("LINGUINATOR_AUTH_ENABLED", "false").lower() in ("1", "true", "yes", "on")
 AUTH_USERNAME = env_value("LINGUINATOR_AUTH_USERNAME", "admin")
 AUTH_PASSWORD = env_value("LINGUINATOR_AUTH_PASSWORD", "")
@@ -1740,7 +1739,38 @@ def ensure_ocr_tools():
         )
 
 
-def ocr_pdf_page(content: bytes, page_number: int) -> str:
+OCR_FALLBACK_LANGUAGE = "eng"
+# Tesseract names a few languages differently than we do, same reason as FALLBACK_LANGUAGE_ALIASES.
+OCR_LANGUAGE_ALIASES = {"arb": "ara", "zho": "chi_sim"}
+
+
+@lru_cache(maxsize=1)
+def installed_ocr_languages() -> Tuple[str, ...]:
+    try:
+        result = subprocess.run(
+            ["tesseract", "--list-langs"], check=True, capture_output=True, text=True
+        )
+    except Exception:
+        return ()
+    # First line is a header ("List of available languages..."), the rest one code per line.
+    return tuple(line.strip() for line in result.stdout.splitlines()[1:] if line.strip())
+
+
+def ocr_language_code(source: str) -> str:
+    """Tesseract language for a job's source language, or English when we cannot serve it."""
+    if source == AUTO_SOURCE:
+        return OCR_FALLBACK_LANGUAGE
+    base = source.split("_")[0]
+    code = OCR_LANGUAGE_ALIASES.get(base, base)
+    installed = installed_ocr_languages()
+    # An unknown -l aborts tesseract and with it the whole job, which is worse than reading one
+    # page in the wrong language. Empty list means we could not ask, then just try the code.
+    if installed and code not in installed:
+        return OCR_FALLBACK_LANGUAGE
+    return code
+
+
+def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE) -> str:
     ensure_ocr_tools()
     with tempfile.TemporaryDirectory() as temp_dir:
         pdf_path = Path(temp_dir) / "input.pdf"
@@ -1764,7 +1794,7 @@ def ocr_pdf_page(content: bytes, page_number: int) -> str:
         )
         image_path = output_prefix.with_suffix(".png")
         result = subprocess.run(
-            ["tesseract", str(image_path), "stdout", "-l", OCR_LANGUAGE],
+            ["tesseract", str(image_path), "stdout", "-l", ocr_language_code(source)],
             check=True,
             capture_output=True,
             text=True,
@@ -1776,6 +1806,7 @@ def extract_pdf_markdown_from_bytes(
     content: bytes,
     content_type: str = "application/pdf",
     page_range: str = "",
+    source: str = AUTO_SOURCE,
 ) -> str:
     if content_type not in ("application/pdf", "application/octet-stream"):
         raise HTTPException(status_code=400, detail="Only PDF uploads are supported")
@@ -1799,7 +1830,7 @@ def extract_pdf_markdown_from_bytes(
         text = re.sub(r"[ \t]+\n", "\n", text).strip()
         needs_ocr = not text or len(text) < PDF_LOW_TEXT_CHARS
         if needs_ocr:
-            ocr_text = ocr_pdf_page(content, index)
+            ocr_text = ocr_pdf_page(content, index, source)
             if ocr_text:
                 text = ocr_text
 
@@ -1814,7 +1845,7 @@ def extract_pdf_markdown_from_bytes(
         raise HTTPException(
             status_code=422,
             detail=f"No extractable text found. This PDF may be scanned, image-only, or protected. "
-                   f"OCR is configured for {OCR_LANGUAGE}, but no readable text was produced.",
+                   f"OCR ran with {ocr_language_code(source)}, but no readable text was produced.",
         )
     return markdown
 
@@ -3085,9 +3116,9 @@ def export_xliff_with_translated_text(content: bytes, translated_text: str) -> b
     return ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
-async def extract_pdf_markdown(file: UploadFile, page_range: str = "") -> str:
+async def extract_pdf_markdown(file: UploadFile, page_range: str = "", source: str = AUTO_SOURCE) -> str:
     content = await read_upload_bytes(file, "PDF")
-    return extract_pdf_markdown_from_bytes(content, file.content_type or "application/pdf", page_range)
+    return extract_pdf_markdown_from_bytes(content, file.content_type or "application/pdf", page_range, source)
 
 
 def run_url_translate_job(job_id: str, url: str, source: str, target: str):
@@ -3223,7 +3254,7 @@ def run_pdf_translate_job(
 ):
     try:
         update_job(job_id, status="running", message="Extracting PDF", started_at=time.time())
-        markdown = extract_pdf_markdown_from_bytes(content, content_type, page_range)
+        markdown = extract_pdf_markdown_from_bytes(content, content_type, page_range, source)
         if source == AUTO_SOURCE:
             source = detect_source_language(markdown)
             update_job(job_id, source=source)
@@ -3354,7 +3385,7 @@ def health():
         "max_chars": MAX_CHARS,
         "max_file_mb": MAX_FILE_MB,
         "ocr_available": ocr_available,
-        "ocr_language": OCR_LANGUAGE,
+        "ocr_languages": list(installed_ocr_languages()) if ocr_available else [],
         "model_idle_unload_enabled": MODEL_IDLE_UNLOAD_ENABLED,
         "model_idle_seconds": MODEL_IDLE_SECONDS,
         "job_workers": JOB_WORKERS,
@@ -3796,8 +3827,12 @@ def translate(request: TranslateRequest):
 
 
 @app.post("/extract-pdf", response_class=PlainTextResponse)
-async def extract_pdf(file: UploadFile = File(...), page_range: str = Form("")):
-    return await extract_pdf_markdown(file, page_range)
+async def extract_pdf(
+    file: UploadFile = File(...),
+    page_range: str = Form(""),
+    source: str = Form(AUTO_SOURCE),
+):
+    return await extract_pdf_markdown(file, page_range, source)
 
 
 @app.post("/extract-docx", response_class=PlainTextResponse)
@@ -3877,7 +3912,7 @@ async def translate_pdf(
     target: str = Form(DEFAULT_TARGET),
     page_range: str = Form(""),
 ):
-    markdown = await extract_pdf_markdown(file, page_range)
+    markdown = await extract_pdf_markdown(file, page_range, source)
     translated = []
     for section in re.split(r"(?m)^# Page ", markdown):
         section = section.strip()

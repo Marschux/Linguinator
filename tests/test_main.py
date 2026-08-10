@@ -953,7 +953,41 @@ class MainTests(unittest.TestCase):
                 markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
 
         self.assertIn("OCR text", markdown)
-        mocked_ocr.assert_called_once_with(b"%PDF", 1)
+        mocked_ocr.assert_called_once_with(b"%PDF", 1, main.AUTO_SOURCE)
+
+    def test_ocr_language_code_maps_source_language_to_tesseract(self):
+        with patch.object(main, "installed_ocr_languages", return_value=("deu", "eng", "fra", "ara", "chi_sim")):
+            self.assertEqual(main.ocr_language_code("deu_Latn"), "deu")
+            self.assertEqual(main.ocr_language_code("fra_Latn"), "fra")
+            # Tesseract names these differently than we do.
+            self.assertEqual(main.ocr_language_code("arb_Arab"), "ara")
+            self.assertEqual(main.ocr_language_code("zho_Hans"), "chi_sim")
+            self.assertEqual(main.ocr_language_code(main.AUTO_SOURCE), "eng")
+
+    def test_ocr_language_code_falls_back_when_the_package_is_missing(self):
+        # An unknown -l aborts tesseract and takes the whole job with it.
+        with patch.object(main, "installed_ocr_languages", return_value=("deu", "eng")):
+            self.assertEqual(main.ocr_language_code("swe_Latn"), "eng")
+
+    def test_ocr_pdf_page_reads_in_the_jobs_source_language(self):
+        completed = SimpleNamespace(stdout="scanned text")
+
+        with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
+            with patch.object(main, "installed_ocr_languages", return_value=("deu", "eng", "rus")):
+                with patch.object(main.subprocess, "run", return_value=completed) as mocked_run:
+                    main.ocr_pdf_page(b"%PDF", 1, "rus_Cyrl")
+
+        tesseract_call = mocked_run.call_args_list[-1].args[0]
+        self.assertEqual(tesseract_call[-2:], ["-l", "rus"])
+
+    def test_pdf_extraction_passes_the_source_language_to_ocr(self):
+        document = FakeDocument([FakePage("")])
+
+        with patch.object(main.pymupdf, "open", return_value=document):
+            with patch.object(main, "ocr_pdf_page", return_value="OCR text") as mocked_ocr:
+                main.extract_pdf_markdown_from_bytes(b"%PDF", source="fra_Latn")
+
+        mocked_ocr.assert_called_once_with(b"%PDF", 1, "fra_Latn")
 
     def test_create_text_pdf_returns_pdf_document(self):
         content = main.create_text_pdf("Translated text\n\nSecond paragraph")
