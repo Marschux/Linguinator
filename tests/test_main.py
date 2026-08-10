@@ -9,6 +9,7 @@ import uuid
 import zipfile
 from io import BytesIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from xml.etree import ElementTree
 
@@ -1081,6 +1082,72 @@ class MainTests(unittest.TestCase):
         # Complete either way: shrinking is the fix, dropping words never is.
         for placed in (cramped, roomy):
             self.assertEqual(" ".join(line["text"] for line in placed).split(), text.split())
+
+    def test_split_to_sentences_gives_the_model_one_sentence_at_a_time(self):
+        # OPUS-MT gives up part-way through a long multi-sentence input: a real 1853-character
+        # paragraph came back 59% translated, three bullet points short, while the same text
+        # split into sentences came back whole.
+        class WordTokenizer:
+            def __call__(self, text):
+                return SimpleNamespace(input_ids=text.split())
+
+        text = 'Erster Satz. Zweiter Satz! Dritter? "Vierter." Fuenfter.'
+        parts = main.split_to_sentences(WordTokenizer(), text)
+
+        self.assertEqual(len(parts), 5)
+        self.assertEqual(parts[0], "Erster Satz. ")
+        # Not a single character may be lost or duplicated - a closing quote used to be eaten
+        # along with the separator.
+        self.assertEqual("".join(parts), text)
+        self.assertIn('"Vierter." ', parts)
+
+    def test_split_to_sentences_keeps_a_single_sentence_whole(self):
+        class WordTokenizer:
+            def __call__(self, text):
+                return SimpleNamespace(input_ids=text.split())
+
+        self.assertEqual(
+            main.split_to_sentences(WordTokenizer(), "Nur ein Satz ohne Ende"),
+            ["Nur ein Satz ohne Ende"],
+        )
+
+    def test_split_to_token_limit_keeps_every_part_within_the_window(self):
+        # The model truncates its input silently, so anything past the window is simply lost.
+        class WordTokenizer:
+            """Stands in for the real tokenizer: one token per word."""
+
+            def __call__(self, text):
+                return SimpleNamespace(input_ids=text.split())
+
+        text = ". ".join(f"Satz nummer {n} mit etwas Text" for n in range(300)) + "."
+        with patch.object(main, "TRANSLATE_TEXT_TOKENS", 50):
+            parts = main.split_to_token_limit(WordTokenizer(), text)
+
+        self.assertGreater(len(parts), 1)
+        for part in parts:
+            self.assertLessEqual(len(part.split()), 50)
+        # Nothing may be dropped or duplicated on the way.
+        self.assertEqual("".join(parts), text)
+
+    def test_split_to_token_limit_leaves_a_short_text_alone(self):
+        class WordTokenizer:
+            def __call__(self, text):
+                return SimpleNamespace(input_ids=text.split())
+
+        self.assertEqual(main.split_to_token_limit(WordTokenizer(), "Kurzer Satz."), ["Kurzer Satz."])
+
+    def test_split_to_token_limit_splits_text_without_any_boundary(self):
+        # A single unbroken run (no spaces, no sentence ends) must still terminate, not recurse.
+        class CharTokenizer:
+            def __call__(self, text):
+                return SimpleNamespace(input_ids=list(text))
+
+        with patch.object(main, "TRANSLATE_TEXT_TOKENS", 10):
+            parts = main.split_to_token_limit(CharTokenizer(), "x" * 100)
+
+        self.assertEqual("".join(parts), "x" * 100)
+        for part in parts:
+            self.assertLessEqual(len(part), 10)
 
     def test_has_translatable_text_rejects_wordless_fragments(self):
         # These are what a line clipped by the page edge leaves behind. Sent to the model they

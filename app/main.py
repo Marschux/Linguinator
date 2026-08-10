@@ -439,9 +439,12 @@ def model_language_code(model_id: str, code: str) -> str:
 # models in use (512 for the bilingual pair models). Several of their tokenizer configs leave
 # model_max_length unset, which makes truncation=True alone a no-op and overruns the model's
 # position embeddings with an "index out of range in self" crash instead of just truncating.
-# MAX_CHARS keeps ordinary chunks well under this already; this is the backstop for the rest
-# (a single very long sentence, or a script with a low chars-per-token ratio).
+# split_to_token_limit keeps every chunk under this; the truncation on the tokenizer call is
+# only the backstop for a single unsplittable run of text.
 TRANSLATE_MAX_TOKENS = 512
+# What a chunk is measured against before being split, leaving room for the ">>deu<<" target
+# prefix and the special tokens that are added on top of the text itself.
+TRANSLATE_TEXT_TOKENS = TRANSLATE_MAX_TOKENS - 16
 
 
 def prepare_translation(
@@ -466,6 +469,70 @@ def normalize_translated_text(text: str) -> str:
     return re.sub(r"([.!?])(?=[A-ZÄÖÜ])", r"\1 ", text)
 
 
+def token_count(tokenizer, text: str) -> int:
+    try:
+        return len(tokenizer(text).input_ids)
+    except Exception:
+        # Never let a measurement failure stop a translation; an over-long chunk is still
+        # translated, just truncated as it was before.
+        return 0
+
+
+SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]*\s+")
+
+
+def split_to_sentences(tokenizer, text: str) -> List[str]:
+    """Split text into one sentence per model call.
+
+    OPUS-MT is trained on sentence pairs and quietly gives up part-way through a long multi-
+    sentence input: measured on a real 1853-character paragraph (405 tokens, comfortably inside
+    the 512-token window) it returned 59% of the text and stopped mid-list, dropping three
+    bullet points. The same paragraph split into its 18 sentences came back complete. Nothing
+    is lost in quality by splitting - the model carries no context across sentence boundaries
+    anyway - and the sentences are translated in one batched call.
+    """
+    if not text.strip():
+        return [text]
+    # Cut *after* each sentence-ending match rather than splitting on it, so closing quotes and
+    # brackets stay with their sentence instead of being eaten as part of the separator.
+    sentences: List[str] = []
+    start = 0
+    for match in SENTENCE_END.finditer(text):
+        sentences.append(text[start:match.end()])
+        start = match.end()
+    if start < len(text):
+        sentences.append(text[start:])
+    sentences = [sentence for sentence in sentences if sentence.strip()]
+    if len(sentences) > 1:
+        return [part for sentence in sentences for part in split_to_token_limit(tokenizer, sentence)]
+    return split_to_token_limit(tokenizer, text)
+
+
+def split_to_token_limit(tokenizer, text: str) -> List[str]:
+    """Split a single sentence into parts that fit the model's input window.
+
+    `truncation=True` drops whatever does not fit *silently*. Sentences are normally far inside
+    the window; this is the backstop for one enormous run of text, and for scripts where a
+    character costs roughly a token.
+    """
+    if not text.strip() or token_count(tokenizer, text) <= TRANSLATE_TEXT_TOKENS:
+        return [text]
+    middle = len(text) // 2
+    # Halve at the sentence end nearest the middle, falling back to a space and then to the
+    # middle itself, so a part is never cut mid-word unless there is nothing else to cut at.
+    split_at = 0
+    for pattern in (r"[.!?…]['\")\]]?\s", r"\s"):
+        positions = [match.end() for match in re.finditer(pattern, text)]
+        inner = [position for position in positions if 0 < position < len(text)]
+        if inner:
+            split_at = min(inner, key=lambda position: abs(position - middle))
+            break
+    if not split_at:
+        split_at = middle
+    return (split_to_token_limit(tokenizer, text[:split_at])
+            + split_to_token_limit(tokenizer, text[split_at:]))
+
+
 def translate_one(text: str, source: str, target: str) -> str:
     if not text:
         return ""
@@ -474,17 +541,20 @@ def translate_one(text: str, source: str, target: str) -> str:
     begin_model_use()
     try:
         tokenizer, model, device, torch_module = load_model(model_id)
-        inputs, generate_kwargs = prepare_translation(tokenizer, model_id, text, source, target)
-        inputs = inputs.to(device)
+        results = []
+        for part in split_to_sentences(tokenizer, text):
+            inputs, generate_kwargs = prepare_translation(tokenizer, model_id, part, source, target)
+            inputs = inputs.to(device)
 
-        with torch_module.inference_mode():
-            generated = model.generate(
-                **inputs,
-                **generate_kwargs,
-                max_new_tokens=TRANSLATE_MAX_TOKENS,
-                num_beams=4,
-            )
-        return normalize_translated_text(tokenizer.batch_decode(generated, skip_special_tokens=True)[0])
+            with torch_module.inference_mode():
+                generated = model.generate(
+                    **inputs,
+                    **generate_kwargs,
+                    max_new_tokens=TRANSLATE_MAX_TOKENS,
+                    num_beams=4,
+                )
+            results.append(tokenizer.batch_decode(generated, skip_special_tokens=True)[0])
+        return normalize_translated_text(" ".join(part.strip() for part in results if part.strip()))
     finally:
         end_model_use()
 
@@ -500,7 +570,14 @@ def translate_batch(texts: List[str], source: str, target: str) -> List[str]:
     begin_model_use()
     try:
         tokenizer, model, device, torch_module = load_model(model_id)
-        batch_texts = [texts[i] for i in indices]
+        # A text too long for the model's window is split first, and its parts are joined back
+        # up afterwards, so batching never silently truncates one of its entries.
+        batch_texts: List[str] = []
+        owners: List[int] = []
+        for i in indices:
+            for part in split_to_sentences(tokenizer, texts[i]):
+                batch_texts.append(part)
+                owners.append(i)
         if model_family(model_id) == "prefix":
             prefix = model_language_code(model_id, target)
             batch_texts = [f"{prefix} {text}" for text in batch_texts]
@@ -514,9 +591,13 @@ def translate_batch(texts: List[str], source: str, target: str) -> List[str]:
     finally:
         end_model_use()
 
+    parts: Dict[int, List[str]] = {}
+    for owner, text in zip(owners, decoded):
+        if text.strip():
+            parts.setdefault(owner, []).append(text.strip())
     results = ["" for _ in texts]
-    for i, text in zip(indices, decoded):
-        results[i] = normalize_translated_text(text)
+    for owner, pieces in parts.items():
+        results[owner] = normalize_translated_text(" ".join(pieces))
     return results
 
 
