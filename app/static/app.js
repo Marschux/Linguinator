@@ -320,6 +320,7 @@ let languageData = null;
       slk: "Slovak",
       slv: "Slovenian",
       spa: "Spanish",
+      sqi: "Albanian",
       srp: "Serbian",
       swe: "Swedish",
       tam: "Tamil",
@@ -343,7 +344,7 @@ let languageData = null;
       lao: "LA", lit: "LT", lvs: "LV", mal: "IN", mar: "IN", mkd: "MK",
       mlt: "MT", mya: "MM", nld: "NL", nob: "NO", npi: "NP", ory: "IN",
       pan: "IN", pes: "IR", pol: "PL", por: "PT", ron: "RO", rus: "RU",
-      sin: "LK", slk: "SK", slv: "SI", spa: "ES", srp: "RS", swe: "SE",
+      sin: "LK", slk: "SK", slv: "SI", spa: "ES", sqi: "AL", srp: "RS", swe: "SE",
       tam: "IN", tel: "IN", tha: "TH", tur: "TR", ukr: "UA", urd: "PK",
       uzn: "UZ", vie: "VN", zho: "CN"
     };

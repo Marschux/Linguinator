@@ -115,6 +115,10 @@ PDF_SCRIPT_FONT_CANDIDATES = {
         "/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf",
         "C:/Windows/Fonts/arial.ttf",
     ),
+    "thai": (
+        "/usr/share/fonts/truetype/noto/NotoSansThai-Regular.ttf",
+        "C:/Windows/Fonts/leelawad.ttf",
+    ),
 }
 
 
@@ -130,6 +134,8 @@ def detect_pdf_script(text: str) -> str:
             return "devanagari"
         if 0x0590 <= codepoint <= 0x05FF:
             return "hebrew"
+        if 0x0E00 <= codepoint <= 0x0E7F:
+            return "thai"
     return ""
 # The language picker's contents, and simultaneously the alias table used to look up OPUS-MT
 # pair models (whose ids use iso-639-1 codes) and to build the >>xxx<< prefix token for the
@@ -141,7 +147,8 @@ CORE_LANGUAGES = {
     "cs": "ces_Latn", "sv": "swe_Latn", "da": "dan_Latn", "fi": "fin_Latn", "el": "ell_Grek",
     "ro": "ron_Latn", "hu": "hun_Latn", "bg": "bul_Cyrl", "hr": "hrv_Latn", "sk": "slk_Latn",
     "et": "est_Latn", "ar": "arb_Arab", "zh": "zho_Hans", "ja": "jpn_Jpan", "he": "heb_Hebr",
-    "hi": "hin_Deva", "vi": "vie_Latn", "id": "ind_Latn",
+    "hi": "hin_Deva", "vi": "vie_Latn", "id": "ind_Latn", "tr": "tur_Latn", "no": "nob_Latn",
+    "sq": "sqi_Latn", "ko": "kor_Hang", "th": "tha_Thai",
 }
 INTERNAL_TO_ISO_639_1 = {internal: short for short, internal in CORE_LANGUAGES.items()}
 
@@ -166,7 +173,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.5.2", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.5.3", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
