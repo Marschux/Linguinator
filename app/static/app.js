@@ -24,6 +24,7 @@ let languageData = null;
         source: "Source",
         target: "Target",
         searchLanguage: "Search language...",
+        detection: "Detection",
         favorites: "Favorites",
         allLanguages: "All languages",
         loading: "Loading...",
@@ -82,6 +83,7 @@ let languageData = null;
         source: "Quelle",
         target: "Ziel",
         searchLanguage: "Sprache suchen...",
+        detection: "Erkennung",
         favorites: "Favoriten",
         allLanguages: "Alle Sprachen",
         loading: "Laedt...",
@@ -140,6 +142,7 @@ let languageData = null;
         source: "Origen",
         target: "Destino",
         searchLanguage: "Buscar idioma...",
+        detection: "Deteccion",
         favorites: "Favoritos",
         allLanguages: "Todos los idiomas",
         loading: "Cargando...",
@@ -198,6 +201,7 @@ let languageData = null;
         source: "Source",
         target: "Cible",
         searchLanguage: "Rechercher une langue...",
+        detection: "Detection",
         favorites: "Favoris",
         allLanguages: "Toutes les langues",
         loading: "Chargement...",
@@ -737,10 +741,16 @@ let languageData = null;
       search.addEventListener("input", () => filterLanguageMenu(menu, search.value));
       menu.appendChild(search);
 
-      addLanguageGroup(menu, t("favorites"));
+      // Auto-detect gets its own group: it is a setting, not a language, and sitting inside
+      // "Favorites" it read as one of them.
       if (id === "source") {
+        addLanguageGroup(menu, t("detection"));
         addLanguageMenuOption(menu, id, AUTO_LANGUAGE, selectedValue);
+        const autoDivider = document.createElement("div");
+        autoDivider.className = "language-divider";
+        menu.appendChild(autoDivider);
       }
+      addLanguageGroup(menu, t("favorites"));
       for (const language of favorites) {
         addLanguageMenuOption(menu, id, language, selectedValue);
       }
