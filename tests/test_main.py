@@ -947,18 +947,48 @@ class MainTests(unittest.TestCase):
         self.assertEqual([line["text"] for line in lines], ["Hello world", "Second"])
         self.assertGreater(lines[0]["right"], 90.0)
 
-    def test_group_pdf_lines_accumulates_runs_reported_at_the_same_position(self):
-        # Runs drawn in one text block all report the position of the block, so the second run
-        # has to continue from the end of the first instead of restarting there.
+    def test_group_pdf_lines_takes_the_furthest_right_edge_of_overlapping_runs(self):
+        # Runs reported at the same position used to be treated as continuing from each other and
+        # their widths added up, which is how pypdf reported a text block. MuPDF gives every span
+        # its own real x, so adding widths only inflates the line's right edge - and that edge is
+        # what the cell-gap check below measures against.
         runs = [
             {"text": "Hello", "x": 50.0, "y": 700.0, "size": 11.0, "width": 30.0},
-            {"text": "world", "x": 50.0, "y": 700.0, "size": 11.0, "width": 30.0},
+            {"text": "world", "x": 50.0, "y": 700.0, "size": 11.0, "width": 40.0},
         ]
 
         lines = main.group_pdf_lines(runs)
 
         self.assertEqual(lines[0]["text"], "Helloworld")
-        self.assertAlmostEqual(lines[0]["right"], 110.0)
+        self.assertAlmostEqual(lines[0]["right"], 90.0)
+
+    def test_group_pdf_lines_splits_table_cells_on_the_same_baseline(self):
+        # Three cells of a table row share one baseline. Merged into a single line, the row's
+        # translation gets reflowed across the whole table width and printed over the columns
+        # next to it - which is what "Typ Minimum empfohlen" overlapping itself looked like.
+        runs = [
+            {"text": "RAM", "x": 50.0, "y": 700.0, "size": 9.0, "width": 25.0},
+            {"text": "8 GB", "x": 200.0, "y": 700.0, "size": 9.0, "width": 25.0},
+            {"text": "16 GB", "x": 400.0, "y": 700.0, "size": 9.0, "width": 30.0},
+        ]
+
+        lines = main.group_pdf_lines(runs)
+
+        self.assertEqual([line["text"] for line in lines], ["RAM", "8 GB", "16 GB"])
+        self.assertEqual([line["x"] for line in lines], [50.0, 200.0, 400.0])
+
+    def test_group_pdf_lines_keeps_ordinary_word_spacing_in_one_line(self):
+        # The mirror case: normal gaps between words, and even a wide tab stop, must not be read
+        # as a cell boundary or every justified line falls apart into fragments.
+        runs = [
+            {"text": "Ein", "x": 50.0, "y": 700.0, "size": 11.0, "width": 18.0},
+            {"text": "kurzer", "x": 71.0, "y": 700.0, "size": 11.0, "width": 30.0},
+            {"text": "Satz", "x": 110.0, "y": 700.0, "size": 11.0, "width": 22.0},
+        ]
+
+        lines = main.group_pdf_lines(runs)
+
+        self.assertEqual([line["text"] for line in lines], ["Ein kurzer Satz"])
 
     def test_group_pdf_paragraphs_splits_on_gaps_and_indentation(self):
         lines = [

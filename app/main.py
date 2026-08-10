@@ -1517,11 +1517,20 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
     return runs
 
 
+# Runs on one baseline further apart than this (in multiples of the run's own font size) belong
+# to separate cells of a table row rather than to one sentence. Wide enough to leave tab stops
+# and justified word spacing inside a line alone.
+PDF_CELL_GAP = 2.0
+
+
 def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Merge runs that share a baseline into lines.
+    """Merge runs that share a baseline into lines, keeping table cells apart.
 
     Grouping by baseline is the one grouping PDFs make reliable, which is why the layout
-    pipeline builds on it instead of trying to detect blocks or columns geometrically.
+    pipeline builds on it instead of trying to detect blocks or columns geometrically. But a
+    baseline also holds every cell of a table row, and bridging those with a space merges the
+    row into one line whose translation is then reflowed across the whole table width, printed
+    over the neighbouring columns.
     """
     baselines: List[List[Dict[str, Any]]] = []
     for run in sorted(runs, key=lambda item: -item["y"]):
@@ -1532,37 +1541,38 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     lines: List[Dict[str, Any]] = []
     for baseline in baselines:
-        line = None
-        # A line can mix faces (a bold lead-in followed by regular text). Weighted by characters
-        # so the face most of the line is actually set in decides how the translation is drawn.
-        bold_chars = 0
-        total_chars = 0
+        cells: List[Dict[str, Any]] = []
         for run in sorted(baseline, key=lambda item: item["x"]):
             width = run.get("width") or pdf_measure_text(run["text"], run["size"])
-            run_length = len(run["text"].strip())
-            total_chars += run_length
-            if run.get("bold"):
-                bold_chars += run_length
-            if line is None:
-                line = {
+            current = cells[-1] if cells else None
+            gap = run["x"] - current["right"] if current else 0.0
+            if current and gap <= PDF_CELL_GAP * run["size"]:
+                separator = " " if gap > 0.2 * run["size"] and not current["text"].endswith(" ") else ""
+                current["text"] += separator + run["text"]
+                current["right"] = max(current["right"], run["x"] + width)
+                current["size"] = max(current["size"], run["size"])
+            else:
+                current = {
                     "text": run["text"],
                     "x": run["x"],
                     "y": run["y"],
                     "right": run["x"] + width,
                     "size": run["size"],
+                    "bold_chars": 0,
+                    "total_chars": 0,
                 }
-                continue
-            gap = run["x"] - line["right"]
-            separator = " " if gap > 0.2 * run["size"] and not line["text"].endswith(" ") else ""
-            line["text"] += separator + run["text"]
-            # Several runs drawn in one text block report the same position, so a run that does
-            # not start beyond the current end continues from it.
-            line["right"] = max(run["x"], line["right"]) + width
-            line["size"] = max(line["size"], run["size"])
-        line["text"] = re.sub(r"\s+", " ", line["text"]).strip()
-        line["bold"] = bold_chars * 2 > total_chars
-        if line["text"]:
-            lines.append(line)
+                cells.append(current)
+            # A line can mix faces (a bold lead-in followed by regular text). Weighted by
+            # characters so the face most of the line is set in decides how it is drawn.
+            length = len(run["text"].strip())
+            current["total_chars"] += length
+            if run.get("bold"):
+                current["bold_chars"] += length
+        for cell in cells:
+            cell["text"] = re.sub(r"\s+", " ", cell["text"]).strip()
+            cell["bold"] = cell.pop("bold_chars") * 2 > cell.pop("total_chars")
+            if cell["text"]:
+                lines.append(cell)
     return lines
 
 
