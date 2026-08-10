@@ -1050,6 +1050,35 @@ class MainTests(unittest.TestCase):
         self.assertGreater(len(placed), 2)
         self.assertEqual(" ".join(line["text"] for line in placed).split(), long_text.split())
 
+    def test_reflow_paragraph_tightens_slightly_rather_than_adding_a_line(self):
+        # The substitute font runs wider than the document's own, so text that filled one line
+        # in the original spills into two. A few percent smaller is better than an extra line.
+        text = "Gerade eben zu breit"
+        # Derived from the measured width, not hard-coded, so the test does not depend on which
+        # font the machine running it happens to embed: 3% too narrow needs ~3% of tightening.
+        width = main.pdf_measure_text(text, 11.0) * 0.97
+        paragraph = {"lines": [
+            {"text": "x", "x": 50.0, "y": 700.0, "right": 50.0 + width, "size": 11.0},
+        ]}
+        # Confirm the premise: at full size this really does need a second line.
+        self.assertGreater(len(main.wrap_text_to_width(text, width, 11.0)), 1)
+
+        placed = main.reflow_paragraph(paragraph, text)
+
+        self.assertEqual(len(placed), 1)
+        self.assertLess(placed[0]["size"], 11.0)
+        self.assertGreaterEqual(placed[0]["size"], 11.0 * main.PDF_LAYOUT_TIGHTEN_SCALE)
+
+    def test_reflow_paragraph_leaves_text_that_already_fits_at_full_size(self):
+        paragraph = {"lines": [
+            {"text": "x", "x": 50.0, "y": 700.0, "right": 300.0, "size": 11.0},
+        ]}
+
+        placed = main.reflow_paragraph(paragraph, "Kurz")
+
+        self.assertEqual(len(placed), 1)
+        self.assertEqual(placed[0]["size"], 11.0)
+
     def test_reflow_paragraph_spaces_overflow_lines_at_the_shrunken_size(self):
         # Overflow lines are set at the shrunken size, so spacing them at the original leading
         # pushes them further down than they need to go - into the next paragraph.
@@ -1077,8 +1106,9 @@ class MainTests(unittest.TestCase):
         cramped = main.reflow_paragraph(paragraph, text, floor=690.0)
         roomy = main.reflow_paragraph(paragraph, text, floor=400.0)
 
+        # Room below still means less shrinking. Not asserting an absolute size here: how far
+        # this particular text has to shrink depends on the font the machine embeds.
         self.assertGreater(roomy[0]["size"], cramped[0]["size"])
-        self.assertEqual(roomy[0]["size"], 11.0)
         # Complete either way: shrinking is the fix, dropping words never is.
         for placed in (cramped, roomy):
             self.assertEqual(" ".join(line["text"] for line in placed).split(), text.split())
@@ -1196,6 +1226,30 @@ class MainTests(unittest.TestCase):
         self.assertIn("Hallo Welt", text)
         self.assertNotIn("Hello world", text)
         self.assertIn(",", text)
+
+    def test_paragraph_width_limit_uses_the_space_beside_the_paragraph(self):
+        # A heading's own ink ends where the original wording ended, which says nothing about
+        # how much room it had. Measuring against that made almost every paragraph wrap early.
+        heading = {"lines": [{"text": "Heading", "x": 50.0, "y": 700.0, "right": 150.0, "size": 14.0}]}
+        below = {"lines": [{"text": "body", "x": 50.0, "y": 680.0, "right": 500.0, "size": 11.0}]}
+
+        limit = main.paragraph_width_limit(heading, [heading, below], 595.0)
+
+        self.assertEqual(limit, 595.0 - main.PDF_LAYOUT_EDGE_MARGIN)
+
+    def test_paragraph_width_limit_stops_at_the_next_column(self):
+        left = {"lines": [{"text": "cell", "x": 50.0, "y": 700.0, "right": 150.0, "size": 10.0}]}
+        right = {"lines": [{"text": "other", "x": 300.0, "y": 700.0, "right": 400.0, "size": 10.0}]}
+
+        self.assertEqual(main.paragraph_width_limit(left, [left, right], 595.0), 298.0)
+
+    def test_paragraph_width_limit_never_reports_less_than_the_text_itself(self):
+        # A paragraph overlapping something to its right must still get its own width, not a
+        # negative one.
+        wide = {"lines": [{"text": "wide", "x": 50.0, "y": 700.0, "right": 400.0, "size": 10.0}]}
+        overlapping = {"lines": [{"text": "x", "x": 60.0, "y": 700.0, "right": 70.0, "size": 10.0}]}
+
+        self.assertEqual(main.paragraph_width_limit(wide, [wide, overlapping], 595.0), 400.0)
 
     def test_paragraph_floor_ignores_paragraphs_beside_the_column(self):
         target = {"lines": [{"text": "cell", "x": 50.0, "y": 700.0, "right": 150.0, "size": 10.0}]}

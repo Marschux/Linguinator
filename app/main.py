@@ -83,6 +83,12 @@ PDF_FOOTER_FONT_SIZE = 9
 PDF_AVG_CHAR_WIDTH = 0.5
 # How far the overlay may shrink the font to make a longer translation fit its original lines.
 PDF_LAYOUT_MIN_SCALE = 0.7
+# Kept clear of the page edge when a paragraph has nothing to its right.
+PDF_LAYOUT_EDGE_MARGIN = 20.0
+# How far a paragraph may be tightened purely to keep the original's line count. 0.9 because no
+# paragraph in the test documents needed more than that to absorb the substitute font's extra
+# width; past it, an extra line is the lesser evil.
+PDF_LAYOUT_TIGHTEN_SCALE = 0.9
 # Layout-PDF paragraphs are usually short, so translating one per model call wastes most of
 # each call on fixed beam-search overhead. Batched via the tensor's batch dimension (not string
 # concatenation), so paragraph boundaries stay exact; kept small to cap the extra padding memory
@@ -1859,8 +1865,35 @@ def paragraph_floor(paragraph: Dict[str, Any], others: List[Dict[str, Any]]) -> 
     return floor
 
 
+def paragraph_width_limit(
+    paragraph: Dict[str, Any], others: List[Dict[str, Any]], page_width: float
+) -> float:
+    """How far right the paragraph may actually run, in absolute page coordinates.
+
+    Its own text ends where the *original* wording happened to end, which is not the width it
+    had available - a heading alone on its line usually has most of the page to its right. The
+    embedded font runs wider than the document's, so measuring against the original's ink makes
+    almost every paragraph wrap one line early. The limit is whatever stands to its right on the
+    same baselines, or the page edge.
+    """
+    limit = page_width - PDF_LAYOUT_EDGE_MARGIN
+    for line in paragraph["lines"]:
+        for other in others:
+            if other is paragraph:
+                continue
+            for other_line in other["lines"]:
+                if abs(other_line["y"] - line["y"]) > 0.6 * max(line["size"], other_line["size"]):
+                    continue
+                if other_line["x"] > line["x"]:
+                    limit = min(limit, other_line["x"] - 2)
+    return max(limit, max(line["right"] for line in paragraph["lines"]))
+
+
 def reflow_paragraph(
-    paragraph: Dict[str, Any], text: str, floor: Optional[float] = None
+    paragraph: Dict[str, Any],
+    text: str,
+    floor: Optional[float] = None,
+    width_limit: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """Lay the translation out in the column the paragraph's original lines occupied.
 
@@ -1873,7 +1906,8 @@ def reflow_paragraph(
     """
     lines = paragraph["lines"]
     left = min(line["x"] for line in lines)
-    width = max(max(line["right"] for line in lines) - left, 10.0)
+    right = width_limit if width_limit is not None else max(line["right"] for line in lines)
+    width = max(right - left, 10.0)
     # A paragraph can start with a larger heading line merged into smaller body lines (grouped
     # for translation context, see group_pdf_paragraphs). Sizing the whole reflow off the max
     # would blow the body text up to heading size, so use whichever size the paragraph mostly is.
@@ -1906,6 +1940,14 @@ def reflow_paragraph(
 
     size = base_size
     wrapped = wrap_text_to_width(text, width, size, bold, serif)
+    # The embedded substitute font runs wider than most fonts documents are set in, so text that
+    # filled n lines in the original spills into n+1 here - measured across the test documents,
+    # 13 of 21 paragraphs needed an extra line for *identical* text, and not one of them needed
+    # more than 10% off to fit again. Tighten by up to that before accepting the extra line: a
+    # slightly smaller line reads better than a paragraph that grew one.
+    while len(wrapped) > len(lines) and size > base_size * PDF_LAYOUT_TIGHTEN_SCALE:
+        size = max(size * 0.98, base_size * PDF_LAYOUT_TIGHTEN_SCALE)
+        wrapped = wrap_text_to_width(text, width, size, bold, serif)
     while not fits(len(wrapped), size) and size > base_size * PDF_LAYOUT_MIN_SCALE:
         size = max(size * 0.95, base_size * PDF_LAYOUT_MIN_SCALE)
         wrapped = wrap_text_to_width(text, width, size, bold, serif)
@@ -1991,7 +2033,10 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
             if (index < len(translations) and translations[index].strip()
                     and has_translatable_text(paragraph["text"])):
                 lines.extend(reflow_paragraph(
-                    paragraph, translations[index], paragraph_floor(paragraph, page["paragraphs"])
+                    paragraph,
+                    translations[index],
+                    paragraph_floor(paragraph, page["paragraphs"]),
+                    paragraph_width_limit(paragraph, page["paragraphs"], page["width"]),
                 ))
             index += 1
         overlay_pages.append({
