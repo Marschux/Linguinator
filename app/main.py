@@ -12,10 +12,12 @@ import subprocess
 import tempfile
 import threading
 import time
+import unicodedata
 import uuid
 import zipfile
 from collections import Counter
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from functools import lru_cache
 from html.parser import HTMLParser
 from io import BytesIO, StringIO
@@ -96,6 +98,32 @@ PDF_FONT_BOLD_CANDIDATES = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "C:/Windows/Fonts/arialbd.ttf",
 )
+# Layout PDFs keep the original's serif/sans character: a Times-set contract redrawn in DejaVu
+# Sans reads as a different document even when every line sits in the right place.
+PDF_SERIF_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+    "C:/Windows/Fonts/times.ttf",
+)
+PDF_SERIF_BOLD_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
+    "C:/Windows/Fonts/timesbd.ttf",
+)
+# The four font resources a generated PDF declares, as (bold, serif).
+PDF_FONT_FACES = {"F1": (False, False), "F2": (True, False), "F3": (False, True), "F4": (True, True)}
+# Serif families as they turn up in PDF font names. MuPDF's own "serifed" span flag comes from
+# the font descriptor, which plenty of sans fonts set wrongly (Roboto reports serifed), so the
+# name is the more reliable signal - anything calling itself "sans" wins over these markers.
+PDF_SERIF_NAME_MARKERS = (
+    "serif", "times", "georgia", "garamond", "cambria", "palatino", "book",
+    "roman", "minion", "baskerville", "constantia", "charter", "century",
+)
+
+
+def pdf_font_is_serif(name: str) -> bool:
+    lowered = (name or "").lower()
+    if "sans" in lowered:
+        return False
+    return any(marker in lowered for marker in PDF_SERIF_NAME_MARKERS)
 # DejaVu Sans (the default embedded PDF font) has no CJK/Arabic/Devanagari/Hebrew glyphs, so a
 # translation into those scripts would otherwise render as empty boxes. Picked automatically per
 # script actually present in the text being measured/drawn (detect_pdf_script), not by target
@@ -551,7 +579,7 @@ class EmbeddedFont:
 
 
 @lru_cache(maxsize=8)
-def load_embedded_font(bold: bool = False, script: str = "") -> Optional[EmbeddedFont]:
+def load_embedded_font(bold: bool = False, script: str = "", serif: bool = False) -> Optional[EmbeddedFont]:
     """Load a TrueType font for PDF embedding, or None to fall back to base-14 Helvetica.
 
     Without an embedded font a PDF can only show WinAnsi characters, so any non-Latin target
@@ -568,6 +596,11 @@ def load_embedded_font(bold: bool = False, script: str = "") -> Optional[Embedde
     if script and script in PDF_SCRIPT_FONT_CANDIDATES:
         candidates = PDF_SCRIPT_FONT_CANDIDATES[script]
         configured = ""
+    elif serif:
+        # No env override for serif: LINGUINATOR_PDF_FONT names the document font, and a serif
+        # variant of an arbitrary configured font cannot be derived from it.
+        configured = ""
+        candidates = PDF_SERIF_BOLD_CANDIDATES if bold else PDF_SERIF_CANDIDATES
     else:
         configured = PDF_FONT_BOLD_FILE if bold else PDF_FONT_FILE
         candidates = PDF_FONT_BOLD_CANDIDATES if bold else PDF_FONT_CANDIDATES
@@ -606,8 +639,8 @@ def load_embedded_font(bold: bool = False, script: str = "") -> Optional[Embedde
     return None
 
 
-def pdf_measure_text(text: str, size: float, bold: bool = False) -> float:
-    font = load_embedded_font(bold, detect_pdf_script(text))
+def pdf_measure_text(text: str, size: float, bold: bool = False, serif: bool = False) -> float:
+    font = load_embedded_font(bold, detect_pdf_script(text), serif)
     if font:
         return font.text_width(text, size)
     return len(text) * PDF_AVG_CHAR_WIDTH * size
@@ -617,8 +650,8 @@ def pdf_escape(text: str) -> str:
     return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
 
 
-def pdf_text_object(text: str, bold: bool = False) -> str:
-    font = load_embedded_font(bold, detect_pdf_script(text))
+def pdf_text_object(text: str, bold: bool = False, serif: bool = False) -> str:
+    font = load_embedded_font(bold, detect_pdf_script(text), serif)
     if font:
         return "<" + font.encode(text) + ">"
     try:
@@ -638,7 +671,8 @@ def wrap_pdf_line(text: str, size: float = PDF_FONT_SIZE) -> List[str]:
 
 
 def pdf_line_command(text: str, x: float, y: float, font: str = "F1", size: float = PDF_FONT_SIZE) -> str:
-    return f"BT /{font} {size:g} Tf {x:.2f} {y:.2f} Td {pdf_text_object(text, font == 'F2')} Tj ET"
+    bold, serif = PDF_FONT_FACES.get(font, (False, False))
+    return f"BT /{font} {size:g} Tf {x:.2f} {y:.2f} Td {pdf_text_object(text, bold, serif)} Tj ET"
 
 
 def markdown_page_sections(text: str) -> List[Dict[str, str]]:
@@ -772,7 +806,7 @@ def pdf_font_objects(font: EmbeddedFont, codepoints: List[int], first_id: int) -
 def pdf_document_font_texts(pages: List[Dict[str, Any]]) -> Dict[str, List[str]]:
     """Every string the document draws, grouped by font resource name, so each font is only
     embedded if it is actually used and only needs widths for the characters it draws."""
-    texts: Dict[str, List[str]] = {"F1": [], "F2": []}
+    texts: Dict[str, List[str]] = {name: [] for name in PDF_FONT_FACES}
     for page in pages:
         for line in page["lines"]:
             texts[line["font"]].append(line["text"])
@@ -791,12 +825,11 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
     # Embedded fonts are shared by every page, so they are allocated before the pages.
     font_texts = pdf_document_font_texts(pages)
     font_resources = []
-    for index, bold in enumerate((False, True)):
-        name = f"F{index + 1}"
+    for name, (bold, serif) in PDF_FONT_FACES.items():
         script = detect_pdf_script("".join(font_texts[name]))
-        font = load_embedded_font(bold, script) if any(font_texts[name]) else None
+        font = load_embedded_font(bold, script, serif) if any(font_texts[name]) else None
         if not font:
-            base = "Helvetica-Bold" if bold else "Helvetica"
+            base = ("Times-Bold" if bold else "Times-Roman") if serif else ("Helvetica-Bold" if bold else "Helvetica")
             font_resources.append(f"/{name} << /Type /Font /Subtype /Type1 /BaseFont /{base} >>")
             continue
         codepoints = sorted({ord(char) for text in font_texts[name] for char in text})
@@ -949,6 +982,40 @@ def history_source_path(item_id: str, extension: str) -> Path:
     return HISTORY_DIR / f"{item_id}.source.{safe_extension}"
 
 
+def history_local_time(created_at: str) -> Optional[datetime]:
+    """A history item's timestamp in LINGUINATOR_TIMEZONE, or None if it cannot be read.
+
+    Falls back to UTC when the zone is unknown: some Python installs ship without a tz database,
+    and a download must not fail over the time in its name.
+    """
+    try:
+        moment = datetime.fromisoformat(created_at)
+    except (TypeError, ValueError):
+        return None
+    try:
+        return moment.astimezone(ZoneInfo(HISTORY_TIMEZONE))
+    except Exception:
+        return moment
+
+
+def history_download_name(item: Dict[str, Any], extension: str) -> str:
+    """`<original name>_<date>_<time>_<target>.<ext>`.
+
+    The stored name is an internal id (date, sanitised name, random code). Downloading several
+    languages or several runs of one document then gives files nothing tells apart.
+    """
+    # Decomposed first, so "Geschäftsbedingungen" becomes "Geschaftsbedingungen" rather than the
+    # "Gesch-ftsbedingungen" a plain non-ASCII purge leaves behind. The header stays ASCII, which
+    # keeps Content-Disposition free of RFC 5987 encoding.
+    original = unicodedata.normalize("NFKD", item.get("original_name") or "translation")
+    stem = Path(original.encode("ascii", "ignore").decode("ascii")).stem or "translation"
+    moment = history_local_time(item.get("created_at", ""))
+    stamp = moment.strftime("%Y-%m-%d_%H%M") if moment else "undated"
+    # Just the language part: "deu_Latn" says everything "deu" does for a file name.
+    target = (item.get("target") or "").split("_", 1)[0] or "translated"
+    return f"{history_safe_name(f'{stem}_{stamp}_{target}')}.{extension}"
+
+
 def save_history(
     kind: str,
     result: str,
@@ -1011,9 +1078,13 @@ def history_paths(item_id: str):
     return HISTORY_DIR / f"{item_id}.md", HISTORY_DIR / f"{item_id}.json"
 
 
-def history_item(item_id: str) -> Dict[str, Any]:
+def history_item(item_id: str, required: bool = True) -> Dict[str, Any]:
     _, json_path = history_paths(item_id)
     if not json_path.exists():
+        if not required:
+            # cleanup_history deletes files one by one, so the metadata can already be gone while
+            # the result is still there. A download then falls back to a generic name, not a 404.
+            return {}
         raise HTTPException(status_code=404, detail="History item not found")
     return json.loads(json_path.read_text(encoding="utf-8"))
 
@@ -1513,6 +1584,7 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
                     "size": span["size"],
                     "width": span["bbox"][2] - span["bbox"][0],
                     "bold": bool(span["flags"] & MUPDF_BOLD_FLAG),
+                    "serif": pdf_font_is_serif(span["font"]),
                 })
     return runs
 
@@ -1559,6 +1631,7 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     "right": run["x"] + width,
                     "size": run["size"],
                     "bold_chars": 0,
+                    "serif_chars": 0,
                     "total_chars": 0,
                 }
                 cells.append(current)
@@ -1568,9 +1641,13 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             current["total_chars"] += length
             if run.get("bold"):
                 current["bold_chars"] += length
+            if run.get("serif"):
+                current["serif_chars"] += length
         for cell in cells:
             cell["text"] = re.sub(r"\s+", " ", cell["text"]).strip()
-            cell["bold"] = cell.pop("bold_chars") * 2 > cell.pop("total_chars")
+            total = cell.pop("total_chars")
+            cell["bold"] = cell.pop("bold_chars") * 2 > total
+            cell["serif"] = cell.pop("serif_chars") * 2 > total
             if cell["text"]:
                 lines.append(cell)
     return lines
@@ -1632,7 +1709,7 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
     return pages
 
 
-def wrap_text_to_width(text: str, width: float, size: float, bold: bool = False) -> List[str]:
+def wrap_text_to_width(text: str, width: float, size: float, bold: bool = False, serif: bool = False) -> List[str]:
     # CJK text has no spaces between words, so any character is a valid break point; splitting
     # on whitespace there would treat the whole string as one unbreakable "word".
     cjk = detect_pdf_script(text) == "cjk"
@@ -1645,7 +1722,7 @@ def wrap_text_to_width(text: str, width: float, size: float, bold: bool = False)
         candidate = current + separator + unit if current else unit
         # Measured in the face the line will actually be drawn in: bold runs wider, so wrapping
         # it against regular metrics fits too much per line and overflows the column.
-        if current and pdf_measure_text(candidate, size, bold) > width:
+        if current and pdf_measure_text(candidate, size, bold, serif) > width:
             lines.append(current)
             current = unit
         else:
@@ -1655,11 +1732,43 @@ def wrap_text_to_width(text: str, width: float, size: float, bold: bool = False)
     return lines or [""]
 
 
-def reflow_paragraph(paragraph: Dict[str, Any], text: str) -> List[Dict[str, Any]]:
+def paragraph_floor(paragraph: Dict[str, Any], others: List[Dict[str, Any]]) -> Optional[float]:
+    """The highest baseline sitting below `paragraph` in a column that overlaps it.
+
+    Paragraphs beside it (table cells on the same row, a caption in the next column) must not
+    limit it, or one long cell shrinks the whole row to nothing.
+    """
+    # ponytail: O(paragraphs^2) per page, fine at the few dozen a page holds; index by column if
+    # a document ever shows up where it isn't.
+    left = min(line["x"] for line in paragraph["lines"])
+    right = max(line["right"] for line in paragraph["lines"])
+    bottom = min(line["y"] for line in paragraph["lines"])
+    floor = None
+    for other in others:
+        if other is paragraph:
+            continue
+        other_top = max(line["y"] for line in other["lines"])
+        if other_top >= bottom:
+            continue
+        if max(line["right"] for line in other["lines"]) <= left:
+            continue
+        if min(line["x"] for line in other["lines"]) >= right:
+            continue
+        floor = other_top if floor is None else max(floor, other_top)
+    return floor
+
+
+def reflow_paragraph(
+    paragraph: Dict[str, Any], text: str, floor: Optional[float] = None
+) -> List[Dict[str, Any]]:
     """Lay the translation out in the column the paragraph's original lines occupied.
 
     Returns the absolutely positioned text lines. Clearing the original text is not this
     function's job: render_pdf_layout_overlay redacts it out of the source page first.
+
+    `floor` is the baseline of whatever sits directly below in the same column: a translation
+    longer than its original keeps running past the last line, and without that limit it runs
+    straight into the next paragraph. Passing None keeps the old unbounded behaviour.
     """
     lines = paragraph["lines"]
     left = min(line["x"] for line in lines)
@@ -1671,25 +1780,49 @@ def reflow_paragraph(paragraph: Dict[str, Any], text: str) -> List[Dict[str, Any
     # Same reasoning as base_size: a paragraph is drawn in whichever face most of its lines use,
     # so a bold heading stays bold instead of flattening to regular body text.
     bold = sum(1 for line in lines if line.get("bold")) * 2 > len(lines)
+    serif = sum(1 for line in lines if line.get("serif")) * 2 > len(lines)
     if len(lines) > 1:
         leading = (lines[0]["y"] - lines[-1]["y"]) / (len(lines) - 1)
     else:
         leading = 1.2 * base_size
 
+    def overflow_leading(size: float) -> float:
+        # Overflow lines are set at the shrunken size, so spacing them at the original leading
+        # pushes them further down than they need to go, straight into the next paragraph.
+        return min(leading, 1.2 * size)
+
+    def fits(count: int, size: float) -> bool:
+        if count <= len(lines):
+            return True
+        if floor is None:
+            # Nothing known to be below: keeping the translation inside the original's own lines
+            # is the only bound there is.
+            return False
+        lowest = lines[-1]["y"] - overflow_leading(size) * (count - len(lines))
+        # A line occupies roughly a quarter em below its baseline and nearly a full em above, so
+        # the lowest overflow baseline has to clear the next paragraph's baseline by that much.
+        return lowest >= floor + 1.15 * size
+
     size = base_size
-    wrapped = wrap_text_to_width(text, width, size, bold)
-    while len(wrapped) > len(lines) and size > base_size * PDF_LAYOUT_MIN_SCALE:
+    wrapped = wrap_text_to_width(text, width, size, bold, serif)
+    while not fits(len(wrapped), size) and size > base_size * PDF_LAYOUT_MIN_SCALE:
         size = max(size * 0.95, base_size * PDF_LAYOUT_MIN_SCALE)
-        wrapped = wrap_text_to_width(text, width, size, bold)
+        wrapped = wrap_text_to_width(text, width, size, bold, serif)
 
     placed = []
     for index, wrapped_line in enumerate(wrapped):
         # Translations longer than the original keep running below the last line: overflowing
-        # is recoverable for the reader, silently cut off text is not.
-        y = lines[index]["y"] if index < len(lines) else lines[-1]["y"] - leading * (index - len(lines) + 1)
+        # is recoverable for the reader, silently cut off text is not. At PDF_LAYOUT_MIN_SCALE
+        # even a floor cannot always be honoured, and then it still overflows rather than losing
+        # the tail of the sentence.
+        y = (
+            lines[index]["y"] if index < len(lines)
+            else lines[-1]["y"] - overflow_leading(size) * (index - len(lines) + 1)
+        )
         placed.append({
             "text": wrapped_line,
-            "font": "F2" if bold else "F1",
+            "font": {(False, False): "F1", (True, False): "F2",
+                     (False, True): "F3", (True, True): "F4"}[(bold, serif)],
             "size": size,
             "line_height": 0,
             "x": left,
@@ -1747,7 +1880,9 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
         lines: List[Dict[str, Any]] = []
         for paragraph in page["paragraphs"]:
             if index < len(translations) and translations[index].strip():
-                lines.extend(reflow_paragraph(paragraph, translations[index]))
+                lines.extend(reflow_paragraph(
+                    paragraph, translations[index], paragraph_floor(paragraph, page["paragraphs"])
+                ))
             index += 1
         overlay_pages.append({
             "width": page["width"],
@@ -2964,7 +3099,8 @@ def download_history(item_id: str):
     path, _ = history_paths(item_id)
     if not path.exists():
         raise HTTPException(status_code=404, detail="History item not found")
-    return FileResponse(path, media_type="text/markdown", filename=path.name)
+    filename = history_download_name(history_item(item_id, required=False), "md")
+    return FileResponse(path, media_type="text/markdown", filename=filename)
 
 
 def original_export_media_type(extension: str) -> str:
@@ -3029,9 +3165,10 @@ def export_history(item_id: str, format: str = "md"):
         raise HTTPException(status_code=404, detail="History item not found")
     text = path.read_text(encoding="utf-8")
     safe_format = format.lower()
-    filename_base = path.stem
+    item = history_item(item_id, required=False)
+    filename_base = history_download_name(item, "").rstrip(".")
     if safe_format == "md":
-        return FileResponse(path, media_type="text/markdown", filename=path.name)
+        return FileResponse(path, media_type="text/markdown", filename=f"{filename_base}.md")
     if safe_format == "txt":
         return Response(
             text,
@@ -3050,7 +3187,6 @@ def export_history(item_id: str, format: str = "md"):
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             headers={"Content-Disposition": f'attachment; filename="{filename_base}.docx"'},
         )
-    item = history_item(item_id)
     source_extension = file_extension("x." + item.get("source_extension", ""))
     requested_extension = source_extension if safe_format == "original" else file_extension("x." + safe_format)
     source_path = history_source_path(item_id, source_extension) if source_extension else None

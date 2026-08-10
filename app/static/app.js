@@ -1109,7 +1109,7 @@ let languageData = null;
         title.appendChild(document.createTextNode(position + (job.label || job.kind) + " - " + job.status));
         const meta = document.createElement("div");
         meta.className = "queue-meta";
-        const languages = [job.source, job.target].filter(Boolean).join(" -> ");
+        const languages = [job.source, job.target].filter(Boolean).map(formatLanguageLabel).join(" -> ");
         const started = job.started_at ? t("started") + " " + formatJobTime(job.started_at) : t("queued") + " " + formatJobTime(job.queued_at);
         meta.textContent = [languages, started].filter(Boolean).join(" | ");
         const progress = document.createElement("div");
@@ -1396,7 +1396,9 @@ let languageData = null;
       link.textContent = historyDisplayName(item);
       const meta = document.createElement("div");
       meta.className = "history-meta";
-      meta.textContent = item.source + " -> " + item.target + " | " + formatBytes(item.size_bytes);
+      // Names, not codes: "deu_Latn -> eng_Latn" is unreadable at a glance in a long list.
+      meta.textContent = formatLanguageLabel(item.source) + " -> " + formatLanguageLabel(item.target)
+        + " | " + formatBytes(item.size_bytes);
       const format = document.createElement("select");
       format.className = "history-format";
       format.title = "Select the history download format.";
@@ -1421,11 +1423,12 @@ let languageData = null;
         const href = format.value === "md"
           ? "history/" + item.id
           : "history/" + item.id + "/export?format=" + encodeURIComponent(format.value);
-        const filename = format.value === "md" ? item.filename : "";
+        // Empty, not the stored name: the server builds "<document>_<date>_<time>_<language>"
+        // in the Content-Disposition header, and any name set here would override it.
         download.href = href;
-        download.download = filename;
+        download.download = "";
         link.href = href;
-        link.download = filename;
+        link.download = "";
       };
       if (hasOriginal) format.value = "original";
       syncDownloadHref();
@@ -1495,16 +1498,20 @@ let languageData = null;
       localStorage.setItem(storageKey, collapsed ? "1" : "0");
     }
 
-    function setupPanelCollapse(toggleId, bodyId, iconId, storageKey) {
+    function setupPanelCollapse(toggleId, bodyId, iconId, storageKey, collapsedByDefault = false) {
       document.getElementById(toggleId).addEventListener("click", () => {
         const body = document.getElementById(bodyId);
         setPanelCollapsed(bodyId, iconId, storageKey, !body.classList.contains("hidden"));
       });
-      setPanelCollapsed(bodyId, iconId, storageKey, localStorage.getItem(storageKey) === "1");
+      // Only an explicit "0" counts as "the user opened it": an absent key is a first visit,
+      // which for the queue means collapsed.
+      const stored = localStorage.getItem(storageKey);
+      const collapsed = stored === null ? collapsedByDefault : stored === "1";
+      setPanelCollapsed(bodyId, iconId, storageKey, collapsed);
     }
 
     setupPanelCollapse("historyCollapse", "historyBody", "historyCollapseIcon", "linguinator_history_collapsed");
-    setupPanelCollapse("queueCollapse", "queueBody", "queueCollapseIcon", "linguinator_queue_collapsed");
+    setupPanelCollapse("queueCollapse", "queueBody", "queueCollapseIcon", "linguinator_queue_collapsed", true);
 
     function setTheme(theme) {
       document.documentElement.dataset.theme = theme;

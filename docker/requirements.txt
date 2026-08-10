@@ -8,3 +8,4 @@ pymupdf==1.28.2
 fonttools==4.63.0
 python-multipart==0.0.20
 httpx==0.28.1
+tzdata==2025.2

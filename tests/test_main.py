@@ -45,7 +45,7 @@ class FakeDocument:
         return self.pages[index]
 
 
-def mupdf_span(text, x, y, size=11.0, bold=False, direction=(1.0, 0.0)):
+def mupdf_span(text, x, y, size=11.0, bold=False, direction=(1.0, 0.0), font="Helvetica"):
     """One span as PyMuPDF reports it: baseline origin and bbox in MuPDF's top-down space."""
     width = 0.5 * size * len(text)
     return {
@@ -55,6 +55,7 @@ def mupdf_span(text, x, y, size=11.0, bold=False, direction=(1.0, 0.0)):
         "size": size,
         "flags": main.MUPDF_BOLD_FLAG if bold else 0,
         "dir": direction,
+        "font": font,
     }
 
 
@@ -925,6 +926,36 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual([run["bold"] for run in main.pdf_page_runs(page)], [True, False])
 
+    def test_pdf_font_is_serif_reads_the_family_name(self):
+        for name in ("TimesNewRomanPSMT", "Georgia", "ABCDEF+DejaVuSerif", "Garamond", "BookAntiqua"):
+            with self.subTest(font=name):
+                self.assertTrue(main.pdf_font_is_serif(name))
+        # "sans" wins over any marker: NotoSansSerif-style names are sans faces.
+        for name in ("Arial", "Roboto", "NotoSans", "DejaVuSans", "Helvetica", ""):
+            with self.subTest(font=name):
+                self.assertFalse(main.pdf_font_is_serif(name))
+
+    def test_pdf_page_runs_reads_the_serif_character_from_the_font_name(self):
+        # MuPDF's own "serifed" span flag comes from the font descriptor, which Roboto (a sans
+        # face) sets - so the name has to decide, not the flag.
+        page = FakeMuPdfPage([
+            mupdf_span("Vertrag", 50.0, 100.0, font="TimesNewRomanPSMT"),
+            mupdf_span("Heading", 50.0, 120.0, font="Roboto"),
+        ])
+
+        self.assertEqual([run["serif"] for run in main.pdf_page_runs(page)], [True, False])
+
+    def test_reflow_paragraph_draws_a_serif_paragraph_in_the_serif_font(self):
+        for bold, serif, expected in ((False, False, "F1"), (True, False, "F2"),
+                                      (False, True, "F3"), (True, True, "F4")):
+            with self.subTest(bold=bold, serif=serif):
+                paragraph = {"lines": [{
+                    "text": "Text", "x": 50.0, "y": 700.0, "right": 200.0,
+                    "size": 11.0, "bold": bold, "serif": serif,
+                }]}
+                placed = main.reflow_paragraph(paragraph, "Uebersetzung")
+                self.assertEqual(placed[0]["font"], expected)
+
     def test_pdf_page_runs_skips_rotated_and_vertical_lines(self):
         # The overlay is stamped horizontally, so sideways text has to keep its original.
         page = FakeMuPdfPage([
@@ -1018,6 +1049,51 @@ class MainTests(unittest.TestCase):
         self.assertGreater(len(placed), 2)
         self.assertEqual(" ".join(line["text"] for line in placed).split(), long_text.split())
 
+    def test_reflow_paragraph_spaces_overflow_lines_at_the_shrunken_size(self):
+        # Overflow lines are set at the shrunken size, so spacing them at the original leading
+        # pushes them further down than they need to go - into the next paragraph.
+        paragraph = {"lines": [
+            {"text": "One", "x": 50.0, "y": 700.0, "right": 200.0, "size": 22.0},
+            {"text": "two", "x": 50.0, "y": 660.0, "right": 200.0, "size": 22.0},
+        ]}
+
+        placed = main.reflow_paragraph(paragraph, "Eine deutlich laengere Uebersetzung " * 4)
+
+        self.assertGreater(len(placed), 2)
+        overflow_steps = [a["y"] - b["y"] for a, b in zip(placed[1:], placed[2:])]
+        for step in overflow_steps:
+            self.assertLessEqual(step, 1.2 * placed[0]["size"] + 0.01)
+            self.assertLess(step, 40.0)  # the original leading
+
+    def test_reflow_paragraph_does_not_shrink_when_the_overflow_has_room(self):
+        # With nothing below it, a paragraph used to be shrunk to the floor purely for having
+        # more lines than the original. Knowing what is below lets it stay readable.
+        paragraph = {"lines": [
+            {"text": "Short", "x": 50.0, "y": 700.0, "right": 200.0, "size": 11.0},
+        ]}
+        text = "Eine etwas laengere Uebersetzung die umbrechen muss"
+
+        cramped = main.reflow_paragraph(paragraph, text, floor=690.0)
+        roomy = main.reflow_paragraph(paragraph, text, floor=400.0)
+
+        self.assertGreater(roomy[0]["size"], cramped[0]["size"])
+        self.assertEqual(roomy[0]["size"], 11.0)
+        # Complete either way: shrinking is the fix, dropping words never is.
+        for placed in (cramped, roomy):
+            self.assertEqual(" ".join(line["text"] for line in placed).split(), text.split())
+
+    def test_paragraph_floor_ignores_paragraphs_beside_the_column(self):
+        target = {"lines": [{"text": "cell", "x": 50.0, "y": 700.0, "right": 150.0, "size": 10.0}]}
+        below = {"lines": [{"text": "next row", "x": 50.0, "y": 680.0, "right": 150.0, "size": 10.0}]}
+        beside = {"lines": [{"text": "same row", "x": 300.0, "y": 700.0, "right": 400.0, "size": 10.0}]}
+        # A neighbouring column further down must not pull the floor up either.
+        beside_below = {"lines": [{"text": "other column", "x": 300.0, "y": 690.0, "right": 400.0, "size": 10.0}]}
+
+        floor = main.paragraph_floor(target, [target, below, beside, beside_below])
+
+        self.assertEqual(floor, 680.0)
+        self.assertIsNone(main.paragraph_floor(target, [target, beside, beside_below]))
+
     def test_group_pdf_lines_marks_a_line_bold_by_majority_of_its_text(self):
         mostly_bold = main.group_pdf_lines([
             {"text": "Important heading", "x": 50.0, "y": 700.0, "size": 11.0, "width": 90.0, "bold": True},
@@ -1090,6 +1166,24 @@ class MainTests(unittest.TestCase):
         self.assertEqual(len(pages_text), 1)
         self.assertIn("Second page translated", pages_text[0])
         self.assertNotIn("First page original", pages_text[0])
+
+    def test_create_pdf_from_pages_embeds_a_serif_face_for_f3(self):
+        # The whole point of the serif face: it has to reach the actual PDF as a different font,
+        # not just as a different resource name pointing at DejaVu Sans again.
+        source = main.create_pdf_from_pages([{
+            "width": 400, "height": 300, "margin": 40,
+            "source_page": "", "continuation": False, "footer": False,
+            "lines": [
+                {"text": "Sans line", "font": "F1", "size": 11, "line_height": 14, "x": 50, "y": 200},
+                {"text": "Serif line", "font": "F3", "size": 11, "line_height": 14, "x": 50, "y": 180},
+            ],
+        }])
+
+        fonts = main.PdfReader(BytesIO(source)).pages[0]["/Resources"]["/Font"]
+        sans = str(fonts["/F1"].get_object().get("/BaseFont", ""))
+        serif = str(fonts["/F3"].get_object().get("/BaseFont", ""))
+        self.assertNotEqual(sans, serif)
+        self.assertRegex(serif.lower(), r"serif|times")
 
     def test_pdf_layout_roundtrip_replaces_text_and_keeps_page_size(self):
         source = main.create_pdf_from_pages([{
@@ -1221,6 +1315,58 @@ class MainTests(unittest.TestCase):
             self.assertEqual(items[0]["size_bytes"], len("result"))
         finally:
             shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
+    def test_history_download_name_carries_document_date_and_language(self):
+        item = {
+            "original_name": "Geschäftsbedingungen.pdf",
+            "created_at": "2026-08-10T09:54:00+00:00",
+            "target": "eng_Latn",
+        }
+
+        with patch.object(main, "HISTORY_TIMEZONE", "UTC"):
+            name = main.history_download_name(item, "pdf")
+
+        # Sanitised, but every part a reader needs to tell two downloads apart is in there, and
+        # the umlaut is transliterated rather than replaced with a dash.
+        self.assertEqual(name, "Geschaftsbedingungen_2026-08-10_0954_eng.pdf")
+        self.assertRegex(name, r"^[A-Za-z0-9_.-]+$")
+
+    def test_history_download_name_uses_the_configured_timezone(self):
+        item = {"original_name": "x.pdf", "created_at": "2026-08-10T09:54:00+00:00", "target": "eng_Latn"}
+
+        with patch.object(main, "HISTORY_TIMEZONE", "Europe/Berlin"):
+            self.assertIn("_1154_", main.history_download_name(item, "pdf"))
+        with patch.object(main, "HISTORY_TIMEZONE", "Not/AZone"):
+            # An unusable zone must not break the download, it just leaves the time as stored.
+            self.assertIn("_0954_", main.history_download_name(item, "pdf"))
+
+    def test_history_download_name_survives_missing_metadata(self):
+        # cleanup_history deletes files one by one, so a result can outlive its metadata. The
+        # download must still produce a name rather than failing.
+        name = main.history_download_name({}, "md")
+
+        self.assertEqual(name, "translation_undated_translated.md")
+
+    def test_history_export_names_the_file_after_the_document(self):
+        temp_dir = test_temp_dir()
+        try:
+            item_id = "2026-08-02-text-abc123"
+            (temp_dir / f"{item_id}.md").write_text("Translated result", encoding="utf-8")
+            (temp_dir / f"{item_id}.json").write_text(json.dumps({
+                "id": item_id,
+                "original_name": "Vertrag.pdf",
+                "created_at": "2026-08-02T14:05:00+00:00",
+                "target": "eng_Latn",
+            }), encoding="utf-8")
+
+            with patch.object(main, "HISTORY_DIR", temp_dir):
+                with patch.object(main, "HISTORY_TIMEZONE", "UTC"):
+                    response = TestClient(main.app).get(f"/history/{item_id}/export?format=txt")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("Vertrag_2026-08-02_1405_eng.txt", response.headers["content-disposition"])
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     def test_history_export_supports_text_and_pdf(self):
         temp_dir = test_temp_dir()
