@@ -1095,8 +1095,10 @@ let languageData = null;
       updateQueueControlButtons(visibleItems);
       if (!visibleItems.length) {
         queue.textContent = t("noQueuedJobs");
+        queue.classList.add("queue-empty-message");
         return;
       }
+      queue.classList.remove("queue-empty-message");
       for (const job of visibleItems) {
         const row = document.createElement("div");
         row.className = "queue-row";

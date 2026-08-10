@@ -598,6 +598,8 @@
 
     .queue:empty { display: none; }
 
+    .queue-empty-message { padding-left: 5ch; }
+
     .queue-row {
       align-items: center;
       background: rgba(var(--overlay-rgb), .04);
