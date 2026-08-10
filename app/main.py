@@ -1732,6 +1732,26 @@ def wrap_text_to_width(text: str, width: float, size: float, bold: bool = False,
     return lines or [""]
 
 
+def has_translatable_text(text: str) -> bool:
+    """Whether a paragraph holds anything a translator can work on.
+
+    A fragment with no word in it - stray punctuation, the loose letters left over from a line the
+    page edge cut through ("y g ;") - gives the model nothing to go on, and it answers by
+    inventing: a row of dots, a "== Weblinks ==*". That invention is then laid out as if it were a
+    translation and runs down the whole page. Such fragments keep their original instead.
+
+    "A word" is a run of at least two letters, which also leaves dates and pure numbers alone.
+
+    A bare URL is excluded for the same reason: it is not prose, the model rewrites it into
+    something else entirely (one turned into "== Weblinks ==*"), and having no spaces it cannot
+    be wrapped, so whatever comes back runs off the edge of the page.
+    """
+    stripped = text.strip()
+    if re.fullmatch(r"(https?://|www\.)\S+", stripped, re.IGNORECASE):
+        return False
+    return bool(re.search(r"[^\W\d_]{2,}", stripped))
+
+
 def paragraph_floor(paragraph: Dict[str, Any], others: List[Dict[str, Any]]) -> Optional[float]:
     """The highest baseline sitting below `paragraph` in a column that overlaps it.
 
@@ -1846,16 +1866,21 @@ def redact_translated_text(content: bytes, pages: List[Dict[str, Any]], translat
         redacted = False
         for paragraph in page_data["paragraphs"]:
             # A paragraph without a translation keeps its original text rather than being
-            # erased with nothing put in its place.
-            if index < len(translations) and translations[index].strip():
+            # erased with nothing put in its place - as does an untranslatable fragment, whose
+            # stored "translation" is just its own original text.
+            if (index < len(translations) and translations[index].strip()
+                    and has_translatable_text(paragraph["text"])):
                 for line in paragraph["lines"]:
                     size = line["size"]
-                    # Deliberately narrower than the line's full height: a rectangle only has to
-                    # touch a glyph for MuPDF to drop it, and one tall enough to hold ascenders
-                    # and descenders would reach into the lines above and below.
+                    # Still narrower than the line's full height - a rectangle only has to touch
+                    # a glyph for MuPDF to drop it, and one tall enough to hold ascenders would
+                    # reach into the line above. It does reach below the baseline far enough to
+                    # cover the link underlines that sit there (measured at 0.23em), which have
+                    # to go with the text they underline or they end up striking through an
+                    # unrelated part of the translation.
                     rectangle = pymupdf.Rect(
                         line["x"] - 1,
-                        line["y"] - 0.05 * size,
+                        line["y"] - 0.30 * size,
                         line["right"] + 1,
                         line["y"] + 0.5 * size,
                     ) * page.transformation_matrix
@@ -1865,7 +1890,10 @@ def redact_translated_text(content: bytes, pages: List[Dict[str, Any]], translat
         if redacted:
             page.apply_redactions(
                 images=pymupdf.PDF_REDACT_IMAGE_NONE,
-                graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
+                # IF_COVERED, not NONE or IF_TOUCHED: an underline lies wholly inside its line's
+                # rectangle and goes, while page backgrounds, table shading and rules extend past
+                # it and stay. IF_TOUCHED would strip every panel a line of text sits on.
+                graphics=pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
                 text=pymupdf.PDF_REDACT_TEXT_REMOVE,
             )
     return document.tobytes(garbage=3, deflate=True)
@@ -1879,7 +1907,8 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
     for page in pages:
         lines: List[Dict[str, Any]] = []
         for paragraph in page["paragraphs"]:
-            if index < len(translations) and translations[index].strip():
+            if (index < len(translations) and translations[index].strip()
+                    and has_translatable_text(paragraph["text"])):
                 lines.extend(reflow_paragraph(
                     paragraph, translations[index], paragraph_floor(paragraph, page["paragraphs"])
                 ))
@@ -2894,7 +2923,8 @@ def run_pdf_layout_translate_job(
         chunks: List[str] = []
         chunk_counts: List[int] = []
         for paragraph in paragraphs:
-            parts = split_long_text(paragraph, MAX_CHARS)
+            # Fragments with no word in them keep their original: see has_translatable_text.
+            parts = split_long_text(paragraph, MAX_CHARS) if has_translatable_text(paragraph) else []
             chunks.extend(parts)
             chunk_counts.append(len(parts))
         update_job(job_id, total=len(chunks), message=f"Translating 0 / {len(chunks)} chunks")
@@ -2902,7 +2932,12 @@ def run_pdf_layout_translate_job(
 
         translated: List[str] = []
         position = 0
-        for count in chunk_counts:
+        for paragraph, count in zip(paragraphs, chunk_counts):
+            if not count:
+                # Untranslated fragment: keep the original so the paragraph still has an entry and
+                # every translation after it stays on its own paragraph.
+                translated.append(re.sub(r"\s+", " ", paragraph).strip())
+                continue
             # Collapsed to a single line so the paragraph split on re-export stays exact.
             translated.append(re.sub(r"\s+", " ", " ".join(translated_chunks[position:position + count])).strip())
             position += count

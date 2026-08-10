@@ -135,12 +135,18 @@ class TestfileRedactionTests(unittest.TestCase):
                         if len(word) > 8 and word.isalpha():
                             self.assertNotIn(word, left, f"{path.name}: {word!r} survived redaction")
 
-    def test_redaction_keeps_the_page_graphics(self):
-        """Redaction must not eat the backgrounds it sits on.
+    def test_redaction_keeps_the_page_backgrounds_and_rules(self):
+        """Redaction must take link underlines with the text, and nothing else.
 
-        apply_redactions removes images and vector graphics under the rectangle by default,
-        which would strip table shading, hint-box panels and logos along with the text.
+        An underline belongs to the words above it: left behind, it strikes through an unrelated
+        part of the translation. But apply_redactions can just as easily strip the table shading,
+        hint-box panels, rules and logos the text sits on, which is why it removes line art only
+        where a drawing lies wholly inside one line's rectangle. Table rules span more than one
+        cell and so survive; a short underline does not.
         """
+        def solid_areas(page):
+            return [d for d in page.get_drawings() if d["rect"].height >= 2.0 and d["rect"].width >= 2.0]
+
         for path in testfile_pdfs():
             with self.subTest(document=path.name):
                 content = path.read_bytes()
@@ -156,7 +162,27 @@ class TestfileRedactionTests(unittest.TestCase):
                 # Not equality: rewriting the page can split a drawing or re-embed an image, so
                 # the count may go up. Only losing one means the redaction ate the background.
                 self.assertGreaterEqual(len(after.get_images()), len(before.get_images()))
-                self.assertGreaterEqual(len(after.get_drawings()), len(before.get_drawings()))
+                self.assertGreaterEqual(len(solid_areas(after)), len(solid_areas(before)))
+
+    def test_redaction_removes_link_underlines_with_their_text(self):
+        # Reddit_discussion is the document that has them: every link is underlined, and the
+        # underlines used to stay put while the text under them changed length.
+        document = next((p for p in testfile_pdfs() if p.name.startswith("Reddit_discussion")), None)
+        if document is None:
+            self.skipTest("Reddit_discussion.pdf not in tests/testfiles/")
+
+        content = document.read_bytes()
+        pages = main.extract_pdf_layout(content, "1")
+        paragraphs = [p for page in pages for p in page["paragraphs"]]
+
+        def underlines(page):
+            return [d for d in page.get_drawings() if d["rect"].height < 2.0 and d["rect"].width >= 2.0]
+
+        before = pymupdf.open(stream=content, filetype="pdf")[0]
+        self.assertTrue(underlines(before), "expected underlines in the source document")
+
+        redacted = main.redact_translated_text(content, pages, ["UEBERSETZT" for _ in paragraphs])
+        self.assertEqual(underlines(pymupdf.open(stream=redacted, filetype="pdf")[0]), [])
 
 
 if __name__ == "__main__":

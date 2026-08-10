@@ -1082,6 +1082,54 @@ class MainTests(unittest.TestCase):
         for placed in (cramped, roomy):
             self.assertEqual(" ".join(line["text"] for line in placed).split(), text.split())
 
+    def test_has_translatable_text_rejects_wordless_fragments(self):
+        # These are what a line clipped by the page edge leaves behind. Sent to the model they
+        # come back as invented text that is then laid out over the page.
+        for fragment in ("", " ", ".", ",", ";", "y", "-", "  .  ", "1", "42", "...",
+                         "y g", "a b c", "09.08.2026, 05:44"):
+            with self.subTest(fragment=fragment):
+                self.assertFalse(main.has_translatable_text(fragment))
+        # A bare URL is not prose, cannot be wrapped, and comes back rewritten.
+        for url in ("https://www.reddit.com/r/mecfs/comments/19525fp/mecfs_recovery",
+                    "http://example.com", "www.malighting.com"):
+            with self.subTest(url=url):
+                self.assertFalse(main.has_translatable_text(url))
+        for real in ("Ja", "Hello world", "2. Scope", "16 GB", "日本語",
+                     "Mehr dazu auf https://example.com nachlesen"):
+            with self.subTest(text=real):
+                self.assertTrue(main.has_translatable_text(real))
+
+    def test_layout_overlay_leaves_wordless_fragments_untouched(self):
+        # A fragment keeps its original: it must be neither redacted away nor redrawn, or the
+        # page loses a character it could have kept.
+        pages = [{
+            "number": 1, "width": 400.0, "height": 300.0,
+            "paragraphs": [
+                {"text": "Hello world", "lines": [
+                    {"text": "Hello world", "x": 50.0, "y": 200.0, "right": 150.0, "size": 11.0},
+                ]},
+                {"text": ",", "lines": [
+                    {"text": ",", "x": 50.0, "y": 180.0, "right": 55.0, "size": 11.0},
+                ]},
+            ],
+        }]
+        source = main.create_pdf_from_pages([{
+            "width": 400, "height": 300, "margin": 40,
+            "source_page": "", "continuation": False, "footer": False,
+            "lines": [
+                {"text": "Hello world", "font": "F1", "size": 11, "line_height": 14, "x": 50, "y": 200},
+                {"text": ",", "font": "F1", "size": 11, "line_height": 14, "x": 50, "y": 180},
+            ],
+        }])
+
+        # The runner stores a fragment's own text in its slot, so positions stay aligned.
+        overlay = main.render_pdf_layout_overlay(source, pages, ["Hallo Welt", ","])
+        text = pdf_text(overlay)
+
+        self.assertIn("Hallo Welt", text)
+        self.assertNotIn("Hello world", text)
+        self.assertIn(",", text)
+
     def test_paragraph_floor_ignores_paragraphs_beside_the_column(self):
         target = {"lines": [{"text": "cell", "x": 50.0, "y": 700.0, "right": 150.0, "size": 10.0}]}
         below = {"lines": [{"text": "next row", "x": 50.0, "y": 680.0, "right": 150.0, "size": 10.0}]}
