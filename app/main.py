@@ -26,8 +26,11 @@ from xml.etree import ElementTree
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
+from langdetect import DetectorFactory, LangDetectException, detect
 from pydantic import BaseModel
 from pypdf import PdfReader, PdfWriter
+
+DetectorFactory.seed = 0  # deterministic detection results across runs
 
 
 def env_value(name: str, default: str) -> str:
@@ -162,7 +165,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.4.20", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.5.0", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -344,6 +347,19 @@ def load_opus_pairs() -> Dict[str, Dict[str, str]]:
 
 
 OPUS_PAIRS = load_opus_pairs()
+
+
+AUTO_SOURCE = "auto"
+
+
+def detect_source_language(text: str) -> str:
+    """Guess the internal language code (deu_Latn-style) of text, falling back to
+    DEFAULT_SOURCE when detection fails or lands on a language we have no model for."""
+    try:
+        guess = detect(text)
+    except LangDetectException:
+        return DEFAULT_SOURCE
+    return CORE_LANGUAGES.get(guess.split("-", 1)[0], DEFAULT_SOURCE)
 
 
 def resolve_model(source: str, target: str) -> Tuple[str, bool]:
@@ -2740,6 +2756,9 @@ def run_text_job(
     source_meta: Optional[Dict[str, str]] = None,
 ):
     try:
+        if source == AUTO_SOURCE:
+            source = detect_source_language(text)
+            update_job(job_id, source=source)
         chunks = split_long_text(text, MAX_CHARS)
         update_job(
             job_id,
@@ -2807,6 +2826,9 @@ def run_pdf_translate_job(
     try:
         update_job(job_id, status="running", message="Extracting PDF", started_at=time.time())
         markdown = extract_pdf_markdown_from_bytes(content, content_type, page_range)
+        if source == AUTO_SOURCE:
+            source = detect_source_language(markdown)
+            update_job(job_id, source=source)
         sections = pdf_sections(markdown)
         planned = [(page_number, split_long_text(page_text, MAX_CHARS)) for page_number, page_text in sections]
         total = sum(len(chunks) for _, chunks in planned)
@@ -2865,6 +2887,9 @@ def run_pdf_layout_translate_job(
             return
         wait_if_paused_or_cancelled(job_id)
         paragraphs = [paragraph["text"] for page in pages for paragraph in page["paragraphs"]]
+        if source == AUTO_SOURCE:
+            source = detect_source_language("\n\n".join(paragraphs))
+            update_job(job_id, source=source)
         # One paragraph per chunk: the overlay maps translations back to paragraphs by position,
         # and the model does not reliably keep paragraph breaks inside a single chunk. Several
         # chunks are still translated per model call (translate_chunks_batched), via the tensor's

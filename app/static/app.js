@@ -66,6 +66,8 @@ let languageData = null;
         formatOriginal: "Original Format",
         modelDedicated: "Dedicated model for this language pair.",
         modelFallback: "No dedicated model for this pair, using the multilingual fallback.",
+        modelAutoDetect: "Source language will be detected automatically.",
+        autoDetect: "Auto-detect",
         ownJobDone: "Your job is done:"
       },
       de: {
@@ -118,6 +120,8 @@ let languageData = null;
         formatOriginal: "Originalformat",
         modelDedicated: "Eigenes Modell fuer dieses Sprachpaar.",
         modelFallback: "Kein eigenes Modell fuer dieses Paar, nutzt den mehrsprachigen Fallback.",
+        modelAutoDetect: "Quellsprache wird automatisch erkannt.",
+        autoDetect: "Automatisch erkennen",
         ownJobDone: "Dein Job ist fertig:"
       },
       es: {
@@ -170,6 +174,8 @@ let languageData = null;
         formatOriginal: "Formato original",
         modelDedicated: "Modelo dedicado para este par de idiomas.",
         modelFallback: "Sin modelo dedicado para este par, se usa el alternativo multilingue.",
+        modelAutoDetect: "El idioma de origen se detectara automaticamente.",
+        autoDetect: "Deteccion automatica",
         ownJobDone: "Tu trabajo esta listo:"
       },
       fr: {
@@ -222,9 +228,12 @@ let languageData = null;
         formatOriginal: "Format original",
         modelDedicated: "Modele dedie pour cette paire de langues.",
         modelFallback: "Pas de modele dedie pour cette paire, utilise le modele multilingue.",
+        modelAutoDetect: "La langue source sera detectee automatiquement.",
+        autoDetect: "Detection automatique",
         ownJobDone: "Ton job est termine :"
       }
     };
+    const AUTO_LANGUAGE = {code: "auto", name: "auto"};
     const FAVORITE_LANGUAGE_COUNT = 4;
     const defaultFavoriteLanguages = ["eng_Latn", "deu_Latn", "fra_Latn", "spa_Latn"];
     const languageNames = new Intl.DisplayNames(["en"], {type: "language"});
@@ -530,6 +539,7 @@ let languageData = null;
     }
 
     function formatLanguageLabel(languageCode) {
+      if (languageCode === AUTO_LANGUAGE.code) return "🔍 " + t("autoDetect");
       const display = languageDisplayName(languageCode);
       return (display.flag ? display.flag + " " : "") + display.name;
     }
@@ -600,6 +610,7 @@ let languageData = null;
     }
 
     function languageByCode(code) {
+      if (code === AUTO_LANGUAGE.code) return AUTO_LANGUAGE;
       return languageData.languages.find((language) => language.code === code);
     }
 
@@ -629,6 +640,12 @@ let languageData = null;
       const pairs = (languageData && languageData.dedicated_pairs) || [];
       const source = document.getElementById("source").value;
       const target = document.getElementById("target").value;
+      if (source === AUTO_LANGUAGE.code) {
+        hint.textContent = t("modelAutoDetect");
+        hint.classList.remove("hint-dedicated");
+        hint.classList.add("hint-fallback");
+        return;
+      }
       const dedicated = pairs.some((pair) => pair[0] === source && pair[1] === target);
       hint.textContent = t(dedicated ? "modelDedicated" : "modelFallback");
       hint.classList.toggle("hint-dedicated", dedicated);
@@ -671,10 +688,13 @@ let languageData = null;
       const select = document.getElementById(id);
       const menu = document.getElementById(id + "Menu");
       const favoriteCodes = getFavoriteLanguages();
-      const favorites = favoriteCodes.map(languageByCode).filter(Boolean);
+      const favorites = favoriteCodes.map(languageByCode).filter(Boolean).filter((language) => id === "source" || language.code !== AUTO_LANGUAGE.code);
       select.innerHTML = "";
       menu.innerHTML = "";
 
+      if (id === "source") {
+        addOption(select, AUTO_LANGUAGE);
+      }
       for (const language of languageData.languages) {
         addOption(select, language);
       }
@@ -689,6 +709,9 @@ let languageData = null;
       menu.appendChild(search);
 
       addLanguageGroup(menu, t("favorites"));
+      if (id === "source") {
+        addLanguageMenuOption(menu, id, AUTO_LANGUAGE, selectedValue);
+      }
       for (const language of favorites) {
         addLanguageMenuOption(menu, id, language, selectedValue);
       }
