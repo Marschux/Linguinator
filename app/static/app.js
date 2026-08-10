@@ -34,6 +34,8 @@ let languageData = null;
         pptxFile: "PowerPoint",
         csvFile: "CSV File",
         pdf: "PDF",
+        website: "Website",
+        websiteSoon: "Paste a page address here and the printable view of that page gets translated. Not built yet.",
         textFile: "Text File",
         markdownFile: "Markdown File",
         loadFile: "Load File",
@@ -88,6 +90,8 @@ let languageData = null;
         pptxFile: "PowerPoint",
         csvFile: "CSV-Datei",
         pdf: "PDF",
+        website: "Webseite",
+        websiteSoon: "Hier kommt eine Adresse rein, uebersetzt wird die Druckansicht der Seite. Noch nicht gebaut.",
         textFile: "Textdatei",
         markdownFile: "Markdown-Datei",
         loadFile: "Datei laden",
@@ -142,6 +146,8 @@ let languageData = null;
         pptxFile: "PowerPoint",
         csvFile: "Archivo CSV",
         pdf: "PDF",
+        website: "Sitio web",
+        websiteSoon: "Pega aqui la direccion de una pagina y se traducira su vista de impresion. Aun no implementado.",
         textFile: "Archivo de texto",
         markdownFile: "Archivo Markdown",
         loadFile: "Cargar archivo",
@@ -196,6 +202,8 @@ let languageData = null;
         pptxFile: "PowerPoint",
         csvFile: "Fichier CSV",
         pdf: "PDF",
+        website: "Site web",
+        websiteSoon: "Colle ici l'adresse d'une page, c'est sa vue imprimable qui sera traduite. Pas encore realise.",
         textFile: "Fichier texte",
         markdownFile: "Fichier Markdown",
         loadFile: "Charger le fichier",
@@ -378,7 +386,10 @@ let languageData = null;
       setText('[data-input-tab="office"] .tab-label', "officeDoc");
       setText('[data-input-tab="pptx"] .tab-label', "pptxFile");
       setText('[data-input-tab="csv"] .tab-label', "csvFile");
+      setText('[data-input-tab="website"] .tab-label', "website");
       setText('[data-input-tab="pdf"] .tab-label', "pdf");
+      setText("#websiteUrlLabel", "website");
+      setText("#websiteHint", "websiteSoon");
       setText('label[for="text"]', "textField");
       setText('label[for="pdf"]', "pdf");
       setText("#loadTextFile", "loadFile");
@@ -576,6 +587,12 @@ let languageData = null;
         panel: "filePanel",
         accept: ".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         labelKey: "csvFile",
+        sourceFormat: "md"
+      },
+      website: {
+        panel: "websitePanel",
+        accept: "",
+        labelKey: "website",
         sourceFormat: "md"
       },
       pdf: {

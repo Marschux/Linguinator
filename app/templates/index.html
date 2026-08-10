@@ -39,6 +39,7 @@
         <button class="tab" type="button" data-input-tab="office" disabled title="Load and translate a DOCX or ODT file as text."><span class="tab-label">DOC File</span></button>
         <button class="tab" type="button" data-input-tab="pptx" disabled title="Load and translate a PowerPoint (PPTX) file as text."><span class="tab-label">PowerPoint</span></button>
         <button class="tab" type="button" data-input-tab="csv" disabled title="Load and translate selected CSV or XLSX columns."><span class="tab-label">CSV File</span></button>
+        <button class="tab" type="button" data-input-tab="website" disabled title="Translate a web page from its address. Not built yet."><span class="tab-label">Website</span></button>
         <button class="tab active" type="button" data-input-tab="pdf" title="Extract and translate a PDF page by page."><span class="tab-label">PDF</span></button>
       </div>
       <select id="inputTabSelect" class="input-tab-select" aria-label="Input type" title="Select the input type.">
@@ -48,6 +49,7 @@
         <option value="office" disabled>DOC File</option>
         <option value="pptx" disabled>PowerPoint</option>
         <option value="csv" disabled>CSV File</option>
+        <option value="website" disabled>Website</option>
         <option value="pdf">PDF</option>
       </select>
 
@@ -82,6 +84,13 @@
       <div class="actions">
         <button id="loadTextFile" class="secondary" type="button" title="Load file content into the text field.">Load File</button>
       </div>
+    </section>
+
+    <section id="websitePanel" class="section tab-panel workspace-section">
+      <label id="websiteUrlLabel" for="websiteUrl">Website</label>
+      <input id="websiteUrl" type="url" placeholder="https://..." disabled
+             title="Address of the page to translate. Not built yet.">
+      <p id="websiteHint" class="subtle"></p>
     </section>
 
     <section id="pdfPanel" class="section tab-panel workspace-section">
