@@ -1474,15 +1474,20 @@ def pdf_page_color_sampler(image: Optional[Any], page_width: float, page_height:
 
 
 def pdf_page_pixel_cropper(image: Optional[Any], page_width: float, page_height: float):
-    """A `crop(x, y, width, height)` closure over a rasterized page, cutting out the exact pixels
-    behind a PDF-space box (bottom-left origin) as a zlib-compressed RGB buffer ready to embed as
-    a PDF image XObject (real background reconstruction instead of a flat averaged fill), or None
-    if there is no image to sample."""
+    """A `crop(x, y, width, height)` closure over a rasterized page, reconstructing the background
+    behind a PDF-space box (bottom-left origin) as a small, heavily downsampled RGB buffer ready to
+    embed as a PDF image XObject (stretched back up to box size when drawn). Downsampled rather than
+    copied 1:1: the rasterized page still has the original foreground text baked into its pixels, so
+    an exact crop would just redraw a picture of the very text the box is meant to hide. A coarse
+    grid still follows gradients/photos/colour transitions (the actual complaint about the old flat
+    average) while blurring thin text strokes away. Returns None if there is no image to sample."""
     if image is None or page_width <= 0 or page_height <= 0:
         return None
+    from PIL import Image as PILImage
 
     scale_x = image.width / page_width
     scale_y = image.height / page_height
+    resample = getattr(PILImage, "Resampling", PILImage).BOX
 
     def crop(x: float, y: float, width: float, height: float) -> Optional[Tuple[bytes, int, int]]:
         left = max(0, min(image.width - 1, int(x * scale_x)))
@@ -1490,10 +1495,14 @@ def pdf_page_pixel_cropper(image: Optional[Any], page_width: float, page_height:
         # PDF y is measured bottom-up from the page origin, image rows are top-down.
         top = max(0, min(image.height - 1, int((page_height - (y + height)) * scale_y)))
         bottom = max(top + 1, min(image.height, int((page_height - y) * scale_y)))
-        region = image.crop((left, top, right, bottom))
-        if region.width < 1 or region.height < 1:
+        if right <= left or bottom <= top:
             return None
-        return zlib.compress(region.tobytes()), region.width, region.height
+        # Fixed small grid regardless of absolute pixel size: cover boxes scale with font size, so
+        # this keeps the same blur-to-text-size ratio for headings and body text alike.
+        target_width = max(1, min(12, round((right - left) / 8)))
+        target_height = max(1, min(4, round((bottom - top) / 8)))
+        blurred = image.resize((target_width, target_height), resample=resample, box=(left, top, right, bottom))
+        return zlib.compress(blurred.tobytes()), target_width, target_height
 
     return crop
 
