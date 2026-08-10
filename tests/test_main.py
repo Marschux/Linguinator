@@ -7,6 +7,7 @@ import time
 import unittest
 import uuid
 import zipfile
+import zlib
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -970,9 +971,10 @@ class MainTests(unittest.TestCase):
         ]}
         long_text = "Eine deutlich laengere Uebersetzung " * 6
 
-        covers, placed = main.reflow_paragraph(paragraph, long_text)
+        covers, placed, image_covers = main.reflow_paragraph(paragraph, long_text)
 
         self.assertEqual(len(covers), 2)
+        self.assertEqual(image_covers, [])
         # Shrunk, but never below the floor, and never dropping lines to make it fit.
         self.assertLess(placed[0]["size"], 11.0)
         self.assertGreaterEqual(placed[0]["size"], 11.0 * main.PDF_LAYOUT_MIN_SCALE)
@@ -989,19 +991,55 @@ class MainTests(unittest.TestCase):
             seen_boxes.append((x, y, width, height))
             return (0.2, 0.4, 0.6)
 
-        covers, _ = main.reflow_paragraph(paragraph, "Kurz", sample_color=fake_sample)
+        covers, _, image_covers = main.reflow_paragraph(paragraph, "Kurz", sample_color=fake_sample)
 
         self.assertEqual(len(seen_boxes), 1)
         self.assertIn("0.200 0.400 0.600 rg", covers[0])
+        self.assertEqual(image_covers, [])
 
     def test_reflow_paragraph_defaults_to_white_without_sample_color(self):
         paragraph = {"lines": [
             {"text": "Short", "x": 50.0, "y": 700.0, "right": 200.0, "size": 11.0},
         ]}
 
-        covers, _ = main.reflow_paragraph(paragraph, "Kurz")
+        covers, _, _ = main.reflow_paragraph(paragraph, "Kurz")
 
         self.assertIn("1.000 1.000 1.000 rg", covers[0])
+
+    def test_reflow_paragraph_uses_real_pixels_when_crop_available(self):
+        paragraph = {"lines": [
+            {"text": "Short", "x": 50.0, "y": 700.0, "right": 200.0, "size": 11.0},
+        ]}
+        seen_boxes = []
+
+        def fake_crop(x, y, width, height):
+            seen_boxes.append((x, y, width, height))
+            return (b"compressed", 12, 8)
+
+        covers, _, image_covers = main.reflow_paragraph(paragraph, "Kurz", crop_pixels=fake_crop)
+
+        self.assertEqual(covers, [])
+        self.assertEqual(len(seen_boxes), 1)
+        self.assertEqual(len(image_covers), 1)
+        self.assertEqual(image_covers[0]["data"], b"compressed")
+        self.assertEqual(image_covers[0]["pixel_width"], 12)
+        self.assertEqual(image_covers[0]["pixel_height"], 8)
+
+    def test_pdf_page_pixel_cropper_round_trips_a_region(self):
+        from PIL import Image
+
+        image = Image.new("RGB", (100, 100), (51, 102, 204))
+        crop = main.pdf_page_pixel_cropper(image, page_width=200.0, page_height=200.0)
+
+        data, pixel_width, pixel_height = crop(x=0.0, y=0.0, width=50.0, height=50.0)
+        self.assertGreater(len(data), 0)
+        self.assertEqual(pixel_width, 25)
+        self.assertEqual(pixel_height, 25)
+        restored = Image.frombytes("RGB", (pixel_width, pixel_height), zlib.decompress(data))
+        self.assertEqual(restored.getpixel((0, 0)), (51, 102, 204))
+
+    def test_pdf_page_pixel_cropper_returns_none_without_an_image(self):
+        self.assertIsNone(main.pdf_page_pixel_cropper(None, 200.0, 200.0))
 
     def test_pdf_page_color_sampler_averages_a_solid_region(self):
         from PIL import Image
@@ -1063,6 +1101,26 @@ class MainTests(unittest.TestCase):
         self.assertEqual(len(pages_text), 1)
         self.assertIn("Second page translated", pages_text[0])
         self.assertNotIn("First page original", pages_text[0])
+
+    def test_create_pdf_from_pages_embeds_image_covers_as_readable_xobjects(self):
+        pixel_data = zlib.compress(bytes([10, 20, 30] * (4 * 3)))
+        source = main.create_pdf_from_pages([{
+            "width": 400, "height": 300, "margin": 40,
+            "source_page": "", "continuation": False, "footer": False,
+            "lines": [{"text": "Translated", "font": "F1", "size": 11, "line_height": 14, "x": 50, "y": 200}],
+            "image_covers": [
+                {"x": 48, "y": 195, "width": 100, "height": 20, "data": pixel_data, "pixel_width": 4, "pixel_height": 3},
+            ],
+        }])
+
+        reader = main.PdfReader(BytesIO(source))
+        self.assertEqual(len(reader.pages), 1)
+        xobjects = reader.pages[0]["/Resources"]["/XObject"]
+        self.assertEqual(len(xobjects), 1)
+        image = list(xobjects.values())[0].get_object()
+        self.assertEqual(image["/Width"], 4)
+        self.assertEqual(image["/Height"], 3)
+        self.assertIn("Translated", reader.pages[0].extract_text())
 
     def test_pdf_layout_roundtrip_replaces_text_and_keeps_page_size(self):
         source = main.create_pdf_from_pages([{
