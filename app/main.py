@@ -176,7 +176,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.5.7", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.5.9", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -1362,6 +1362,10 @@ def parse_page_range(page_range: str, total_pages: int) -> List[int]:
         return list(range(1, total_pages + 1))
 
     pages = set()
+    # A range running past the last page is clamped ("the first 5 pages" is a reasonable thing to
+    # ask of a 2-page document), but a single page named outright is not: "7" on a 3-page document
+    # is a typo worth reporting rather than silently dropping.
+    named_pages = set()
     for part in page_range.split(","):
         part = part.strip()
         if not part:
@@ -1375,14 +1379,17 @@ def parse_page_range(page_range: str, total_pages: int) -> List[int]:
                 end = int(end_text)
                 if start > end:
                     raise ValueError
-                pages.update(range(start, end + 1))
+                pages.update(range(start, min(end, total_pages) + 1))
             else:
-                pages.add(int(part))
+                page = int(part)
+                pages.add(page)
+                named_pages.add(page)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="Invalid page range") from exc
 
-    selected = sorted(pages)
-    if not selected or selected[0] < 1 or selected[-1] > total_pages:
+    selected = sorted(page for page in pages if page <= total_pages)
+    invalid = named_pages - set(selected)
+    if not selected or selected[0] < 1 or invalid:
         raise HTTPException(status_code=400, detail=f"Page range must be between 1 and {total_pages}")
     return selected
 
@@ -1637,6 +1644,36 @@ def pdf_run_width(text: str, size: float, font_dict: Any, cache: Dict[int, Any])
     return total * size / 1000.0, True
 
 
+FORCE_BOLD_FLAG = 1 << 18  # /FontDescriptor /Flags bit 19, per the PDF spec's font flags table
+
+
+def pdf_font_is_bold(font_dict: Any) -> bool:
+    """Whether an extracted run's font is a bold face.
+
+    Read off /BaseFont first, which is where it is legible in practice ("Arial-BoldMT",
+    "Helvetica-Bold", "ABCDEF+Foo,Bold"); the descriptor's ForceBold flag and a heavy stem width
+    cover the fonts whose name says nothing. Never raises: a PDF with an odd or missing font
+    dictionary must still extract, just without bold.
+    """
+    if not font_dict:
+        return False
+    try:
+        name = str(font_dict.get("/BaseFont", "")).lower()
+        if any(marker in name for marker in ("bold", "black", "heavy", "semibd", "-bd")):
+            return True
+        descriptor = font_dict.get("/FontDescriptor")
+        descriptor = descriptor.get_object() if hasattr(descriptor, "get_object") else descriptor
+        if not descriptor:
+            return False
+        if int(descriptor.get("/Flags", 0)) & FORCE_BOLD_FLAG:
+            return True
+        # StemV is the vertical stem thickness in 1/1000 em; regular text sits near 80, bold
+        # around 140 and up. Only consulted when nothing more explicit said so.
+        return float(descriptor.get("/StemV", 0) or 0) >= 120
+    except Exception:
+        return False
+
+
 def pdf_page_runs(page) -> List[Dict[str, Any]]:
     """Every text run on the page with its position on the page and its rendered font size."""
     runs: List[Dict[str, Any]] = []
@@ -1692,6 +1729,7 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
         scale = math.sqrt(abs(matrix[0] * matrix[3] - matrix[1] * matrix[2])) or 1.0
         size = abs(float(font_size or PDF_FONT_SIZE)) * scale or PDF_FONT_SIZE
         width, exact = pdf_run_width(text.strip(), size, font_dict, width_cache)
+        bold = pdf_font_is_bold(font_dict)
         # Synthetic bold (no real bold font available) is commonly faked by drawing the same
         # glyphs twice at the same spot; keep only one copy or lines double up into "PPoowweerr".
         if runs:
@@ -1763,6 +1801,7 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
                     "size": size,
                     "width": line_width,
                     "exact": line_exact,
+                    "bold": bold,
                 })
             return
         runs.append({
@@ -1772,6 +1811,7 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
             "size": size,
             "width": width,
             "exact": exact,
+            "bold": bold,
         })
 
     page.extract_text(visitor_text=visitor, visitor_operand_before=track)
@@ -1794,8 +1834,16 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     lines: List[Dict[str, Any]] = []
     for baseline in baselines:
         line = None
+        # A line can mix faces (a bold lead-in followed by regular text). Weighted by characters
+        # so the face most of the line is actually set in decides how the translation is drawn.
+        bold_chars = 0
+        total_chars = 0
         for run in sorted(baseline, key=lambda item: item["x"]):
             width = run.get("width") or pdf_measure_text(run["text"], run["size"])
+            run_length = len(run["text"].strip())
+            total_chars += run_length
+            if run.get("bold"):
+                bold_chars += run_length
             if line is None:
                 line = {
                     "text": run["text"],
@@ -1815,6 +1863,7 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             line["size"] = max(line["size"], run["size"])
             line["exact"] = line["exact"] and run.get("exact", False)
         line["text"] = re.sub(r"\s+", " ", line["text"]).strip()
+        line["bold"] = bold_chars * 2 > total_chars
         if line["text"]:
             lines.append(line)
     return lines
@@ -1876,7 +1925,7 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
     return pages
 
 
-def wrap_text_to_width(text: str, width: float, size: float) -> List[str]:
+def wrap_text_to_width(text: str, width: float, size: float, bold: bool = False) -> List[str]:
     # CJK text has no spaces between words, so any character is a valid break point; splitting
     # on whitespace there would treat the whole string as one unbreakable "word".
     cjk = detect_pdf_script(text) == "cjk"
@@ -1887,7 +1936,9 @@ def wrap_text_to_width(text: str, width: float, size: float) -> List[str]:
     current = ""
     for unit in units:
         candidate = current + separator + unit if current else unit
-        if current and pdf_measure_text(candidate, size) > width:
+        # Measured in the face the line will actually be drawn in: bold runs wider, so wrapping
+        # it against regular metrics fits too much per line and overflows the column.
+        if current and pdf_measure_text(candidate, size, bold) > width:
             lines.append(current)
             current = unit
         else:
@@ -1927,16 +1978,19 @@ def reflow_paragraph(
     # for translation context, see group_pdf_paragraphs). Sizing the whole reflow off the max
     # would blow the body text up to heading size, so use whichever size the paragraph mostly is.
     base_size = Counter(line["size"] for line in lines).most_common(1)[0][0]
+    # Same reasoning as base_size: a paragraph is drawn in whichever face most of its lines use,
+    # so a bold heading stays bold instead of flattening to regular body text.
+    bold = sum(1 for line in lines if line.get("bold")) * 2 > len(lines)
     if len(lines) > 1:
         leading = (lines[0]["y"] - lines[-1]["y"]) / (len(lines) - 1)
     else:
         leading = 1.2 * base_size
 
     size = base_size
-    wrapped = wrap_text_to_width(text, width, size)
+    wrapped = wrap_text_to_width(text, width, size, bold)
     while len(wrapped) > len(lines) and size > base_size * PDF_LAYOUT_MIN_SCALE:
         size = max(size * 0.95, base_size * PDF_LAYOUT_MIN_SCALE)
-        wrapped = wrap_text_to_width(text, width, size)
+        wrapped = wrap_text_to_width(text, width, size, bold)
 
     factor = 1.0 if all(line.get("exact") for line in lines) else PDF_COVER_WIDTH_FACTOR
     covers = []
@@ -1962,7 +2016,14 @@ def reflow_paragraph(
         # Translations longer than the original keep running below the last line: overflowing
         # is recoverable for the reader, silently cut off text is not.
         y = lines[index]["y"] if index < len(lines) else lines[-1]["y"] - leading * (index - len(lines) + 1)
-        placed.append({"text": wrapped_line, "font": "F1", "size": size, "line_height": 0, "x": left, "y": y})
+        placed.append({
+            "text": wrapped_line,
+            "font": "F2" if bold else "F1",
+            "size": size,
+            "line_height": 0,
+            "x": left,
+            "y": y,
+        })
     return covers, placed, image_covers
 
 

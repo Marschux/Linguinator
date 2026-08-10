@@ -654,6 +654,32 @@ class MainTests(unittest.TestCase):
         self.assertNotIn("# Page 1", markdown)
         self.assertIn("# Page 2", markdown)
 
+    def test_parse_page_range_clamps_a_range_to_the_document_end(self):
+        # "the first 5 pages" is a reasonable request for a shorter document; it used to be
+        # rejected outright with "Page range must be between 1 and 1".
+        self.assertEqual(main.parse_page_range("1-5", 1), [1])
+        self.assertEqual(main.parse_page_range("1-5", 3), [1, 2, 3])
+        self.assertEqual(main.parse_page_range("2-9", 4), [2, 3, 4])
+
+    def test_parse_page_range_still_rejects_a_single_page_past_the_end(self):
+        # A page named outright is a typo worth reporting, not something to silently drop.
+        with self.assertRaises(HTTPException):
+            main.parse_page_range("7", 3)
+        with self.assertRaises(HTTPException):
+            main.parse_page_range("1,7", 3)
+
+    def test_parse_page_range_rejects_a_range_entirely_past_the_end(self):
+        with self.assertRaises(HTTPException):
+            main.parse_page_range("8-10", 3)
+
+    def test_parse_page_range_keeps_rejecting_malformed_and_zero_input(self):
+        for bad in ("abc", "3-1", "1-", "-2"):
+            with self.subTest(page_range=bad):
+                with self.assertRaises(HTTPException):
+                    main.parse_page_range(bad, 5)
+        with self.assertRaises(HTTPException):
+            main.parse_page_range("0-2", 5)
+
     def test_pdf_extraction_reports_scanned_pdf(self):
         reader = FakeReader([FakePage(""), FakePage(None)])
 
@@ -986,6 +1012,62 @@ class MainTests(unittest.TestCase):
         self.assertGreaterEqual(placed[0]["size"], 11.0 * main.PDF_LAYOUT_MIN_SCALE)
         self.assertGreater(len(placed), 2)
         self.assertEqual(" ".join(line["text"] for line in placed).split(), long_text.split())
+
+    def test_pdf_font_is_bold_reads_the_base_font_name(self):
+        for name in ("/Arial-BoldMT", "/ABCDEF+Helvetica-Bold", "/Foo,Bold", "/Roboto-Black", "/X-Heavy"):
+            with self.subTest(base_font=name):
+                self.assertTrue(main.pdf_font_is_bold({"/BaseFont": name}))
+        for name in ("/ArialMT", "/Helvetica", "/ABCDEF+Times-Roman", "/Foo-Italic"):
+            with self.subTest(base_font=name):
+                self.assertFalse(main.pdf_font_is_bold({"/BaseFont": name}))
+
+    def test_pdf_font_is_bold_falls_back_to_the_descriptor(self):
+        # Fonts whose name gives nothing away still declare themselves in the descriptor.
+        self.assertTrue(main.pdf_font_is_bold({
+            "/BaseFont": "/Subset01", "/FontDescriptor": {"/Flags": main.FORCE_BOLD_FLAG},
+        }))
+        self.assertTrue(main.pdf_font_is_bold({
+            "/BaseFont": "/Subset01", "/FontDescriptor": {"/StemV": 165},
+        }))
+        self.assertFalse(main.pdf_font_is_bold({
+            "/BaseFont": "/Subset01", "/FontDescriptor": {"/StemV": 80, "/Flags": 4},
+        }))
+
+    def test_pdf_font_is_bold_never_raises_on_odd_font_dictionaries(self):
+        # Extraction must survive any PDF; an unreadable font just means "not bold".
+        class Hostile:
+            def get(self, *_args, **_kwargs):
+                raise RuntimeError("broken font")
+
+        for font_dict in (None, {}, {"/FontDescriptor": None}, Hostile()):
+            with self.subTest(font_dict=type(font_dict).__name__):
+                self.assertFalse(main.pdf_font_is_bold(font_dict))
+
+    def test_group_pdf_lines_marks_a_line_bold_by_majority_of_its_text(self):
+        mostly_bold = main.group_pdf_lines([
+            {"text": "Important heading", "x": 50.0, "y": 700.0, "size": 11.0, "width": 90.0, "bold": True},
+            {"text": "x", "x": 141.0, "y": 700.0, "size": 11.0, "width": 5.0, "bold": False},
+        ])
+        self.assertTrue(mostly_bold[0]["bold"])
+
+        mostly_regular = main.group_pdf_lines([
+            {"text": "Note:", "x": 50.0, "y": 680.0, "size": 11.0, "width": 25.0, "bold": True},
+            {"text": "a much longer regular remark follows", "x": 80.0, "y": 680.0, "size": 11.0, "width": 150.0, "bold": False},
+        ])
+        self.assertFalse(mostly_regular[0]["bold"])
+
+    def test_reflow_paragraph_draws_a_bold_paragraph_in_the_bold_font(self):
+        bold_paragraph = {"lines": [
+            {"text": "Heading", "x": 50.0, "y": 700.0, "right": 200.0, "size": 14.0, "bold": True},
+        ]}
+        _covers, placed, _images = main.reflow_paragraph(bold_paragraph, "Ueberschrift")
+        self.assertEqual([line["font"] for line in placed], ["F2"])
+
+        regular_paragraph = {"lines": [
+            {"text": "Body", "x": 50.0, "y": 680.0, "right": 200.0, "size": 11.0, "bold": False},
+        ]}
+        _covers, placed, _images = main.reflow_paragraph(regular_paragraph, "Fliesstext")
+        self.assertEqual([line["font"] for line in placed], ["F1"])
 
     def test_reflow_paragraph_covers_with_sampled_color_instead_of_white(self):
         paragraph = {"lines": [
