@@ -21,7 +21,7 @@ http://localhost:5051/
 - Text and document translation with progress, pause, resume, and stop.
 - PDF extraction, PDF translation, and PDF download.
 - Layout-preserving PDF translation: the translation is placed back into the original lines, images and graphics stay untouched. Falls back automatically to a plain OCR-capable extraction for scanned/image-only PDFs. A plain text/Markdown/PDF/DOCX version is always available afterwards via the download buttons.
-- Website translation: paste the address of a publicly reachable page and the readable article is extracted and translated, downloadable as PDF, DOCX, Markdown, or TXT. **This is the one feature that reaches out to the internet.** Pages behind a login or paywall, and pages that build their content with JavaScript, cannot be read. Addresses inside your own network (localhost, private ranges, `.local`, cloud metadata) are refused, including after redirects.
+- Website translation (built, tab still disabled pending testing): paste the address of a publicly reachable page and the readable article is extracted and translated, downloadable as PDF, DOCX, Markdown, or TXT. **This is the one feature that reaches out to the internet.** Pages behind a login or paywall, and pages that build their content with JavaScript, cannot be read. Addresses inside your own network (localhost, private ranges, `.local`, cloud metadata) are refused, including after redirects.
 - Original-format export for DOCX, ODT, PPTX, CSV, XLSX, HTML, SRT/VTT, JSON/YAML, PO, and XLIFF.
 - Local history with configurable retention, retained source files, and Markdown, TXT, PDF, DOCX, or original-format downloads.
 - Persistent global job queue with configurable worker count.
@@ -39,7 +39,6 @@ http://localhost:5051/
    - `DOC File`: load DOCX or ODT files.
    - `PowerPoint`: load PPTX files.
    - `CSV File`: load CSV or XLSX files and optionally limit translation to selected columns.
-   - `Website`: paste a public page address; the article is fetched and translated.
    - `PDF`: extract and translate PDF pages.
 3. For file inputs, select the file and click `Load File` if the tab uses the shared text input.
 4. Click `Translate Input`.
