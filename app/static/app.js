@@ -265,7 +265,7 @@ let languageData = null;
       aeb: "Tunisian Arabic",
       afr: "Afrikaans",
       amh: "Amharic",
-      arb: "Modern Standard Arabic",
+      arb: "Arabic",
       ary: "Moroccan Arabic",
       arz: "Egyptian Arabic",
       asm: "Assamese",
@@ -741,18 +741,18 @@ let languageData = null;
       search.addEventListener("input", () => filterLanguageMenu(menu, search.value));
       menu.appendChild(search);
 
-      // Auto-detect gets its own group: it is a setting, not a language, and sitting inside
-      // "Favorites" it read as one of them.
-      if (id === "source") {
-        addLanguageGroup(menu, t("detection"));
-        addLanguageMenuOption(menu, id, AUTO_LANGUAGE, selectedValue);
-        const autoDivider = document.createElement("div");
-        autoDivider.className = "language-divider";
-        menu.appendChild(autoDivider);
-      }
       addLanguageGroup(menu, t("favorites"));
       for (const language of favorites) {
         addLanguageMenuOption(menu, id, language, selectedValue);
+      }
+      // Auto-detect sits below the favourites in a group of its own: it is a setting, not a
+      // language, and listed among them it both read as one and took one of the four slots.
+      if (id === "source") {
+        const autoDivider = document.createElement("div");
+        autoDivider.className = "language-divider";
+        menu.appendChild(autoDivider);
+        addLanguageGroup(menu, t("detection"));
+        addLanguageMenuOption(menu, id, AUTO_LANGUAGE, selectedValue);
       }
 
       const divider = document.createElement("div");
