@@ -503,6 +503,26 @@ class MainTests(unittest.TestCase):
         self.assertEqual(main.model_language_code("Helsinki-NLP/opus-mt-tc-bible-big-mul-mul", "deu_Latn"), ">>deu<<")
         self.assertEqual(main.model_language_code("Helsinki-NLP/opus-mt-en-de", "deu_Latn"), "deu_Latn")
 
+    def test_model_language_code_maps_aliases_the_fallback_actually_knows(self):
+        # The fallback's vocabulary has >>ara<< but no >>arb<<. An unknown prefix is silently
+        # tokenised as plain text rather than rejected, leaving the model without a target
+        # signal: nl>ar came back in Korean before this mapping existed.
+        self.assertEqual(main.model_language_code("Helsinki-NLP/opus-mt-tc-bible-big-mul-mul", "arb_Arab"), ">>ara<<")
+        # A dedicated bilingual model takes the internal code unchanged, aliases included.
+        self.assertEqual(main.model_language_code("Helsinki-NLP/opus-mt-de-ar", "arb_Arab"), "arb_Arab")
+
+    def test_every_core_language_has_a_prefix_token_alias_entry_or_matches_directly(self):
+        # Guard for the next language added: its short code must either be one the fallback
+        # already knows or be mapped in FALLBACK_LANGUAGE_ALIASES. The vocabulary itself cannot
+        # be checked here (that needs the real model), so this only asserts the mapping is
+        # applied - the vocabulary check is the manual step documented alongside the alias table.
+        for internal in main.CORE_LANGUAGES.values():
+            with self.subTest(language=internal):
+                token = main.model_language_code(main.FALLBACK_MODEL_ID, internal)
+                self.assertTrue(token.startswith(">>") and token.endswith("<<"))
+                short = internal.split("_", 1)[0]
+                self.assertEqual(token, f">>{main.FALLBACK_LANGUAGE_ALIASES.get(short, short)}<<")
+
     def test_prepare_translation_prefix_prepends_target_token(self):
         tokenizer = FakeTokenizer()
 

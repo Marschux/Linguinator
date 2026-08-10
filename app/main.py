@@ -175,7 +175,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.5.10", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.5.11", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -391,10 +391,20 @@ def model_family(model_id: str) -> str:
     return "prefix" if "mul-mul" in model_id.lower() else "plain"
 
 
+# The multilingual fallback labels some languages by their macro-language code where our internal
+# codes name a specific variety: it knows >>ara<< (Arabic) but not >>arb<< (Modern Standard
+# Arabic). An unknown prefix is not rejected - the tokenizer just splits it into ordinary subword
+# pieces, so the model receives no target signal at all and answers in whatever language it likes.
+# Before this mapping, nl>ar came back in Korean. Any language added here must be checked against
+# the fallback tokenizer's vocabulary, not assumed.
+FALLBACK_LANGUAGE_ALIASES = {"arb": "ara"}
+
+
 def model_language_code(model_id: str, code: str) -> str:
     """Turn an internal deu_Latn-style code into whatever the given model expects."""
     if "mul-mul" in model_id.lower():
-        return f">>{code.split('_', 1)[0]}<<"
+        short = code.split("_", 1)[0]
+        return f">>{FALLBACK_LANGUAGE_ALIASES.get(short, short)}<<"
     return code
 
 
