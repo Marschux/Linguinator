@@ -562,6 +562,49 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(seen_model_ids, ["Helsinki-NLP/opus-mt-en-de"])
 
+    def test_translation_hops_single_hop_for_dedicated_pair(self):
+        with patch.object(main, "OPUS_PAIRS", {"en>de": {"model_id": "x", "license": "x"}}):
+            hops = main.translation_hops("eng_Latn", "deu_Latn")
+
+        self.assertEqual(hops, [("eng_Latn", "deu_Latn")])
+
+    def test_translation_hops_single_hop_for_ordinary_fallback_pair(self):
+        with patch.object(main, "OPUS_PAIRS", {}):
+            hops = main.translation_hops("fra_Latn", "tur_Latn")
+
+        self.assertEqual(hops, [("fra_Latn", "tur_Latn")])
+
+    def test_translation_hops_pivots_via_english_for_fallback_unsupported_language(self):
+        with patch.object(main, "OPUS_PAIRS", {}):
+            hops = main.translation_hops("deu_Latn", "kor_Hang")
+
+        self.assertEqual(hops, [("deu_Latn", "eng_Latn"), ("eng_Latn", "kor_Hang")])
+
+    def test_translation_hops_no_pivot_when_english_already_an_endpoint(self):
+        # Pivoting eng_Latn -> kor_Hang through itself would be pointless; the direct (broken)
+        # fallback hop is returned as-is so the caller's own resolve_model/model call surfaces it.
+        with patch.object(main, "OPUS_PAIRS", {}):
+            hops = main.translation_hops("eng_Latn", "kor_Hang")
+
+        self.assertEqual(hops, [("eng_Latn", "kor_Hang")])
+
+    def test_translate_one_pivots_through_english_for_unsupported_language(self):
+        seen_model_ids = []
+
+        def fake_load_model(model_id):
+            seen_model_ids.append(model_id)
+            return FakeTokenizer(), FakeModel(), "cpu", FakeTorch()
+
+        pairs = {
+            "de>en": {"model_id": "Helsinki-NLP/opus-mt-de-en", "license": "x"},
+            "en>ko": {"model_id": "Helsinki-NLP/opus-mt-tc-big-en-ko", "license": "x"},
+        }
+        with patch.object(main, "OPUS_PAIRS", pairs):
+            with patch.object(main, "load_model", fake_load_model):
+                main.translate_one("Hallo", "deu_Latn", "kor_Hang")
+
+        self.assertEqual(seen_model_ids, ["Helsinki-NLP/opus-mt-de-en", "Helsinki-NLP/opus-mt-tc-big-en-ko"])
+
     def test_language_codes_returns_core_languages(self):
         with patch.object(main, "CORE_LANGUAGES", {"en": "eng_Latn", "de": "deu_Latn"}):
             self.assertEqual(main.language_codes(), ["deu_Latn", "eng_Latn"])
