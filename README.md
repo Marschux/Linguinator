@@ -71,6 +71,7 @@ The `.env` file is grouped by topic:
 | `LINGUINATOR_HISTORY_DAYS` | `7` | Number of days to keep saved translation history, including retained source files. |
 | `LINGUINATOR_HISTORY_DIR` | `/data/history` | Directory for saved history files, source files, and metadata inside the container. |
 | `LINGUINATOR_TIMEZONE` | `UTC` | IANA timezone name (e.g. `Europe/Berlin`) used to display the completion time next to each history entry. |
+| `LINGUINATOR_TIME_FORMAT` | `auto` | `auto` follows the UI language's own convention (English defaults to 12h, German/French/Spanish to 24h); `12h` or `24h` forces it regardless of UI language. |
 | `LINGUINATOR_JOB_WORKERS` | `1` | Number of queued translation jobs that may run in parallel. Higher values can use more CPU/RAM. |
 | `LINGUINATOR_JOBS_DIR` | `/data/history/jobs` | Directory for persisted queue metadata and pending PDF payloads. |
 | `LINGUINATOR_DEFAULT_SOURCE` | `eng_Latn` | Default source language code. |

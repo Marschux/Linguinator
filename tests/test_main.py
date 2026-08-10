@@ -359,6 +359,12 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(response.json()["version"], main.app.version)
 
+    def test_health_reports_time_format(self):
+        with patch.object(main, "TIME_FORMAT", "24h"):
+            response = TestClient(main.app).get("/health")
+
+        self.assertEqual(response.json()["time_format"], "24h")
+
     def test_health_reports_proxy_configuration(self):
         with patch.object(main, "ROOT_PATH", "/linguinator"):
             with patch.object(main, "PUBLIC_URL", "https://example.test/linguinator"):

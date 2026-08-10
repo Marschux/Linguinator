@@ -11,6 +11,7 @@ let languageData = null;
     let historyPage = 0;
     let historyFilterText = "";
     let historyTimezone = "UTC";
+    let timeFormat = "auto";
     const seenCompletedJobIds = new Set();
     const HISTORY_PAGE_SIZE = 5;
     const baseTitle = document.title || "Linguinator";
@@ -952,6 +953,7 @@ let languageData = null;
       const data = await response.json();
       maxChars = data.max_chars || 0;
       historyTimezone = data.timezone || "UTC";
+      timeFormat = data.time_format || "auto";
       updateCounter();
       const versionEl = document.getElementById("appVersion");
       if (versionEl && data.version) versionEl.textContent = " v" + data.version;
@@ -1004,9 +1006,15 @@ let languageData = null;
       return minutes + "m " + rest + "s";
     }
 
+    function hour12Option() {
+      if (timeFormat === "12h") return true;
+      if (timeFormat === "24h") return false;
+      return undefined;
+    }
+
     function formatJobTime(timestamp) {
       if (!timestamp) return "";
-      return new Date(timestamp * 1000).toLocaleString();
+      return new Date(timestamp * 1000).toLocaleString(undefined, {hour12: hour12Option()});
     }
 
     async function controlJob(jobId, action) {
@@ -1340,7 +1348,7 @@ let languageData = null;
 
     function formatHistoryTime(isoString) {
       try {
-        return new Intl.DateTimeFormat(currentUiLanguage, {hour: "2-digit", minute: "2-digit", timeZone: historyTimezone}).format(new Date(isoString));
+        return new Intl.DateTimeFormat(currentUiLanguage, {hour: "2-digit", minute: "2-digit", timeZone: historyTimezone, hour12: hour12Option()}).format(new Date(isoString));
       } catch {
         return "";
       }
