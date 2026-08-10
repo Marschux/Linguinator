@@ -28,7 +28,7 @@ OUTPUT_PATH = Path(__file__).resolve().parent.parent / "app" / "opus_pairs.json"
 DEFAULT_LANGUAGES = [
     "en", "de", "fr", "es", "it", "nl", "pt", "pl", "ru", "uk", "cs", "sv", "da", "fi", "el",
     "ro", "hu", "bg", "hr", "sk", "et", "ar", "zh", "ja", "he", "hi", "vi", "id", "tr", "no",
-    "sq", "ko", "th",
+    "sq", "th",
 ]
 
 # opus-mt-tc-big-* models are newer Tatoeba-Challenge releases and generally translate better

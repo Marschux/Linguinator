@@ -148,7 +148,7 @@ CORE_LANGUAGES = {
     "ro": "ron_Latn", "hu": "hun_Latn", "bg": "bul_Cyrl", "hr": "hrv_Latn", "sk": "slk_Latn",
     "et": "est_Latn", "ar": "arb_Arab", "zh": "zho_Hans", "ja": "jpn_Jpan", "he": "heb_Hebr",
     "hi": "hin_Deva", "vi": "vie_Latn", "id": "ind_Latn", "tr": "tur_Latn", "no": "nob_Latn",
-    "sq": "sqi_Latn", "ko": "kor_Hang", "th": "tha_Thai",
+    "sq": "sqi_Latn", "th": "tha_Thai",
 }
 INTERNAL_TO_ISO_639_1 = {internal: short for short, internal in CORE_LANGUAGES.items()}
 

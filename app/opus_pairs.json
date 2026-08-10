@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-10T08:57:39.213552+00:00",
+  "generated_at": "2026-08-10T09:17:02.617058+00:00",
   "languages": [
     "ar",
     "bg",
@@ -19,7 +19,6 @@
     "id",
     "it",
     "ja",
-    "ko",
     "nl",
     "no",
     "pl",
@@ -322,10 +321,6 @@
     },
     "en>it": {
       "model_id": "Helsinki-NLP/opus-mt-tc-big-en-it",
-      "license": "cc-by-4.0"
-    },
-    "en>ko": {
-      "model_id": "Helsinki-NLP/opus-mt-tc-big-en-ko",
       "license": "cc-by-4.0"
     },
     "en>nl": {
@@ -854,38 +849,6 @@
     },
     "ja>vi": {
       "model_id": "Helsinki-NLP/opus-mt-ja-vi",
-      "license": "apache-2.0"
-    },
-    "ko>de": {
-      "model_id": "Helsinki-NLP/opus-mt-ko-de",
-      "license": "apache-2.0"
-    },
-    "ko>en": {
-      "model_id": "Helsinki-NLP/opus-mt-tc-big-ko-en",
-      "license": "cc-by-4.0"
-    },
-    "ko>es": {
-      "model_id": "Helsinki-NLP/opus-mt-ko-es",
-      "license": "apache-2.0"
-    },
-    "ko>fi": {
-      "model_id": "Helsinki-NLP/opus-mt-ko-fi",
-      "license": "apache-2.0"
-    },
-    "ko>fr": {
-      "model_id": "Helsinki-NLP/opus-mt-ko-fr",
-      "license": "apache-2.0"
-    },
-    "ko>hu": {
-      "model_id": "Helsinki-NLP/opus-mt-ko-hu",
-      "license": "apache-2.0"
-    },
-    "ko>ru": {
-      "model_id": "Helsinki-NLP/opus-mt-ko-ru",
-      "license": "apache-2.0"
-    },
-    "ko>sv": {
-      "model_id": "Helsinki-NLP/opus-mt-ko-sv",
       "license": "apache-2.0"
     },
     "nl>en": {
