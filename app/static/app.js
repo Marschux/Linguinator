@@ -519,14 +519,15 @@ let languageData = null;
     }
 
     function getFavoriteLanguages() {
-      // Filtered on read as well, so browsers that already stored it from an earlier version
-      // do not keep showing the duplicate.
-      const favorites = getRecentLanguages()
-        .filter((code) => code !== AUTO_LANGUAGE.code)
-        .slice(0, FAVORITE_LANGUAGE_COUNT);
-      for (const code of defaultFavoriteLanguages) {
+      // Every candidate is checked against the languages actually on offer *before* the list is
+      // topped up. A recent entry can name a language that no longer exists (Croatian, Thai,
+      // Norwegian and Romanian were dropped) or auto-detect, which is not a language; dropping
+      // those only after filling up left three or even two favourites on show.
+      const usable = (code) => code !== AUTO_LANGUAGE.code && Boolean(languageByCode(code));
+      const favorites = getRecentLanguages().filter(usable).slice(0, FAVORITE_LANGUAGE_COUNT);
+      for (const code of [...defaultFavoriteLanguages, ...languageData.languages.map((l) => l.code)]) {
         if (favorites.length >= FAVORITE_LANGUAGE_COUNT) break;
-        if (!favorites.includes(code)) favorites.push(code);
+        if (!favorites.includes(code) && usable(code)) favorites.push(code);
       }
       return favorites;
     }
