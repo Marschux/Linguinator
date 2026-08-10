@@ -14,7 +14,6 @@ import threading
 import time
 import uuid
 import zipfile
-import zlib
 from collections import Counter
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -82,9 +81,6 @@ PDF_FOOTER_FONT_SIZE = 9
 PDF_AVG_CHAR_WIDTH = 0.5
 # How far the overlay may shrink the font to make a longer translation fit its original lines.
 PDF_LAYOUT_MIN_SCALE = 0.7
-# Safety margin on the estimated width of the original text when covering it. Anything left
-# uncovered shows through next to the translation; overshoot is clamped at neighbouring columns.
-PDF_COVER_WIDTH_FACTOR = 1.05
 # Layout-PDF paragraphs are usually short, so translating one per model call wastes most of
 # each call on fixed beam-search overhead. Batched via the tensor's batch dimension (not string
 # concatenation), so paragraph boundaries stay exact; kept small to cap the extra padding memory
@@ -645,11 +641,6 @@ def pdf_line_command(text: str, x: float, y: float, font: str = "F1", size: floa
     return f"BT /{font} {size:g} Tf {x:.2f} {y:.2f} Td {pdf_text_object(text, font == 'F2')} Tj ET"
 
 
-def pdf_cover_command(x: float, y: float, width: float, height: float, color: Tuple[float, float, float] = (1.0, 1.0, 1.0)) -> str:
-    r, g, b = color
-    return f"{r:.3f} {g:.3f} {b:.3f} rg {x:.2f} {y:.2f} {width:.2f} {height:.2f} re f 0 g"
-
-
 def markdown_page_sections(text: str) -> List[Dict[str, str]]:
     sections = pdf_sections(text)
     if not sections:
@@ -820,32 +811,11 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
         height = page.get("height", PDF_PAGE_HEIGHT)
         margin = page.get("margin", PDF_MARGIN)
 
-        # Real-pixel cover boxes (render_pdf_layout_overlay): each is its own small image
-        # XObject, drawn before the text lines so the translation still lands on top.
-        image_commands = []
-        xobject_resources = []
-        for cover_index, cover in enumerate(page.get("image_covers", [])):
-            name = f"Im{cover_index}"
-            image_id = next_object_id
-            next_object_id += 1
-            objects.append(pdf_stream_object(
-                f"/Type /XObject /Subtype /Image /Width {cover['pixel_width']} /Height {cover['pixel_height']} "
-                f"/ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode",
-                cover["data"],
-            ))
-            xobject_resources.append(f"/{name} {image_id} 0 R")
-            image_commands.append(
-                f"q {cover['width']:.2f} 0 0 {cover['height']:.2f} {cover['x']:.2f} {cover['y']:.2f} cm /{name} Do Q"
-            )
-        page_resources = resources
-        if xobject_resources:
-            page_resources += " /XObject << " + " ".join(xobject_resources) + " >>"
-
         page_id = next_object_id
         content_id = next_object_id + 1
         next_object_id += 2
         page_refs.append(f"{page_id} 0 R")
-        commands = image_commands + list(page.get("commands", []))
+        commands = list(page.get("commands", []))
         y = height - margin
         if page["source_page"]:
             heading = "Page " + page["source_page"]
@@ -875,7 +845,7 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
         objects.append(
             (
                 f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width:.2f} {height:.2f}] "
-                f"/Resources << {page_resources} >> "
+                f"/Resources << {resources} >> "
                 f"/Contents {content_id} 0 R >>"
             ).encode("utf-8")
         )
@@ -1451,112 +1421,6 @@ def ocr_pdf_page(content: bytes, page_number: int) -> str:
     return result.stdout.strip()
 
 
-def render_pdf_page_image(content: bytes, page_number: int, dpi: int = 100) -> Optional[Any]:
-    """Rasterize one original PDF page, so the layout overlay can sample the real colour behind
-    covered text (pdf_cover_command) instead of always painting over it with plain white."""
-    if not shutil.which("pdftoppm"):
-        return None
-    try:
-        from PIL import Image
-    except ImportError:
-        return None
-    with tempfile.TemporaryDirectory() as temp_dir:
-        pdf_path = Path(temp_dir) / "input.pdf"
-        output_prefix = Path(temp_dir) / "page"
-        pdf_path.write_bytes(content)
-        try:
-            subprocess.run(
-                ["pdftoppm", "-f", str(page_number), "-l", str(page_number), "-r", str(dpi), "-png", "-singlefile", str(pdf_path), str(output_prefix)],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            with Image.open(output_prefix.with_suffix(".png")) as image:
-                return image.convert("RGB").copy()
-        except Exception:
-            return None
-
-
-def pdf_page_color_sampler(image: Optional[Any], page_width: float, page_height: float):
-    """A `sample(x, y, width, height)` closure over a rasterized page, averaging the pixels
-    behind a PDF-space box (bottom-left origin) into an RGB triple, or None if there is no image
-    to sample (pdftoppm/Pillow unavailable) so callers can fall back to plain white."""
-    if image is None or page_width <= 0 or page_height <= 0:
-        return None
-    from PIL import Image as PILImage
-
-    scale_x = image.width / page_width
-    scale_y = image.height / page_height
-    resample = getattr(PILImage, "Resampling", PILImage).BOX
-
-    def sample(x: float, y: float, width: float, height: float) -> Tuple[float, float, float]:
-        left = max(0, min(image.width - 1, int(x * scale_x)))
-        right = max(left + 1, min(image.width, int((x + width) * scale_x)))
-        # PDF y is measured bottom-up from the page origin, image rows are top-down.
-        top = max(0, min(image.height - 1, int((page_height - (y + height)) * scale_y)))
-        bottom = max(top + 1, min(image.height, int((page_height - y) * scale_y)))
-        region = image.resize((1, 1), resample=resample, box=(left, top, right, bottom))
-        pixel = region.getpixel((0, 0))
-        return (pixel[0] / 255.0, pixel[1] / 255.0, pixel[2] / 255.0)
-
-    return sample
-
-
-def pdf_page_pixel_cropper(image: Optional[Any], page_width: float, page_height: float):
-    """A `crop(x, y, width, height)` closure over a rasterized page, reconstructing the background
-    behind a PDF-space box (bottom-left origin) as a small, heavily downsampled RGB buffer ready to
-    embed as a PDF image XObject (stretched back up to box size when drawn). Downsampled rather than
-    copied 1:1: the rasterized page still has the original foreground text baked into its pixels, so
-    an exact crop would just redraw a picture of the very text the box is meant to hide. A coarse
-    grid still follows gradients/photos/colour transitions (the actual complaint about the old flat
-    average) while blurring thin text strokes away. Returns None if there is no image to sample."""
-    if image is None or page_width <= 0 or page_height <= 0:
-        return None
-
-    scale_x = image.width / page_width
-    scale_y = image.height / page_height
-
-    def background_color(box: Tuple[int, int, int, int]) -> Tuple[int, int, int]:
-        """The most common colour in a region, i.e. its background. Averaging instead (the
-        obvious choice) blends the very glyphs being covered into the result and paints a grey
-        band over a white page; the background wins on pixel count in any region holding text."""
-        cell = image.crop(box)
-        colors = cell.getcolors(maxcolors=cell.width * cell.height + 1)
-        if not colors:
-            return (255, 255, 255)
-        return max(colors)[1]
-
-    def crop(x: float, y: float, width: float, height: float) -> Optional[Tuple[bytes, int, int]]:
-        left = max(0, min(image.width - 1, int(x * scale_x)))
-        right = max(left + 1, min(image.width, int((x + width) * scale_x)))
-        # PDF y is measured bottom-up from the page origin, image rows are top-down.
-        top = max(0, min(image.height - 1, int((page_height - (y + height)) * scale_y)))
-        bottom = max(top + 1, min(image.height, int((page_height - y) * scale_y)))
-        if right <= left or bottom <= top:
-            return None
-        # A coarse grid of background samples rather than one flat fill, so gradients/photos behind
-        # the box still shift across it. Capped small: each cell must stay wide enough to contain
-        # more background than glyph, or its mode stops being the background.
-        target_width = max(1, min(12, round((right - left) / 16)))
-        target_height = max(1, min(3, round((bottom - top) / 16)))
-        cell_width = (right - left) / target_width
-        cell_height = (bottom - top) / target_height
-        pixels = bytearray()
-        for row in range(target_height):
-            for column in range(target_width):
-                cell_left = left + int(column * cell_width)
-                cell_top = top + int(row * cell_height)
-                pixels.extend(background_color((
-                    cell_left,
-                    cell_top,
-                    max(cell_left + 1, left + int((column + 1) * cell_width)),
-                    max(cell_top + 1, top + int((row + 1) * cell_height)),
-                )))
-        return zlib.compress(bytes(pixels)), target_width, target_height
-
-    return crop
-
-
 def extract_pdf_markdown_from_bytes(
     content: bytes,
     content_type: str = "application/pdf",
@@ -1648,7 +1512,6 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
                     "y": y,
                     "size": span["size"],
                     "width": span["bbox"][2] - span["bbox"][0],
-                    "exact": True,  # measured by MuPDF from the real font, never estimated
                     "bold": bool(span["flags"] & MUPDF_BOLD_FLAG),
                 })
     return runs
@@ -1687,7 +1550,6 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     "y": run["y"],
                     "right": run["x"] + width,
                     "size": run["size"],
-                    "exact": run.get("exact", False),
                 }
                 continue
             gap = run["x"] - line["right"]
@@ -1697,7 +1559,6 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             # not start beyond the current end continues from it.
             line["right"] = max(run["x"], line["right"]) + width
             line["size"] = max(line["size"], run["size"])
-            line["exact"] = line["exact"] and run.get("exact", False)
         line["text"] = re.sub(r"\s+", " ", line["text"]).strip()
         line["bold"] = bold_chars * 2 > total_chars
         if line["text"]:
@@ -1784,28 +1645,11 @@ def wrap_text_to_width(text: str, width: float, size: float, bold: bool = False)
     return lines or [""]
 
 
-def cover_right_edge(line: Dict[str, Any], wanted: float, neighbours: List[Dict[str, Any]]) -> float:
-    """Widen the cover as far as the estimate asks, but never into a neighbouring column."""
-    for other in neighbours:
-        if other is line:
-            continue
-        if abs(other["y"] - line["y"]) <= 0.6 * line["size"] and other["x"] > line["x"]:
-            wanted = min(wanted, other["x"] - 1)
-    return max(wanted, line["right"])
+def reflow_paragraph(paragraph: Dict[str, Any], text: str) -> List[Dict[str, Any]]:
+    """Lay the translation out in the column the paragraph's original lines occupied.
 
-
-def reflow_paragraph(
-    paragraph: Dict[str, Any],
-    text: str,
-    neighbours: Optional[List[Dict[str, Any]]] = None,
-    sample_color: Optional[Callable[[float, float, float, float], Tuple[float, float, float]]] = None,
-    crop_pixels: Optional[Callable[[float, float, float, float], Optional[Tuple[bytes, int, int]]]] = None,
-) -> Tuple[List[str], List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Cover the paragraph's original lines and lay the translation out in the same column.
-
-    Returns the cover commands (flat-colour fallback), the image covers (real pixel
-    reconstruction, used whenever crop_pixels is available), and the absolutely positioned
-    text lines.
+    Returns the absolutely positioned text lines. Clearing the original text is not this
+    function's job: render_pdf_layout_overlay redacts it out of the source page first.
     """
     lines = paragraph["lines"]
     left = min(line["x"] for line in lines)
@@ -1828,25 +1672,6 @@ def reflow_paragraph(
         size = max(size * 0.95, base_size * PDF_LAYOUT_MIN_SCALE)
         wrapped = wrap_text_to_width(text, width, size, bold)
 
-    factor = 1.0 if all(line.get("exact") for line in lines) else PDF_COVER_WIDTH_FACTOR
-    covers = []
-    image_covers = []
-    for line in lines:
-        # Each line is covered to its own estimated end, so a short line does not paint over
-        # whatever sits beside the paragraph.
-        right = cover_right_edge(line, line["x"] + (line["right"] - line["x"]) * factor, neighbours or [])
-        cover_x, cover_y = line["x"] - 1, line["y"] - 0.25 * line["size"]
-        cover_width, cover_height = right - line["x"] + 2, 1.2 * line["size"]
-        pixels = crop_pixels(cover_x, cover_y, cover_width, cover_height) if crop_pixels else None
-        if pixels:
-            data, pixel_width, pixel_height = pixels
-            image_covers.append({
-                "x": cover_x, "y": cover_y, "width": cover_width, "height": cover_height,
-                "data": data, "pixel_width": pixel_width, "pixel_height": pixel_height,
-            })
-        else:
-            color = sample_color(cover_x, cover_y, cover_width, cover_height) if sample_color else (1.0, 1.0, 1.0)
-            covers.append(pdf_cover_command(cover_x, cover_y, cover_width, cover_height, color))
     placed = []
     for index, wrapped_line in enumerate(wrapped):
         # Translations longer than the original keep running below the last line: overflowing
@@ -1860,7 +1685,47 @@ def reflow_paragraph(
             "x": left,
             "y": y,
         })
-    return covers, placed, image_covers
+    return placed
+
+
+def redact_translated_text(content: bytes, pages: List[Dict[str, Any]], translations: List[str]) -> bytes:
+    """Delete the original text of every translated paragraph from the source PDF.
+
+    Painting boxes over it (the previous approach) left it in the file: copy/paste and Ctrl+F on
+    a "translated" document still returned the original wording. MuPDF's redaction removes the
+    text operators themselves, and with fill off and images/line art excluded it leaves the page
+    background, table shading, icons and vector graphics untouched.
+    """
+    document = pymupdf.open(stream=content, filetype="pdf")
+    index = 0
+    for page_data in pages:
+        page = document[page_data["number"] - 1]
+        redacted = False
+        for paragraph in page_data["paragraphs"]:
+            # A paragraph without a translation keeps its original text rather than being
+            # erased with nothing put in its place.
+            if index < len(translations) and translations[index].strip():
+                for line in paragraph["lines"]:
+                    size = line["size"]
+                    # Deliberately narrower than the line's full height: a rectangle only has to
+                    # touch a glyph for MuPDF to drop it, and one tall enough to hold ascenders
+                    # and descenders would reach into the lines above and below.
+                    rectangle = pymupdf.Rect(
+                        line["x"] - 1,
+                        line["y"] - 0.05 * size,
+                        line["right"] + 1,
+                        line["y"] + 0.5 * size,
+                    ) * page.transformation_matrix
+                    page.add_redact_annot(rectangle, fill=False)
+                    redacted = True
+            index += 1
+        if redacted:
+            page.apply_redactions(
+                images=pymupdf.PDF_REDACT_IMAGE_NONE,
+                graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
+                text=pymupdf.PDF_REDACT_TEXT_REMOVE,
+            )
+    return document.tobytes(garbage=3, deflate=True)
 
 
 def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], translations: List[str]) -> bytes:
@@ -1869,25 +1734,10 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
     overlay_pages = []
     index = 0
     for page in pages:
-        commands: List[str] = []
         lines: List[Dict[str, Any]] = []
-        page_lines = [line for paragraph in page["paragraphs"] for line in paragraph["lines"]]
-        # Rendered once per page (not per paragraph) so covers can sample the real background
-        # colour instead of always painting plain white over it.
-        page_image = render_pdf_page_image(content, page["number"])
-        sample_color = pdf_page_color_sampler(page_image, page["width"], page["height"])
-        crop_pixels = pdf_page_pixel_cropper(page_image, page["width"], page["height"])
-        image_covers: List[Dict[str, Any]] = []
         for paragraph in page["paragraphs"]:
-            # A paragraph without a translation keeps its original text rather than being
-            # covered with nothing.
             if index < len(translations) and translations[index].strip():
-                covers, placed, paragraph_images = reflow_paragraph(
-                    paragraph, translations[index], page_lines, sample_color, crop_pixels
-                )
-                commands.extend(covers)
-                image_covers.extend(paragraph_images)
-                lines.extend(placed)
+                lines.extend(reflow_paragraph(paragraph, translations[index]))
             index += 1
         overlay_pages.append({
             "width": page["width"],
@@ -1897,12 +1747,11 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
             "continuation": False,
             "footer": False,
             "lines": lines,
-            "commands": commands,
-            "image_covers": image_covers,
+            "commands": [],
         })
 
     overlay_reader = PdfReader(BytesIO(create_pdf_from_pages(overlay_pages)))
-    reader = PdfReader(BytesIO(content))
+    reader = PdfReader(BytesIO(redact_translated_text(content, pages, translations)))
     writer = PdfWriter()
     # Only the selected pages are translated, so only those are exported. Keeping the untouched
     # rest would make a single-page selection look like the unconverted original.

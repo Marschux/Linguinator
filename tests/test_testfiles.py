@@ -15,9 +15,10 @@ page, so more pages cost runtime without covering anything new.
 """
 import sys
 import unittest
-import zlib
 from io import BytesIO
 from pathlib import Path
+
+import pymupdf
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -107,87 +108,55 @@ class TestfilePdfRoundTripTests(unittest.TestCase):
 
 
 @unittest.skipUnless(testfile_pdfs(), "tests/testfiles/ has no PDFs (gitignored, maintainer-local)")
-class TestfileCoverBoxTests(unittest.TestCase):
-    def cover_cells_with_regions(self, image, page, paragraph):
-        """Each cover cell the pipeline would emit for this paragraph, paired with the slice of
-        the rendered page it was sampled from. Mirrors the cover geometry in reflow_paragraph and
-        the cell grid in pdf_page_pixel_cropper, so a cell can be checked against its own source.
-        """
-        page_width, page_height = page["width"], page["height"]
-        crop = main.pdf_page_pixel_cropper(image, page_width, page_height)
-        self.assertIsNotNone(crop, "Pillow unavailable, cannot sample covers")
-        scale_x = image.width / page_width
-        scale_y = image.height / page_height
+class TestfileRedactionTests(unittest.TestCase):
+    def test_translated_pages_no_longer_carry_the_original_wording(self):
+        """The original text must be gone from the file, not just painted over.
 
-        for line in paragraph["lines"]:
-            x = line["x"] - 1
-            y = line["y"] - 0.25 * line["size"]
-            width = (line["right"] - line["x"]) + 2
-            height = 1.2 * line["size"]
-            sample = crop(x, y, width, height)
-            if not sample:
-                continue
-            data, cells_across, cells_down = sample
-            raw = zlib.decompress(data)
-
-            left = max(0, min(image.width - 1, int(x * scale_x)))
-            right = max(left + 1, min(image.width, int((x + width) * scale_x)))
-            top = max(0, min(image.height - 1, int((page_height - (y + height)) * scale_y)))
-            bottom = max(top + 1, min(image.height, int((page_height - y) * scale_y)))
-            cell_width = (right - left) / cells_across
-            cell_height = (bottom - top) / cells_down
-
-            for row in range(cells_down):
-                for column in range(cells_across):
-                    offset = (row * cells_across + column) * 3
-                    cell_left = left + int(column * cell_width)
-                    cell_top = top + int(row * cell_height)
-                    region = image.crop((
-                        cell_left,
-                        cell_top,
-                        max(cell_left + 1, left + int((column + 1) * cell_width)),
-                        max(cell_top + 1, top + int((row + 1) * cell_height)),
-                    ))
-                    yield tuple(raw[offset:offset + 3]), region
-
-    def test_cover_fills_are_colours_that_exist_on_the_page(self):
-        """Every cover fill must be a colour actually present in the area it covers.
-
-        This is the precise form of the "grey bands over every line" regression: averaging the
-        region blends the glyphs being hidden into the fill and yields a colour that appears
-        nowhere on the page (black text on white averaged to ~(205,205,205)). Sampling the
-        region's dominant colour instead can only ever return a colour that is really there.
-
-        Deliberately not asserting "covers are light": these documents carry black table headers,
-        grey panels and hint boxes, and a cover sitting on one of those is correct to be dark.
+        Covering it left it copy/pasteable and findable with Ctrl+F, so a document handed on as
+        "translated" still gave the reader the source wording. Checked by feeding each paragraph
+        back in as its own "translation" and then asking the exported PDF for its text: only the
+        substituted marker may survive.
         """
         for path in testfile_pdfs():
             with self.subTest(document=path.name):
                 content = path.read_bytes()
                 pages = main.extract_pdf_layout(content, "1")
-                image = main.render_pdf_page_image(content, 1)
-                if image is None:
-                    self.skipTest("pdftoppm unavailable")
+                paragraphs = [p["text"] for page in pages for p in page["paragraphs"]]
 
-                page = pages[0]
-                checked = 0
-                invented = []
-                for paragraph in page["paragraphs"]:
-                    for cell, region in self.cover_cells_with_regions(image, page, paragraph):
-                        checked += 1
-                        present = {color for _count, color in region.getcolors(
-                            maxcolors=region.width * region.height + 1
-                        ) or []}
-                        if cell not in present:
-                            invented.append((cell, sorted(present)[:3]))
-
-                self.assertTrue(checked, f"{path.name} produced no cover samples")
-                self.assertEqual(
-                    invented[:5],
-                    [],
-                    f"{path.name}: {len(invented)}/{checked} cover fills are blended colours that "
-                    f"do not occur in the region they cover",
+                exported = main.export_pdf_layout_with_translated_text(
+                    content, "\n\n".join("UEBERSETZT" for _ in paragraphs), "1"
                 )
+                left = pymupdf.open(stream=exported, filetype="pdf")[0].get_text()
+
+                for original in paragraphs:
+                    # Whole words only: a paragraph may share short fragments with a heading or
+                    # a table cell that legitimately stayed put.
+                    for word in original.split():
+                        if len(word) > 8 and word.isalpha():
+                            self.assertNotIn(word, left, f"{path.name}: {word!r} survived redaction")
+
+    def test_redaction_keeps_the_page_graphics(self):
+        """Redaction must not eat the backgrounds it sits on.
+
+        apply_redactions removes images and vector graphics under the rectangle by default,
+        which would strip table shading, hint-box panels and logos along with the text.
+        """
+        for path in testfile_pdfs():
+            with self.subTest(document=path.name):
+                content = path.read_bytes()
+                pages = main.extract_pdf_layout(content, "1")
+                paragraphs = [p for page in pages for p in page["paragraphs"]]
+                before = pymupdf.open(stream=content, filetype="pdf")[0]
+
+                redacted = main.redact_translated_text(
+                    content, pages, ["UEBERSETZT" for _ in paragraphs]
+                )
+                after = pymupdf.open(stream=redacted, filetype="pdf")[0]
+
+                # Not equality: rewriting the page can split a drawing or re-embed an image, so
+                # the count may go up. Only losing one means the redaction ate the background.
+                self.assertGreaterEqual(len(after.get_images()), len(before.get_images()))
+                self.assertGreaterEqual(len(after.get_drawings()), len(before.get_drawings()))
 
 
 if __name__ == "__main__":
