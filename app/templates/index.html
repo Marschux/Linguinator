@@ -34,7 +34,7 @@
     <section class="grid workspace-section">
       <div class="tabs" role="tablist" aria-label="Input type">
         <button class="tab" type="button" data-input-tab="textarea" disabled title="Type text directly into the input field."><span class="tab-label">Text Field</span></button>
-        <button class="tab" type="button" data-input-tab="text" disabled title="Load and translate a text-like file."><span class="tab-label">Text</span></button>
+        <button class="tab" type="button" data-input-tab="text" disabled title="Load and translate a TXT file, and also HTML, SRT, VTT, JSON, YAML, PO or XLIFF."><span class="tab-label">TXT File</span></button>
         <button class="tab" type="button" data-input-tab="markdown" disabled title="Load and translate a Markdown file."><span class="tab-label">Markdown</span></button>
         <button class="tab" type="button" data-input-tab="website" disabled title="Translate a public web page from its address. Built, still to be tested."><span class="tab-label">Website</span></button>
         <button class="tab" type="button" data-input-tab="office" disabled title="Load and translate a DOCX or ODT file as text."><span class="tab-label">DOC File</span></button>
@@ -44,7 +44,7 @@
       </div>
       <select id="inputTabSelect" class="input-tab-select" aria-label="Input type" title="Select the input type.">
         <option value="textarea" disabled>Text Field</option>
-        <option value="text" disabled>Text</option>
+        <option value="text" disabled>TXT File</option>
         <option value="markdown" disabled>Markdown</option>
         <option value="website" disabled>Website</option>
         <option value="office" disabled>DOC File</option>
@@ -77,7 +77,7 @@
     </section>
 
     <section id="filePanel" class="section tab-panel workspace-section">
-      <label id="textFileLabel" for="textFile">Text File</label>
+      <label id="textFileLabel" for="textFile">TXT File</label>
       <input id="textFile" type="file" accept=".txt,text/plain" title="Select the file to load.">
       <input id="sheetName" class="file-extra" type="text" placeholder="XLSX sheet name, optional" title="Optional XLSX sheet name. Leave empty to use the first sheet.">
       <input id="csvColumns" class="file-extra" type="text" placeholder="CSV/XLSX columns, e.g. title,description or A,B" title="Column names or letters to translate.">
