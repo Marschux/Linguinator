@@ -246,7 +246,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.7.2", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.7.4", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -987,7 +987,9 @@ def pdf_document_font_texts(pages: List[Dict[str, Any]]) -> Dict[str, List[str]]
 # is right for Latin, Cyrillic, Greek, CJK and Hebrew and wrong for these - Hindi came out with
 # its matras behind the wrong letters and no conjuncts at all. MuPDF shapes text as it draws it,
 # so pages holding one of these scripts are written with MuPDF instead.
-PDF_SHAPED_SCRIPTS = ("devanagari", "arabic", "thai")
+# Scripts our own writer cannot get right by placing one codepoint after another: matras move in
+# front of their consonant, Arabic letters join, and Hebrew and Arabic run right to left.
+PDF_SHAPED_SCRIPTS = ("devanagari", "arabic", "thai", "hebrew")
 # Base-14 stand-ins, used when no file for the face could be loaded.
 PDF_BASE_FONTS = {(False, False): "helv", (True, False): "hebo",
                   (False, True): "tiro", (True, True): "tibo"}
@@ -998,25 +1000,39 @@ def pages_need_shaping(pages: List[Dict[str, Any]]) -> bool:
                for page in pages for line in page["lines"] if line["text"])
 
 
-def draw_shaped_line(page, registered: set, text: str, x: float, y: float, face: str,
+@lru_cache(maxsize=8)
+def shaping_font(bold: bool, script: str, serif: bool):
+    """The same font load_embedded_font hands the hand-built writer, as a MuPDF font.
+
+    Cached because MuPDF parses the file again for every font object, and a long document draws
+    thousands of lines out of the same handful of faces.
+    """
+    embedded = load_embedded_font(bold, script, serif)
+    return (pymupdf.Font(fontbuffer=embedded.data) if embedded
+            else pymupdf.Font(PDF_BASE_FONTS[(bold, serif)]))
+
+
+def draw_shaped_line(page, text: str, x: float, y: float, face: str,
                      size: float, color: int, height: float) -> None:
     """One line of text on a MuPDF page, at the same place our own writer would put it.
 
     `y` is a PDF baseline, counted up from the bottom of the page; MuPDF counts down from the
-    top, hence the flip. A font loaded from disk has to be registered on the page before
-    insert_text can refer to it by name, and only once per page.
+    top, hence the flip.
+
+    Written through a TextWriter rather than insert_text for the one thing insert_text has no
+    switch for: a Hebrew or Arabic line has to be laid down right to left, or it ends up on the
+    page back to front. Everything else comes out of both the same, glyph for glyph.
     """
     bold, serif = PDF_FONT_FACES.get(face, (False, False))
-    font = load_embedded_font(bold, detect_pdf_script(text), serif)
-    fontname = re.sub(r"\W", "", font.name)[:30] if font else PDF_BASE_FONTS[(bold, serif)]
-    if font and fontname not in registered:
-        page.insert_font(fontname=fontname, fontbuffer=font.data)
-        registered.add(fontname)
-    page.insert_text(
-        (x, height - y),
-        text,
-        fontname=fontname,
-        fontsize=size,
+    font = shaping_font(bold, detect_pdf_script(text), serif)
+    writer = pymupdf.TextWriter(page.rect)
+    # ponytail: MuPDF turns the line around as a whole, so a Latin word or a number inside an
+    # RTL line is turned around with it. Reach for a real bidi pass when a document shows up
+    # where that matters.
+    writer.append((x, height - y), text, font=font, fontsize=size,
+                  right_to_left=is_rtl_text(text))
+    writer.write_text(
+        page,
         color=((color >> 16 & 0xFF) / 255, (color >> 8 & 0xFF) / 255, (color & 0xFF) / 255),
     )
 
@@ -1029,23 +1045,22 @@ def create_shaped_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
         height = page_data.get("height", PDF_PAGE_HEIGHT)
         margin = page_data.get("margin", PDF_MARGIN)
         page = document.new_page(width=width, height=height)
-        registered: set = set()
         y = height - margin
         if page_data["source_page"]:
             heading = "Page " + page_data["source_page"]
             if page_data["continuation"]:
                 heading += " continued"
-            draw_shaped_line(page, registered, heading, margin, y, "F2",
+            draw_shaped_line(page, heading, margin, y, "F2",
                              PDF_HEADING_FONT_SIZE, 0, height)
             y -= 24
         for line in page_data["lines"]:
             if line["text"]:
-                draw_shaped_line(page, registered, line["text"], line.get("x", margin),
+                draw_shaped_line(page, line["text"], line.get("x", margin),
                                  line.get("y", y), line["font"], line["size"],
                                  line.get("color", 0), height)
             y -= line["line_height"]
         if page_data.get("footer", True):
-            draw_shaped_line(page, registered, f"{output_page_number}", width - margin,
+            draw_shaped_line(page, f"{output_page_number}", width - margin,
                              margin // 2, "F1", PDF_FOOTER_FONT_SIZE, 0, height)
     return document.tobytes(garbage=3, deflate=True)
 
@@ -2724,6 +2739,9 @@ def reflow_paragraph(
         size = max(size * 0.95, base_size * PDF_LAYOUT_MIN_SCALE)
         wrapped = wrap_text_to_width(text, width, size, bold, serif)
 
+    # A translation into Hebrew or Arabic hangs off the right edge of the column, the way the
+    # column would have been set had the document been written in that language.
+    rtl = is_rtl_text(text)
     placed = []
     for index, wrapped_line in enumerate(wrapped):
         # Translations longer than the original keep running below the last line: overflowing
@@ -2740,7 +2758,7 @@ def reflow_paragraph(
                      (False, True): "F3", (True, True): "F4"}[(bold, serif)],
             "size": size,
             "line_height": 0,
-            "x": left,
+            "x": right - pdf_measure_text(wrapped_line, size, bold, serif) if rtl else left,
             "y": y,
             "color": color,
         })

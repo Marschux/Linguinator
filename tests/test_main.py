@@ -1841,6 +1841,35 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual([run["text"] for run in main.pdf_page_runs(page)], ["םיבכוכה חתפמ"])
 
+    def test_a_hebrew_translation_is_written_right_to_left(self):
+        # Placed codepoint by codepoint from the left, a Hebrew line ends up on the page back to
+        # front. Reading our own output back is the check: it goes through the same turn-around
+        # a source document gets, so the line only comes out again if it was written the right
+        # way round.
+        text = "שלום עולם"
+        pdf = main.create_pdf_from_pages([{
+            "width": 300, "height": 200, "margin": 20,
+            "source_page": "", "continuation": False, "footer": False,
+            "lines": [{"text": text, "font": "F1", "size": 14, "line_height": 18,
+                       "x": 20, "y": 150}],
+        }])
+
+        page = pymupdf.open(stream=pdf, filetype="pdf")[0]
+        read_back = [line["text"] for line in main.group_pdf_lines(main.pdf_page_runs(page))]
+
+        if read_back:  # no Hebrew font on the machine means nothing to place, not a failure
+            self.assertEqual(read_back, [text])
+
+    def test_reflow_paragraph_hangs_a_right_to_left_translation_off_the_right_edge(self):
+        paragraph = {"lines": [
+            {"text": "Key of the stars", "x": 100.0, "y": 700.0, "right": 300.0, "size": 12.0},
+        ]}
+
+        placed = main.reflow_paragraph(paragraph, "מפתח הכוכבים")
+
+        width = main.pdf_measure_text(placed[0]["text"], placed[0]["size"])
+        self.assertAlmostEqual(placed[0]["x"] + width, 300.0, delta=1)
+
     def test_reflow_paragraph_carries_the_original_colour(self):
         # A title set in white on a dark cover image was redrawn in the default black.
         white = 0xFFFFFF
@@ -1859,12 +1888,13 @@ class MainTests(unittest.TestCase):
         def page(text):
             return {"lines": [{"text": text, "font": "F1"}], "source_page": ""}
 
-        # Matras move in front of their consonant, Arabic letters join: drawn codepoint by
-        # codepoint these come out wrong, so MuPDF writes the page instead.
+        # Matras move in front of their consonant, Arabic letters join, Hebrew runs right to
+        # left: drawn codepoint by codepoint these come out wrong, so MuPDF writes the page.
         self.assertTrue(main.pages_need_shaping([page("सितारों की कुंजी")]))
         self.assertTrue(main.pages_need_shaping([page("مفتاح النجوم")]))
+        self.assertTrue(main.pages_need_shaping([page("מפתח הכוכבים")]))
         # Everything else our own writer gets right, and keeps writing byte for byte as before.
-        for text in ("Guten Morgen", "Привет", "星の鍵", "מפתח הכוכבים", ""):
+        for text in ("Guten Morgen", "Привет", "星の鍵", ""):
             with self.subTest(text=text):
                 self.assertFalse(main.pages_need_shaping([page(text)]))
 
