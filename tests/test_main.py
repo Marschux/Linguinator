@@ -1884,6 +1884,10 @@ class MainTests(unittest.TestCase):
                  for line in block.get("lines", []) for span in line["spans"]]
         if drawn:  # no Devanagari font on the machine means nothing to place, not a failure
             self.assertAlmostEqual(200 - drawn[0]["origin"][1], 150, delta=2)
+            # Every character reached a glyph of its own. Glyph id 0 is .notdef, the empty box
+            # that a missing font or an unshaped cluster leaves behind.
+            glyph_ids = [item[1] for span in page.get_texttrace() for item in span["chars"]]
+            self.assertNotIn(0, glyph_ids)
 
     def test_coloured_page_names_the_colour_on_every_line(self):
         # `rg` outlives its text object: a black line drawn after a white one and left to the

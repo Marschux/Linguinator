@@ -158,6 +158,8 @@ PDF_SCRIPT_FONT_CANDIDATES = {
     "devanagari": (
         "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
         "C:/Windows/Fonts/mangal.ttf",
+        # Mangal only ships with Windows' Hindi language support; Nirmala UI is always there.
+        "C:/Windows/Fonts/Nirmala.ttc",
     ),
     "hebrew": (
         "/usr/share/fonts/truetype/noto/NotoSansHebrew-Regular.ttf",
