@@ -1822,6 +1822,26 @@ class MainTests(unittest.TestCase):
         # The full stop of an RTL sentence stands at its left end.
         self.assertEqual(main.visual_to_logical(".םולש"), "שלום.")
 
+    def test_visual_to_logical_puts_a_stray_full_stop_back_at_the_end(self):
+        # A converter that skips the bidi algorithm leaves the sentence's full stop at the right
+        # edge of the line, which for RTL is where the line begins, so it arrives here in front
+        # of the text. Measured on a Word document converted by Stirling-PDF.
+        self.assertEqual(main.visual_to_logical("םיקיתעה םיפנעה."), "הענפים העתיקים.")
+        self.assertEqual(main.visual_to_logical("רעיה תמשנ'."), "נשמת היער'.")
+        # A line that genuinely opens with a quotation keeps it.
+        self.assertEqual(main.visual_to_logical("םולש'"), "'שלום")
+
+    def test_pdf_page_runs_measures_a_right_to_left_span_from_its_left_edge(self):
+        # MuPDF reports the origin of an RTL span where reading starts, its right edge, while
+        # everything downstream measures a line from the left. Taken as given, a full stop drawn
+        # as its own span sorted behind the text it ends.
+        span = mupdf_span("םיקיתעה", 100, 700)
+        span["origin"] = (span["bbox"][2], span["origin"][1])
+
+        runs = main.pdf_page_runs(FakeMuPdfPage([span]))
+
+        self.assertAlmostEqual(runs[0]["x"], 100, delta=0.01)
+
     def test_visual_to_logical_keeps_closing_punctuation_in_its_order(self):
         # Punctuation at the left end of the line has nothing before it to belong to. Taken as a
         # stretch of its own it runs the wrong way and the quote and full stop swap places, which

@@ -2404,7 +2404,21 @@ def visual_to_logical(text: str) -> str:
     """
     parts = [(reverse_rtl(part) if rtl else part).strip()
              for part, rtl in direction_segments(text)]
-    return " ".join(part for part in reversed(parts) if part)
+    logical = " ".join(part for part in reversed(parts) if part)
+    # A converter that lays an RTL paragraph out without running the bidi algorithm leaves the
+    # sentence's full stop at the right edge of the line, where it stands in the file, instead
+    # of the left edge where it is read. It then arrives here as the first character of the
+    # line. No line of prose begins with a full stop, so it goes back to the end where it
+    # belongs - measured on a Word document converted by Stirling-PDF, this was 40 of its 45
+    # differences against the original text.
+    lead = 0
+    while lead < len(logical) - 1 and logical[lead] in ".!?'\"":
+        lead += 1
+    # A closing quote goes back with the full stop it stands next to. Only a stretch holding an
+    # end-of-sentence mark is moved, so a line that genuinely opens with a quotation stays put.
+    if any(char in ".!?" for char in logical[:lead]):
+        logical = logical[lead:].lstrip() + logical[lead - 1::-1]
+    return logical
 
 
 def pdf_page_runs(page) -> List[Dict[str, Any]]:
@@ -2434,12 +2448,20 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
                 continue
             for span in line["spans"]:
                 characters = span["chars"]
-                if any(is_rtl_char(item["c"]) for item in characters):
+                right_to_left = any(is_rtl_char(item["c"]) for item in characters)
+                if right_to_left:
                     characters = sorted(characters, key=lambda item: item["origin"][0])
                 text = "".join(item["c"] for item in characters)
                 if not text.strip():
                     continue
                 x, y = pymupdf.Point(span["origin"]) * inverse
+                if right_to_left:
+                    # A right-to-left span starts where it is read from, its right edge, and
+                    # that is the origin MuPDF reports. Everything downstream measures a line
+                    # from its left edge: a sentence's full stop, drawn as its own span, sorted
+                    # to the far right of the text it ends and came out in front of the next
+                    # line instead.
+                    x, _ = pymupdf.Point(span["bbox"][0], span["origin"][1]) * inverse
                 if abs(x) < 0.01 and abs(y) < 0.01:
                     # Some generators dump a hidden duplicate of the page's text anchored at the
                     # origin (accessibility/search layer). It is never real, visible content.
@@ -2544,8 +2566,13 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             cell["serif"] = cell.pop("serif_chars") * 2 > total
             colors = cell.pop("color_chars")
             cell["color"] = colors.most_common(1)[0][0] if colors else 0
-            if cell["text"]:
-                lines.append(cell)
+        # A justified Hebrew line whose word spacing grows past PDF_CELL_GAP is cut into cells
+        # like a table row, and those are read from the right: taken left to right, the end of
+        # the sentence came before its beginning and the full stop landed in front of the next
+        # line's first word.
+        if is_rtl_text(" ".join(cell["text"] for cell in cells)):
+            cells.reverse()
+        lines.extend(cell for cell in cells if cell["text"])
     return lines
 
 
