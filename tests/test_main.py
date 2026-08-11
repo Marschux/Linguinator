@@ -1020,6 +1020,45 @@ class MainTests(unittest.TestCase):
         with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout=report)):
             self.assertEqual(main.ocr_page_script(Path("page.png")), "Cyrillic")
 
+    def test_dominant_text_script_names_the_script(self):
+        self.assertEqual(main.dominant_text_script("Hello world"), "Latin")
+        self.assertEqual(main.dominant_text_script("הרפובליקה הפדרלית"), "Hebrew")
+        self.assertEqual(main.dominant_text_script("Президентские выборы"), "Cyrillic")
+        self.assertEqual(main.dominant_text_script("शिक्षा मंत्रालय"), "Devanagari")
+        self.assertEqual(main.dominant_text_script("12345 -,."), "")
+
+    def test_text_layer_is_distrusted_when_it_contradicts_the_page(self):
+        # A Hebrew page whose font maps to Latin: the text layer claims Latin, the page shows
+        # Hebrew. Nothing in the file flags this, the fonts do carry a ToUnicode table.
+        with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
+            with patch.object(main, "render_pdf_page", return_value=Path("page.png")):
+                with patch.object(main, "ocr_page_script", return_value="Hebrew"):
+                    self.assertFalse(main.text_layer_is_trustworthy(b"%PDF", 1, "hinmrg tilrdph"))
+                with patch.object(main, "ocr_page_script", return_value="Latin"):
+                    self.assertTrue(main.text_layer_is_trustworthy(b"%PDF", 1, "hinmrg tilrdph"))
+                # Japanese is written with Han characters, so those two never contradict.
+                with patch.object(main, "ocr_page_script", return_value="Japanese"):
+                    self.assertTrue(main.text_layer_is_trustworthy(b"%PDF", 1, "作成日 東京都"))
+                # OSD silent, or a page without letters: nothing to contradict.
+                with patch.object(main, "ocr_page_script", return_value=""):
+                    self.assertTrue(main.text_layer_is_trustworthy(b"%PDF", 1, "hinmrg tilrdph"))
+                with patch.object(main, "ocr_page_script", return_value="Hebrew"):
+                    self.assertTrue(main.text_layer_is_trustworthy(b"%PDF", 1, "12345"))
+
+    def test_pdf_extraction_falls_back_to_ocr_for_a_lying_text_layer(self):
+        document = FakeDocument([FakePage("hinmrg lß tilrdph hqilbuprh und mehr text"),
+                                 FakePage("hinmrg lß tilrdph hqilbuprh und mehr text")])
+
+        with patch.object(main.pymupdf, "open", return_value=document):
+            with patch.object(main, "text_layer_is_trustworthy", return_value=False) as checked:
+                with patch.object(main, "ocr_pdf_page", return_value="הרפובליקה") as mocked_ocr:
+                    markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
+
+        self.assertIn("הרפובליקה", markdown)
+        self.assertEqual(mocked_ocr.call_count, 2)
+        # Asked once for the document, not once per page.
+        self.assertEqual(checked.call_count, 1)
+
     def test_ocr_probe_reads_traditional_chinese_with_its_own_model(self):
         installed = ("chi_sim", "chi_tra", "deu", "eng", "fra")
         with patch.object(main, "installed_ocr_languages", return_value=installed):

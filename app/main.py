@@ -1862,29 +1862,84 @@ def ocr_probe_languages(script: str) -> str:
     return "+".join(codes) if codes else OCR_FALLBACK_LANGUAGE
 
 
+def render_pdf_page(content: bytes, page_number: int, temp_dir: str) -> Path:
+    """One page of a PDF as a PNG, the form both OSD and tesseract want."""
+    pdf_path = Path(temp_dir) / "input.pdf"
+    output_prefix = Path(temp_dir) / "page"
+    pdf_path.write_bytes(content)
+    subprocess.run(
+        [
+            "pdftoppm",
+            "-f",
+            str(page_number),
+            "-l",
+            str(page_number),
+            "-png",
+            "-singlefile",
+            str(pdf_path),
+            str(output_prefix),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return output_prefix.with_suffix(".png")
+
+
+# Character ranges per script, named the way OSD names them so the two can be compared.
+TEXT_SCRIPT_RANGES = (
+    ("Latin", ((0x41, 0x5A), (0x61, 0x7A), (0xC0, 0x24F))),
+    ("Cyrillic", ((0x400, 0x4FF),)),
+    ("Greek", ((0x370, 0x3FF),)),
+    ("Hebrew", ((0x590, 0x5FF), (0xFB1D, 0xFB4F))),
+    ("Arabic", ((0x600, 0x6FF), (0xFB50, 0xFEFF))),
+    ("Devanagari", ((0x900, 0x97F),)),
+    ("Han", ((0x3400, 0x9FFF),)),
+    ("Japanese", ((0x3040, 0x30FF),)),
+)
+# Japanese is written with Han characters too, so those two never contradict each other.
+COMPATIBLE_SCRIPTS = {frozenset(("Han", "Japanese"))}
+
+
+def dominant_text_script(text: str) -> str:
+    """Which script most of a text is written in, "" when it holds no letters we know."""
+    best, best_count = "", 0
+    for name, spans in TEXT_SCRIPT_RANGES:
+        count = sum(1 for c in text if any(low <= ord(c) <= high for low, high in spans))
+        if count > best_count:
+            best, best_count = name, count
+    return best
+
+
+def text_layer_is_trustworthy(content: bytes, page_number: int, text: str) -> bool:
+    """Does the page's text layer agree with what is printed on the page?
+
+    A PDF can carry a text layer that decodes to something else entirely - a Hebrew page whose
+    font maps to Latin letters yields `hinmrg lß tilrdph`. There is no flag for it: the font has
+    a ToUnicode table, it is simply wrong. But the rendered image still shows Hebrew, so asking
+    OSD what script the page *looks* like and comparing that to the script the text *claims*
+    catches it without any threshold or guesswork.
+    """
+    claimed = dominant_text_script(text)
+    if not claimed or not shutil.which("pdftoppm") or not shutil.which("tesseract"):
+        return True
+    try:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            printed = ocr_page_script(render_pdf_page(content, page_number, temp_dir))
+    except Exception:
+        return True
+    if not printed or printed == claimed:
+        return True
+    printed = "Han" if printed in ("HanS", "HanT") else printed
+    if printed == claimed or frozenset((printed, claimed)) in COMPATIBLE_SCRIPTS:
+        return True
+    return False
+
+
 def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE) -> str:
     ensure_ocr_tools()
     with tempfile.TemporaryDirectory() as temp_dir:
-        pdf_path = Path(temp_dir) / "input.pdf"
-        output_prefix = Path(temp_dir) / "page"
-        pdf_path.write_bytes(content)
-        subprocess.run(
-            [
-                "pdftoppm",
-                "-f",
-                str(page_number),
-                "-l",
-                str(page_number),
-                "-png",
-                "-singlefile",
-                str(pdf_path),
-                str(output_prefix),
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        image_path = output_prefix.with_suffix(".png")
+        image_path = render_pdf_page(content, page_number, temp_dir)
         if source != AUTO_SOURCE:
             return run_tesseract(image_path, ocr_language_code(source))
 
@@ -1934,10 +1989,17 @@ def extract_pdf_markdown_from_bytes(
     selected_pages = parse_page_range(page_range, document.page_count)
     pages = []
     pages_with_text = 0
+    # Checked once on the first page that has one, not per page: a text layer is written by one
+    # producer for the whole file, and the check costs a render plus an OSD call.
+    trust_text_layer = None
     for index in selected_pages:
         text = document[index - 1].get_text() or ""
         text = re.sub(r"[ \t]+\n", "\n", text).strip()
         needs_ocr = not text or len(text) < PDF_LOW_TEXT_CHARS
+        if not needs_ocr:
+            if trust_text_layer is None:
+                trust_text_layer = text_layer_is_trustworthy(content, index, text)
+            needs_ocr = not trust_text_layer
         if needs_ocr:
             ocr_text = ocr_pdf_page(content, index, source)
             if ocr_text:
