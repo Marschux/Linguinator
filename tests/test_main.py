@@ -5,6 +5,7 @@ import shutil
 import socket
 import sys
 import time
+import unicodedata
 import unittest
 import uuid
 import zipfile
@@ -45,6 +46,11 @@ class FakeDocument:
 
     def __getitem__(self, index):
         return self.pages[index]
+
+
+def fold(text):
+    """NFKC, so a letter and the presentation form of it compare equal."""
+    return unicodedata.normalize("NFKC", text)
 
 
 def mupdf_span(text, x, y, size=11.0, bold=False, direction=(1.0, 0.0), font="Helvetica",
@@ -1816,6 +1822,13 @@ class MainTests(unittest.TestCase):
         # The full stop of an RTL sentence stands at its left end.
         self.assertEqual(main.visual_to_logical(".םולש"), "שלום.")
 
+    def test_visual_to_logical_keeps_closing_punctuation_in_its_order(self):
+        # Punctuation at the left end of the line has nothing before it to belong to. Taken as a
+        # stretch of its own it runs the wrong way and the quote and full stop swap places, which
+        # is what a real Hebrew page turned up.
+        logical = "נשמת היער'."
+        self.assertEqual(main.visual_to_logical(logical[::-1]), logical)
+
     def test_pdf_page_runs_drops_a_second_copy_drawn_over_the_first(self):
         # Synthetic bold paints the same glyphs twice ("PPoowweerr"), and some generators leave a
         # whole second copy of the page's text behind, offset and often broken. Only one of them
@@ -1847,13 +1860,20 @@ class MainTests(unittest.TestCase):
         # a source document gets, so the line only comes out again if it was written the right
         # way round.
         text = "שלום עולם"
-        self.assertEqual(self.written_and_read_back(text), [text])
+        self.assertEqual(self.written_and_read_back(text), [fold(text)])
 
     def test_a_year_inside_a_hebrew_line_keeps_its_own_direction(self):
         # The line turns around, the number and the Latin word inside it do not: written as one
         # reversed string, "2024" would stand on the page as "4202".
         text = "ירושלים 2024 ABC"
-        self.assertEqual(self.written_and_read_back(text), [text])
+        self.assertEqual(self.written_and_read_back(text), [fold(text)])
+
+    def test_an_arabic_vowel_mark_stays_on_the_letter_it_belongs_to(self):
+        # A harakat follows its letter and takes up no width of its own, so a line reversed
+        # character by character drops it behind the letter before: measured on a real Arabic
+        # page, معروفًا came back as معروًفا.
+        text = "معروفًا بين سكان البلدة"
+        self.assertEqual(self.written_and_read_back(text), [fold(text)])
 
     def written_and_read_back(self, text):
         """Our own output, read back through the extractor that turns RTL lines around."""
@@ -1865,9 +1885,12 @@ class MainTests(unittest.TestCase):
         }])
 
         page = pymupdf.open(stream=pdf, filetype="pdf")[0]
-        read_back = [line["text"] for line in main.group_pdf_lines(main.pdf_page_runs(page))]
-        # Nothing at all means the machine has no Hebrew font, which is not a failure.
-        return read_back or [text]
+        # The Arabic fallback font's ToUnicode names the presentation form of each letter rather
+        # than the letter itself, so both sides are compared folded back to base characters.
+        read_back = [fold(line["text"])
+                     for line in main.group_pdf_lines(main.pdf_page_runs(page))]
+        # Nothing at all means the machine has no font for the script, which is not a failure.
+        return read_back or [fold(text)]
 
     def test_reflow_paragraph_hangs_a_right_to_left_translation_off_the_right_edge(self):
         paragraph = {"lines": [

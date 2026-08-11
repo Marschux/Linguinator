@@ -2369,7 +2369,29 @@ def direction_segments(text: str) -> List[Tuple[str, bool]]:
         else:
             segments.append([char])
             directions.append(rtl)
+    # Punctuation at the very start has nothing before it to belong to and would stand as a
+    # stretch of its own, running the wrong way: the full stop and closing quote at the left end
+    # of a Hebrew line came back as `היער.'` instead of `היער'.`. It belongs to the line it ends.
+    if len(segments) > 1 and not any(char.isalnum() for char in segments[0]):
+        segments[1] = segments[0] + segments[1]
+        del segments[0], directions[0]
     return [("".join(chars), rtl) for chars, rtl in zip(segments, directions)]
+
+
+def reverse_rtl(text: str) -> str:
+    """Reverse a stretch of right-to-left text without tearing its marks off.
+
+    A vowel point or an Arabic harakat follows the letter it belongs to and carries no width of
+    its own, so reversing character by character drops it behind the letter before: measured on
+    a real Arabic page, `معروفًا` came back as `معروًفا`.
+    """
+    clusters: List[str] = []
+    for char in text:
+        if clusters and unicodedata.category(char) == "Mn":
+            clusters[-1] += char
+        else:
+            clusters.append(char)
+    return "".join(reversed(clusters))
 
 
 def visual_to_logical(text: str) -> str:
@@ -2380,10 +2402,9 @@ def visual_to_logical(text: str) -> str:
     Latin words inside the line already run left to right and are reversed back into place, and
     spaces or punctuation stay with the segment they were found in.
     """
-    parts = [(part[::-1] if rtl else part).strip() for part, rtl in direction_segments(text)]
-    # A sentence's full stop sits at the left end of an RTL line and becomes a segment of its
-    # own, which would otherwise leave a space in front of it after the turn.
-    return re.sub(r"\s+([,.;:!?])", r"\1", " ".join(part for part in reversed(parts) if part))
+    parts = [(reverse_rtl(part) if rtl else part).strip()
+             for part, rtl in direction_segments(text)]
+    return " ".join(part for part in reversed(parts) if part)
 
 
 def pdf_page_runs(page) -> List[Dict[str, Any]]:
