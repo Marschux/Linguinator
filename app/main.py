@@ -1026,11 +1026,21 @@ def draw_shaped_line(page, text: str, x: float, y: float, face: str,
     bold, serif = PDF_FONT_FACES.get(face, (False, False))
     font = shaping_font(bold, detect_pdf_script(text), serif)
     writer = pymupdf.TextWriter(page.rect)
-    # ponytail: MuPDF turns the line around as a whole, so a Latin word or a number inside an
-    # RTL line is turned around with it. Reach for a real bidi pass when a document shows up
-    # where that matters.
-    writer.append((x, height - y), text, font=font, fontsize=size,
-                  right_to_left=is_rtl_text(text))
+    if is_rtl_text(text):
+        # MuPDF's own right_to_left turns the whole string around, a year or a Latin name inside
+        # the line with it. So the line is handed over a stretch at a time, laid out from its
+        # right edge leftwards, each stretch written in the direction it actually runs.
+        cursor = x
+        space = font.text_length(" ", fontsize=size)
+        for part, rtl in reversed(direction_segments(text)):
+            part = part.strip()
+            if not part:
+                continue
+            writer.append((cursor, height - y), part, font=font, fontsize=size,
+                          right_to_left=rtl)
+            cursor += font.text_length(part, fontsize=size) + space
+    else:
+        writer.append((x, height - y), text, font=font, fontsize=size)
     writer.write_text(
         page,
         color=((color >> 16 & 0xFF) / 255, (color >> 8 & 0xFF) / 255, (color & 0xFF) / 255),
@@ -2341,13 +2351,12 @@ def is_rtl_text(text: str) -> bool:
     return rtl > 0 and rtl * 2 > sum(1 for char in text if char.isalpha())
 
 
-def visual_to_logical(text: str) -> str:
-    """Turn a right-to-left line from the order it stands on the page into reading order.
+def direction_segments(text: str) -> List[Tuple[str, bool]]:
+    """The line cut into stretches of one writing direction, each with the direction it runs in.
 
-    The layout pipeline assembles a line from left to right, which for Hebrew or Arabic is the
-    order a reader ends on. Reversing it restores the reading order the model needs; digits and
-    Latin words inside the line already run left to right and are reversed back into place, and
-    spaces or punctuation stay with the segment they were found in.
+    A Hebrew line holding a year or a product name is two directions at once, and both the
+    reader and the writer have to treat those stretches separately: the line as a whole turns
+    around, the Latin word inside it does not.
     """
     segments: List[List[str]] = []
     directions: List[bool] = []
@@ -2360,10 +2369,18 @@ def visual_to_logical(text: str) -> str:
         else:
             segments.append([char])
             directions.append(rtl)
-    parts = [
-        "".join(reversed(chars) if rtl else chars).strip()
-        for chars, rtl in zip(segments, directions)
-    ]
+    return [("".join(chars), rtl) for chars, rtl in zip(segments, directions)]
+
+
+def visual_to_logical(text: str) -> str:
+    """Turn a right-to-left line from the order it stands on the page into reading order.
+
+    The layout pipeline assembles a line from left to right, which for Hebrew or Arabic is the
+    order a reader ends on. Reversing it restores the reading order the model needs; digits and
+    Latin words inside the line already run left to right and are reversed back into place, and
+    spaces or punctuation stay with the segment they were found in.
+    """
+    parts = [(part[::-1] if rtl else part).strip() for part, rtl in direction_segments(text)]
     # A sentence's full stop sits at the left end of an RTL line and becomes a segment of its
     # own, which would otherwise leave a space in front of it after the turn.
     return re.sub(r"\s+([,.;:!?])", r"\1", " ".join(part for part in reversed(parts) if part))

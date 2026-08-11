@@ -1847,6 +1847,16 @@ class MainTests(unittest.TestCase):
         # a source document gets, so the line only comes out again if it was written the right
         # way round.
         text = "שלום עולם"
+        self.assertEqual(self.written_and_read_back(text), [text])
+
+    def test_a_year_inside_a_hebrew_line_keeps_its_own_direction(self):
+        # The line turns around, the number and the Latin word inside it do not: written as one
+        # reversed string, "2024" would stand on the page as "4202".
+        text = "ירושלים 2024 ABC"
+        self.assertEqual(self.written_and_read_back(text), [text])
+
+    def written_and_read_back(self, text):
+        """Our own output, read back through the extractor that turns RTL lines around."""
         pdf = main.create_pdf_from_pages([{
             "width": 300, "height": 200, "margin": 20,
             "source_page": "", "continuation": False, "footer": False,
@@ -1856,9 +1866,8 @@ class MainTests(unittest.TestCase):
 
         page = pymupdf.open(stream=pdf, filetype="pdf")[0]
         read_back = [line["text"] for line in main.group_pdf_lines(main.pdf_page_runs(page))]
-
-        if read_back:  # no Hebrew font on the machine means nothing to place, not a failure
-            self.assertEqual(read_back, [text])
+        # Nothing at all means the machine has no Hebrew font, which is not a failure.
+        return read_back or [text]
 
     def test_reflow_paragraph_hangs_a_right_to_left_translation_off_the_right_edge(self):
         paragraph = {"lines": [
