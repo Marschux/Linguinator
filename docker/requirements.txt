@@ -5,6 +5,7 @@ transformers==4.54.1
 sentencepiece==0.2.0
 pypdf==5.9.0
 pymupdf==1.28.2
+# Not imported directly any more, but pymupdf's subset_fonts() needs it.
 fonttools==4.63.0
 python-multipart==0.0.20
 httpx==0.28.1

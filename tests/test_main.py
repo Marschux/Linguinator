@@ -23,6 +23,19 @@ import app.main as main
 import app.server as server
 
 
+def pdf_spans(content, page_number=0):
+    """Every drawn span of a generated PDF, read back the way a viewer sees it. Asserted on
+    rather than the byte stream: MuPDF writes the file, its exact operators are its own
+    business."""
+    page = pymupdf.open(stream=content, filetype="pdf")[page_number]
+    return [span for block in page.get_text("dict")["blocks"]
+            for line in block.get("lines", []) for span in line["spans"]]
+
+
+def pdf_page_count(content):
+    return len(pymupdf.open(stream=content, filetype="pdf"))
+
+
 def pdf_text(content):
     from pypdf import PdfReader
 
@@ -1264,22 +1277,23 @@ class MainTests(unittest.TestCase):
     def test_create_text_pdf_returns_pdf_document(self):
         content = main.create_text_pdf("Translated text\n\nSecond paragraph")
 
-        self.assertTrue(content.startswith(b"%PDF-1.4"))
-        self.assertIn(b"/Type /Page", content)
+        self.assertTrue(content.startswith(b"%PDF"))
+        self.assertEqual(pdf_page_count(content), 1)
         self.assertIn("Translated text", pdf_text(content))
 
     def test_create_text_pdf_preserves_markdown_page_breaks(self):
         content = main.create_text_pdf("# Page 1\n\nFirst\n\n# Page 2\n\nSecond")
         text = pdf_text(content)
 
-        self.assertIn(b"/Count 2", content)
+        self.assertEqual(pdf_page_count(content), 2)
         self.assertIn("Page 1", text)
         self.assertIn("Page 2", text)
 
     def test_create_text_pdf_formats_markdown_headings(self):
         content = main.create_text_pdf("# Title\n\nBody")
 
-        self.assertIn(b"/F2 15 Tf", content)
+        title = [span for span in pdf_spans(content) if "Title" in span["text"]]
+        self.assertEqual(title[0]["size"], main.PDF_HEADING_FONT_SIZE)
         self.assertIn("Title", pdf_text(content))
 
     def test_pdf_sections_returns_none_without_page_markers(self):
@@ -1295,8 +1309,6 @@ class MainTests(unittest.TestCase):
         self.assertEqual(sections, [{"page_number": "", "text": "Hello world, this is the whole translation."}])
 
     def test_create_text_pdf_embeds_font_for_non_latin_text(self):
-        if not main.load_embedded_font(False):
-            self.skipTest("no TrueType font available on this machine")
         content = main.create_text_pdf("Privet mir: Привет")
 
         self.assertIn(b"/FontFile2", content)
@@ -1312,12 +1324,14 @@ class MainTests(unittest.TestCase):
         self.assertEqual(main.detect_pdf_script("שלום"), "hebrew")
 
     def test_create_text_pdf_embeds_script_specific_font_for_cjk_text(self):
-        if not main.load_embedded_font(False, "cjk"):
-            self.skipTest("no CJK-capable font available on this machine")
         content = main.create_text_pdf("こんにちは世界")
 
         self.assertIn(b"/FontFile2", content)
         self.assertIn("こんにちは世界", pdf_text(content))
+        # Glyph id 0 is .notdef, the empty box a font without the script leaves behind.
+        page = pymupdf.open(stream=content, filetype="pdf")[0]
+        glyph_ids = [item[1] for span in page.get_texttrace() for item in span["chars"]]
+        self.assertNotIn(0, glyph_ids)
 
     def test_create_text_docx_returns_valid_package(self):
         content = main.create_text_docx("# Title\n\nHallo Welt.\n\nSecond paragraph.")
@@ -1932,23 +1946,6 @@ class MainTests(unittest.TestCase):
         placed = main.reflow_paragraph(paragraph, "Einschalten")
 
         self.assertEqual(placed[0]["color"], white)
-        self.assertIn("1.000 1.000 1.000 rg", main.pdf_line_command("x", 0, 0, "F1", 10, white))
-        # Pages without a single coloured line are written exactly as before.
-        self.assertNotIn("rg", main.pdf_line_command("x", 0, 0, "F1", 10))
-
-    def test_pages_need_shaping_only_for_the_scripts_that_do(self):
-        def page(text):
-            return {"lines": [{"text": text, "font": "F1"}], "source_page": ""}
-
-        # Matras move in front of their consonant, Arabic letters join, Hebrew runs right to
-        # left: drawn codepoint by codepoint these come out wrong, so MuPDF writes the page.
-        self.assertTrue(main.pages_need_shaping([page("सितारों की कुंजी")]))
-        self.assertTrue(main.pages_need_shaping([page("مفتاح النجوم")]))
-        self.assertTrue(main.pages_need_shaping([page("מפתח הכוכבים")]))
-        # Everything else our own writer gets right, and keeps writing byte for byte as before.
-        for text in ("Guten Morgen", "Привет", "星の鍵", ""):
-            with self.subTest(text=text):
-                self.assertFalse(main.pages_need_shaping([page(text)]))
 
     def test_shaped_pages_come_out_as_a_readable_pdf(self):
         pdf = main.create_pdf_from_pages([{
@@ -1971,9 +1968,9 @@ class MainTests(unittest.TestCase):
             glyph_ids = [item[1] for span in page.get_texttrace() for item in span["chars"]]
             self.assertNotIn(0, glyph_ids)
 
-    def test_coloured_page_names_the_colour_on_every_line(self):
-        # `rg` outlives its text object: a black line drawn after a white one and left to the
-        # default would inherit the white and vanish.
+    def test_a_coloured_line_does_not_tint_the_lines_after_it(self):
+        # The PDF fill colour outlives the text object that set it: a black line drawn after
+        # a white one and left to the default would inherit the white and vanish.
         page = {
             "width": 300, "height": 200, "margin": 20,
             "source_page": "", "continuation": False, "footer": True,
@@ -1983,11 +1980,13 @@ class MainTests(unittest.TestCase):
             ],
         }
 
-        pdf = main.create_pdf_from_pages([page]).decode("latin-1")
+        spans = pdf_spans(main.create_pdf_from_pages([page]))
 
-        self.assertIn("1.000 1.000 1.000 rg", pdf)
-        # The black line and the page footer both state their colour rather than inheriting.
-        self.assertEqual(pdf.count("0.000 0.000 0.000 rg"), 2)
+        colours = {span["text"].strip(): span["color"] for span in spans}
+        self.assertEqual(colours["weiss"], 0xFFFFFF)
+        # The black line and the page footer stay black.
+        self.assertEqual(colours["schwarz"], 0x000000)
+        self.assertEqual(colours["1"], 0x000000)
 
     def test_group_pdf_lines_takes_the_colour_most_of_the_line_is_set_in(self):
         runs = [
@@ -2124,11 +2123,9 @@ class MainTests(unittest.TestCase):
             ],
         }])
 
-        fonts = main.PdfReader(BytesIO(source)).pages[0]["/Resources"]["/Font"]
-        sans = str(fonts["/F1"].get_object().get("/BaseFont", ""))
-        serif = str(fonts["/F3"].get_object().get("/BaseFont", ""))
-        self.assertNotEqual(sans, serif)
-        self.assertRegex(serif.lower(), r"serif|times")
+        fonts = {span["text"].strip(): span["font"] for span in pdf_spans(source)}
+        self.assertNotEqual(fonts["Sans line"], fonts["Serif line"])
+        self.assertRegex(fonts["Serif line"].lower(), r"serif|times")
 
     def test_pdf_layout_roundtrip_replaces_text_and_keeps_page_size(self):
         source = main.create_pdf_from_pages([{
@@ -2213,12 +2210,6 @@ class MainTests(unittest.TestCase):
                 main.JOBS.clear()
                 main.JOB_RUNNERS.clear()
             shutil.rmtree(temp_dir, ignore_errors=True)
-
-    def test_pdf_text_object_encodes_unicode(self):
-        with patch.object(main, "load_embedded_font", return_value=None):
-            self.assertEqual(main.pdf_text_object("Grusse"), "(Grusse)")
-            self.assertEqual(main.pdf_text_object("Gruesse aeoeue"), "(Gruesse aeoeue)")
-            self.assertTrue(main.pdf_text_object("Gruesse: " + chr(228)).startswith("<FEFF"))
 
     def test_cleanup_history_removes_old_files(self):
         temp_dir = test_temp_dir()
@@ -2332,7 +2323,7 @@ class MainTests(unittest.TestCase):
             self.assertEqual(text_response.text, "Translated result")
             self.assertEqual(pdf_response.status_code, 200)
             self.assertEqual(pdf_response.headers["content-type"], "application/pdf")
-            self.assertTrue(pdf_response.content.startswith(b"%PDF-1.4"))
+            self.assertTrue(pdf_response.content.startswith(b"%PDF"))
             self.assertEqual(doc_response.status_code, 200)
             self.assertEqual(
                 doc_response.headers["content-type"],

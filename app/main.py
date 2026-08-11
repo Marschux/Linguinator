@@ -86,10 +86,6 @@ PDF_LINE_HEIGHT = 14
 PDF_FONT_SIZE = 11
 PDF_HEADING_FONT_SIZE = 15
 PDF_FOOTER_FONT_SIZE = 9
-# Average glyph width as a fraction of the font size, used when no real font metrics are
-# available. Calibration knob: too small leaves old text peeking out from under the overlay,
-# too large covers neighbouring content.
-PDF_AVG_CHAR_WIDTH = 0.5
 # How far the overlay may shrink the font to make a longer translation fit its original lines.
 PDF_LAYOUT_MIN_SCALE = 0.7
 # Kept clear of the page edge when a paragraph has nothing to its right.
@@ -718,42 +714,22 @@ def translate_text(text: str, source: str, target: str) -> str:
     return "\n\n".join(translated)
 
 
-class EmbeddedFont:
-    """A TrueType font loaded from disk, ready to be embedded as a PDF CID font."""
-
-    def __init__(self, name: str, data: bytes, glyph_ids: Dict[int, int], widths: Dict[int, int], metrics: Dict[str, int]):
-        self.name = name
-        self.data = data
-        self.glyph_ids = glyph_ids
-        self.widths = widths
-        self.metrics = metrics
-
-    def glyph_id(self, codepoint: int) -> int:
-        return self.glyph_ids.get(codepoint, self.glyph_ids.get(ord("?"), 0))
-
-    def encode(self, text: str) -> str:
-        return "".join(f"{self.glyph_id(ord(char)):04X}" for char in text)
-
-    def text_width(self, text: str, size: float) -> float:
-        total = sum(self.widths.get(ord(char), 500) for char in text)
-        return total * size / 1000.0
+# Base-14 stand-ins, used when no file for the face could be loaded.
+PDF_BASE_FONTS = {(False, False): "helv", (True, False): "hebo",
+                  (False, True): "tiro", (True, True): "tibo"}
 
 
 @lru_cache(maxsize=8)
-def load_embedded_font(bold: bool = False, script: str = "", serif: bool = False) -> Optional[EmbeddedFont]:
-    """Load a TrueType font for PDF embedding, or None to fall back to base-14 Helvetica.
+def script_font(bold: bool = False, script: str = "", serif: bool = False):
+    """The font a face is drawn and measured with, as a MuPDF font.
 
-    Without an embedded font a PDF can only show WinAnsi characters, so any non-Latin target
-    language (Cyrillic, Greek, ...) would come out as garbage. `script` (from detect_pdf_script)
-    picks a font that actually covers CJK/Arabic/Devanagari/Hebrew instead, where DejaVu Sans
-    has no glyphs at all; those fonts are used as-is for "bold" too since covering the script
-    matters more than the weight.
+    A base-14 font can only show WinAnsi characters, so any non-Latin target language (Cyrillic,
+    Greek, ...) would come out as garbage. `script` (from detect_pdf_script) picks a file that
+    actually covers CJK/Arabic/Devanagari/Hebrew instead, where DejaVu Sans has no glyphs at all;
+    those fonts are used as-is for "bold" too since covering the script matters more than the
+    weight. Cached because MuPDF parses the file again for every font object, and a long document
+    draws thousands of lines out of the same handful of faces.
     """
-    try:
-        from fontTools.ttLib import TTFont
-    except ImportError:
-        return None
-
     if script and script in PDF_SCRIPT_FONT_CANDIDATES:
         candidates = PDF_SCRIPT_FONT_CANDIDATES[script]
     elif serif:
@@ -764,57 +740,14 @@ def load_embedded_font(bold: bool = False, script: str = "", serif: bool = False
         if not path or not Path(path).exists():
             continue
         try:
-            ttf = TTFont(path, fontNumber=0, lazy=True)
-            units = ttf["head"].unitsPerEm or 1000
-            scale = 1000.0 / units
-            metrics = ttf["hmtx"].metrics
-            glyph_ids: Dict[int, int] = {}
-            widths: Dict[int, int] = {}
-            for codepoint, glyph_name in ttf.getBestCmap().items():
-                glyph_ids[codepoint] = ttf.getGlyphID(glyph_name)
-                widths[codepoint] = round(metrics[glyph_name][0] * scale)
-            head = ttf["head"]
-            os2 = ttf["OS/2"] if "OS/2" in ttf else None
-            return EmbeddedFont(
-                re.sub(r"[^A-Za-z0-9-]", "", Path(path).stem) or "EmbeddedFont",
-                Path(path).read_bytes(),
-                glyph_ids,
-                widths,
-                {
-                    "x_min": round(head.xMin * scale),
-                    "y_min": round(head.yMin * scale),
-                    "x_max": round(head.xMax * scale),
-                    "y_max": round(head.yMax * scale),
-                    "ascent": round(ttf["hhea"].ascent * scale),
-                    "descent": round(ttf["hhea"].descent * scale),
-                    "cap_height": round(getattr(os2, "sCapHeight", 0) * scale) or 700,
-                },
-            )
+            return pymupdf.Font(fontfile=path)
         except Exception:
             continue
-    return None
+    return pymupdf.Font(PDF_BASE_FONTS[(bold, serif)])
 
 
 def pdf_measure_text(text: str, size: float, bold: bool = False, serif: bool = False) -> float:
-    font = load_embedded_font(bold, detect_pdf_script(text), serif)
-    if font:
-        return font.text_width(text, size)
-    return len(text) * PDF_AVG_CHAR_WIDTH * size
-
-
-def pdf_escape(text: str) -> str:
-    return text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
-
-
-def pdf_text_object(text: str, bold: bool = False, serif: bool = False) -> str:
-    font = load_embedded_font(bold, detect_pdf_script(text), serif)
-    if font:
-        return "<" + font.encode(text) + ">"
-    try:
-        text.encode("ascii")
-    except UnicodeEncodeError:
-        return "<" + (bytes.fromhex("FEFF") + text.encode("utf-16-be")).hex().upper() + ">"
-    return f"({pdf_escape(text)})"
+    return script_font(bold, detect_pdf_script(text), serif).text_length(text, fontsize=size)
 
 
 def wrap_pdf_line(text: str, size: float = PDF_FONT_SIZE) -> List[str]:
@@ -824,19 +757,6 @@ def wrap_pdf_line(text: str, size: float = PDF_FONT_SIZE) -> List[str]:
     if not text:
         return [""]
     return wrap_text_to_width(text, PDF_PAGE_WIDTH - 2 * PDF_MARGIN, size)
-
-
-def pdf_line_command(
-    text: str, x: float, y: float, font: str = "F1", size: float = PDF_FONT_SIZE,
-    color: Optional[int] = None,
-) -> str:
-    bold, serif = PDF_FONT_FACES.get(font, (False, False))
-    # `rg` sets the fill colour in the graphics state, which outlives the text object it stands in:
-    # once one line on a page is drawn in white, every later line has to name its own colour or it
-    # inherits the white and disappears. None means the page has no coloured line at all and the
-    # operator is left out entirely, which keeps every other pipeline's output byte-for-byte.
-    fill = "" if color is None else f"{(color >> 16 & 0xFF) / 255:.3f} {(color >> 8 & 0xFF) / 255:.3f} {(color & 0xFF) / 255:.3f} rg "
-    return f"BT {fill}/{font} {size:g} Tf {x:.2f} {y:.2f} Td {pdf_text_object(text, bold, serif)} Tj ET"
 
 
 def markdown_page_sections(text: str) -> List[Dict[str, str]]:
@@ -891,130 +811,9 @@ def pdf_document_pages(text: str) -> List[Dict[str, Any]]:
     return document_pages or [{"source_page": "", "continuation": False, "lines": []}]
 
 
-def pdf_stream_object(dictionary: str, stream: bytes) -> bytes:
-    return f"<< {dictionary} /Length {len(stream)} >>\nstream\n".encode("utf-8") + stream + b"\nendstream"
-
-
-def pdf_to_unicode_stream(font: EmbeddedFont, codepoints: List[int]) -> bytes:
-    """A ToUnicode CMap, so text in the generated PDF stays selectable and searchable
-    even though the content stream addresses glyphs by id."""
-    lines = [
-        "/CIDInit /ProcSet findresource begin",
-        "12 dict begin",
-        "begincmap",
-        "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def",
-        "/CMapName /Adobe-Identity-UCS def",
-        "/CMapType 2 def",
-        "1 begincodespacerange",
-        "<0000> <FFFF>",
-        "endcodespacerange",
-    ]
-    pairs = sorted({(font.glyph_id(codepoint), codepoint) for codepoint in codepoints})
-    for start in range(0, len(pairs), 100):
-        block = pairs[start:start + 100]
-        lines.append(f"{len(block)} beginbfchar")
-        for glyph_id, codepoint in block:
-            target = chr(codepoint).encode("utf-16-be").hex().upper()
-            lines.append(f"<{glyph_id:04X}> <{target}>")
-        lines.append("endbfchar")
-    lines += ["endcmap", "CMapName currentdict /CMap defineresource pop", "end", "end"]
-    return "\n".join(lines).encode("utf-8")
-
-
-def pdf_font_file(font: EmbeddedFont, codepoints: List[int]) -> bytes:
-    """Strip the outlines of glyphs the document never draws. `retain_gids` keeps the original
-    glyph ids valid, so the cached cmap/width tables stay usable."""
-    try:
-        from fontTools import subset
-        from fontTools.ttLib import TTFont
-
-        ttf = TTFont(BytesIO(font.data), fontNumber=0)
-        subsetter = subset.Subsetter(options=subset.Options(retain_gids=True, notdef_outline=True))
-        subsetter.populate(unicodes=codepoints)
-        subsetter.subset(ttf)
-        output = BytesIO()
-        ttf.save(output)
-        return output.getvalue()
-    except Exception:
-        return font.data
-
-
-def pdf_font_objects(font: EmbeddedFont, codepoints: List[int], first_id: int) -> List[bytes]:
-    """Five objects describing one embedded font: file, descriptor, ToUnicode, CID font, Type0."""
-    file_id, descriptor_id, to_unicode_id, cid_id = first_id, first_id + 1, first_id + 2, first_id + 3
-    widths = sorted({(font.glyph_id(codepoint), font.widths.get(codepoint, 500)) for codepoint in codepoints})
-    width_array = " ".join(f"{glyph_id} [{width}]" for glyph_id, width in widths)
-    metrics = font.metrics
-    font_data = pdf_font_file(font, codepoints)
-    return [
-        pdf_stream_object(f"/Length1 {len(font_data)}", font_data),
-        (
-            f"<< /Type /FontDescriptor /FontName /{font.name} /Flags 4 "
-            f"/FontBBox [{metrics['x_min']} {metrics['y_min']} {metrics['x_max']} {metrics['y_max']}] "
-            f"/ItalicAngle 0 /Ascent {metrics['ascent']} /Descent {metrics['descent']} "
-            f"/CapHeight {metrics['cap_height']} /StemV 80 /FontFile2 {file_id} 0 R >>"
-        ).encode("utf-8"),
-        pdf_stream_object("", pdf_to_unicode_stream(font, codepoints)),
-        (
-            f"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /{font.name} "
-            f"/CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> "
-            f"/FontDescriptor {descriptor_id} 0 R /DW 1000 /W [{width_array}] /CIDToGIDMap /Identity >>"
-        ).encode("utf-8"),
-        (
-            f"<< /Type /Font /Subtype /Type0 /BaseFont /{font.name} /Encoding /Identity-H "
-            f"/DescendantFonts [{cid_id} 0 R] /ToUnicode {to_unicode_id} 0 R >>"
-        ).encode("utf-8"),
-    ]
-
-
-def pdf_document_font_texts(pages: List[Dict[str, Any]]) -> Dict[str, List[str]]:
-    """Every string the document draws, grouped by font resource name, so each font is only
-    embedded if it is actually used and only needs widths for the characters it draws."""
-    texts: Dict[str, List[str]] = {name: [] for name in PDF_FONT_FACES}
-    for page in pages:
-        for line in page["lines"]:
-            texts[line["font"]].append(line["text"])
-        if page["source_page"]:
-            texts["F2"].append("Page " + page["source_page"] + " continued")
-        if page.get("footer", True):
-            texts["F1"].append("0123456789")
-    return texts
-
-
-# Scripts whose glyphs have to be reordered and merged before they can be drawn: a Devanagari
-# vowel sign is stored after its consonant but printed in front of it, and Arabic letters change
-# shape depending on their neighbours. The writer below maps codepoints straight to glyphs, which
-# is right for Latin, Cyrillic, Greek, CJK and Hebrew and wrong for these - Hindi came out with
-# its matras behind the wrong letters and no conjuncts at all. MuPDF shapes text as it draws it,
-# so pages holding one of these scripts are written with MuPDF instead.
-# Scripts our own writer cannot get right by placing one codepoint after another: matras move in
-# front of their consonant, Arabic letters join, and Hebrew and Arabic run right to left.
-PDF_SHAPED_SCRIPTS = ("devanagari", "arabic", "thai", "hebrew")
-# Base-14 stand-ins, used when no file for the face could be loaded.
-PDF_BASE_FONTS = {(False, False): "helv", (True, False): "hebo",
-                  (False, True): "tiro", (True, True): "tibo"}
-
-
-def pages_need_shaping(pages: List[Dict[str, Any]]) -> bool:
-    return any(detect_pdf_script(line["text"]) in PDF_SHAPED_SCRIPTS
-               for page in pages for line in page["lines"] if line["text"])
-
-
-@lru_cache(maxsize=8)
-def shaping_font(bold: bool, script: str, serif: bool):
-    """The same font load_embedded_font hands the hand-built writer, as a MuPDF font.
-
-    Cached because MuPDF parses the file again for every font object, and a long document draws
-    thousands of lines out of the same handful of faces.
-    """
-    embedded = load_embedded_font(bold, script, serif)
-    return (pymupdf.Font(fontbuffer=embedded.data) if embedded
-            else pymupdf.Font(PDF_BASE_FONTS[(bold, serif)]))
-
-
-def draw_shaped_line(page, text: str, x: float, y: float, face: str,
-                     size: float, color: int, height: float) -> None:
-    """One line of text on a MuPDF page, at the same place our own writer would put it.
+def draw_pdf_line(page, text: str, x: float, y: float, face: str,
+                  size: float, color: int, height: float) -> None:
+    """One line of text on a MuPDF page.
 
     `y` is a PDF baseline, counted up from the bottom of the page; MuPDF counts down from the
     top, hence the flip.
@@ -1024,7 +823,7 @@ def draw_shaped_line(page, text: str, x: float, y: float, face: str,
     page back to front. Everything else comes out of both the same, glyph for glyph.
     """
     bold, serif = PDF_FONT_FACES.get(face, (False, False))
-    font = shaping_font(bold, detect_pdf_script(text), serif)
+    font = script_font(bold, detect_pdf_script(text), serif)
     writer = pymupdf.TextWriter(page.rect)
     if is_rtl_text(text):
         # MuPDF's own right_to_left turns the whole string around, a year or a Latin name inside
@@ -1047,8 +846,27 @@ def draw_shaped_line(page, text: str, x: float, y: float, face: str,
     )
 
 
-def create_shaped_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
-    """Same pages, written by MuPDF so that complex scripts come out shaped."""
+def fix_pdf_space_mapping(document) -> None:
+    """Map the space glyph back to U+0020 in every ToUnicode table MuPDF wrote.
+
+    A font's cmap points both space and no-break space at the same glyph, and MuPDF builds its
+    ToUnicode by reversing that map, so the glyph comes back as U+00A0. Copy/paste and Ctrl+F in
+    the finished document then miss every phrase longer than one word.
+    """
+    for xref in range(1, document.xref_length()):
+        if not document.xref_is_stream(xref):
+            continue
+        stream = document.xref_stream(xref)
+        if b"beginbfchar" not in stream:
+            continue
+        # Only the target of a single-glyph mapping, never the glyph id in front of it.
+        patched = re.sub(rb"(<[0-9a-fA-F]{4}> )<00[aA]0>", rb"\g<1><0020>", stream)
+        if patched != stream:
+            document.update_stream(xref, patched)
+
+
+def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
+    """Write the pages with MuPDF, which shapes complex scripts and embeds the fonts itself."""
     document = pymupdf.open()
     for output_page_number, page_data in enumerate(pages, start=1):
         width = page_data.get("width", PDF_PAGE_WIDTH)
@@ -1060,110 +878,27 @@ def create_shaped_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
             heading = "Page " + page_data["source_page"]
             if page_data["continuation"]:
                 heading += " continued"
-            draw_shaped_line(page, heading, margin, y, "F2",
-                             PDF_HEADING_FONT_SIZE, 0, height)
+            draw_pdf_line(page, heading, margin, y, "F2",
+                          PDF_HEADING_FONT_SIZE, 0, height)
             y -= 24
         for line in page_data["lines"]:
             if line["text"]:
-                draw_shaped_line(page, line["text"], line.get("x", margin),
-                                 line.get("y", y), line["font"], line["size"],
-                                 line.get("color", 0), height)
+                draw_pdf_line(page, line["text"], line.get("x", margin),
+                              line.get("y", y), line["font"], line["size"],
+                              line.get("color", 0), height)
             y -= line["line_height"]
         if page_data.get("footer", True):
-            draw_shaped_line(page, f"{output_page_number}", width - margin,
-                             margin // 2, "F1", PDF_FOOTER_FONT_SIZE, 0, height)
+            draw_pdf_line(page, f"{output_page_number}", width - margin,
+                          margin // 2, "F1", PDF_FOOTER_FONT_SIZE, 0, height)
+    # MuPDF embeds every font whole: a page of Japanese carried 6.8 MB of MS Gothic. Subsetting
+    # to the glyphs actually drawn brings that back below what the old hand-built writer produced.
+    try:
+        document.subset_fonts(verbose=False)
+    except Exception:
+        # Needs fontTools; a fat PDF is still a readable one.
+        pass
+    fix_pdf_space_mapping(document)
     return document.tobytes(garbage=3, deflate=True)
-
-
-def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
-    if pages_need_shaping(pages):
-        return create_shaped_pdf_from_pages(pages)
-    objects: List[bytes] = [b"<< /Type /Catalog /Pages 2 0 R >>"]
-    page_refs = []
-    next_object_id = 3
-
-    # Embedded fonts are shared by every page, so they are allocated before the pages.
-    font_texts = pdf_document_font_texts(pages)
-    font_resources = []
-    for name, (bold, serif) in PDF_FONT_FACES.items():
-        script = detect_pdf_script("".join(font_texts[name]))
-        font = load_embedded_font(bold, script, serif) if any(font_texts[name]) else None
-        if not font:
-            base = ("Times-Bold" if bold else "Times-Roman") if serif else ("Helvetica-Bold" if bold else "Helvetica")
-            font_resources.append(f"/{name} << /Type /Font /Subtype /Type1 /BaseFont /{base} >>")
-            continue
-        codepoints = sorted({ord(char) for text in font_texts[name] for char in text})
-        objects.extend(pdf_font_objects(font, codepoints, next_object_id))
-        font_resources.append(f"/{name} {next_object_id + 4} 0 R")
-        next_object_id += 5
-
-    resources = "/Font << " + " ".join(font_resources) + " >>"
-
-    for output_page_number, page in enumerate(pages, start=1):
-        width = page.get("width", PDF_PAGE_WIDTH)
-        height = page.get("height", PDF_PAGE_HEIGHT)
-        margin = page.get("margin", PDF_MARGIN)
-
-        page_id = next_object_id
-        content_id = next_object_id + 1
-        next_object_id += 2
-        page_refs.append(f"{page_id} 0 R")
-        commands = list(page.get("commands", []))
-        # Once any line on the page names a colour, every line on it has to, black ones included:
-        # see pdf_line_command. Pages without one are written exactly as before.
-        default = 0 if any(line.get("color") for line in page["lines"]) else None
-        y = height - margin
-        if page["source_page"]:
-            heading = "Page " + page["source_page"]
-            if page["continuation"]:
-                heading += " continued"
-            commands.append(pdf_line_command(heading, margin, y, "F2", PDF_HEADING_FONT_SIZE, default))
-            y -= 24
-        for line in page["lines"]:
-            if line["text"]:
-                # Lines carrying their own coordinates are placed absolutely (layout overlay),
-                # everything else flows down the page from the margin.
-                commands.append(
-                    pdf_line_command(line["text"], line.get("x", margin), line.get("y", y),
-                                     line["font"], line["size"], line.get("color", default))
-                )
-            y -= line["line_height"]
-        if page.get("footer", True):
-            commands.append(
-                pdf_line_command(
-                    f"{output_page_number}",
-                    width - margin,
-                    margin // 2,
-                    "F1",
-                    PDF_FOOTER_FONT_SIZE,
-                    default,
-                )
-            )
-        stream = "\n".join(commands).encode("utf-8")
-        objects.append(
-            (
-                f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {width:.2f} {height:.2f}] "
-                f"/Resources << {resources} >> "
-                f"/Contents {content_id} 0 R >>"
-            ).encode("utf-8")
-        )
-        objects.append(pdf_stream_object("", stream))
-
-    objects.insert(1, f"<< /Type /Pages /Kids [{' '.join(page_refs)}] /Count {len(page_refs)} >>".encode("utf-8"))
-    data = bytearray(b"%PDF-1.4\n")
-    offsets = [0]
-    for index, obj in enumerate(objects, start=1):
-        offsets.append(len(data))
-        data.extend(f"{index} 0 obj\n".encode("utf-8") + obj + b"\nendobj\n")
-    xref_offset = len(data)
-    data.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode("ascii"))
-    for offset in offsets[1:]:
-        data.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
-    data.extend(
-        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
-        f"startxref\n{xref_offset}\n%%EOF\n".encode("ascii")
-    )
-    return bytes(data)
 
 
 def create_text_pdf(text: str) -> bytes:
@@ -2913,7 +2648,6 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
             "continuation": False,
             "footer": False,
             "lines": lines,
-            "commands": [],
         })
 
     overlay_reader = PdfReader(BytesIO(create_pdf_from_pages(overlay_pages)))
