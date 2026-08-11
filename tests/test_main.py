@@ -418,14 +418,11 @@ class MainTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(main.env_value("LINGUINATOR_MODEL", "default"), "default")
 
-    def test_server_reads_proxy_and_https_env(self):
+    def test_server_reads_host_port_and_proxy_env(self):
         env = {
             "LINGUINATOR_HOST": "127.0.0.1",
             "LINGUINATOR_PORT": "5443",
-            "LINGUINATOR_TRUST_PROXY_HEADERS": "true",
-            "LINGUINATOR_FORWARDED_ALLOW_IPS": "10.0.0.1",
-            "LINGUINATOR_SSL_CERTFILE": "/certs/fullchain.pem",
-            "LINGUINATOR_SSL_KEYFILE": "/certs/privkey.pem",
+            "LINGUINATOR_TRUST_PROXY_HEADERS": "false",
         }
 
         with patch.dict(os.environ, env, clear=False):
@@ -437,10 +434,9 @@ class MainTests(unittest.TestCase):
         self.assertEqual(options["app"], "app.main:app")
         self.assertEqual(options["host"], "127.0.0.1")
         self.assertEqual(options["port"], 5443)
-        self.assertTrue(options["proxy_headers"])
-        self.assertEqual(options["forwarded_allow_ips"], "10.0.0.1")
-        self.assertEqual(options["ssl_certfile"], "/certs/fullchain.pem")
-        self.assertEqual(options["ssl_keyfile"], "/certs/privkey.pem")
+        self.assertFalse(options["proxy_headers"])
+        # Direct HTTPS is gone: TLS belongs to the reverse proxy.
+        self.assertNotIn("ssl_certfile", options)
 
     def test_frontend_uses_relative_paths_for_reverse_proxy_prefixes(self):
         template = (Path(main.APP_DIR) / "templates" / "index.html").read_text(encoding="utf-8")
@@ -631,8 +627,8 @@ class MainTests(unittest.TestCase):
         with patch.object(main, "load_model", model_loader):
             with patch.object(main, "load_tokenizer", tokenizer_loader):
                 with patch.dict(sys.modules, {"torch": fake_torch}):
-                    with patch.object(main, "MODEL_IDLE_UNLOAD_ENABLED", True):
-                        with patch.object(main, "MODEL_IDLE_SECONDS", 1200):
+                    with patch.object(main, "MODEL_IDLE_SECONDS", 1200):
+                        if True:
                             with patch.object(main, "MODEL_ACTIVE_USERS", 0):
                                 with patch.object(main, "MODEL_LAST_USED", 100.0):
                                     unloaded = main.unload_model_if_idle(now=1301.0)
@@ -648,29 +644,27 @@ class MainTests(unittest.TestCase):
 
         with patch.object(main, "load_model", model_loader):
             with patch.object(main, "load_tokenizer", tokenizer_loader):
-                with patch.object(main, "MODEL_IDLE_UNLOAD_ENABLED", True):
-                    with patch.object(main, "MODEL_IDLE_SECONDS", 1200):
-                        with patch.object(main, "MODEL_ACTIVE_USERS", 0):
-                            with patch.object(main, "MODEL_LAST_USED", 100.0):
-                                unloaded = main.unload_model_if_idle(now=1000.0)
+                with patch.object(main, "MODEL_IDLE_SECONDS", 1200):
+                    with patch.object(main, "MODEL_ACTIVE_USERS", 0):
+                        with patch.object(main, "MODEL_LAST_USED", 100.0):
+                            unloaded = main.unload_model_if_idle(now=1000.0)
 
         self.assertFalse(unloaded)
         self.assertFalse(model_loader.cleared)
         self.assertFalse(tokenizer_loader.cleared)
 
-    def test_model_idle_unload_skips_when_disabled_or_active(self):
+    def test_model_idle_unload_skips_when_switched_off_or_active(self):
         model_loader = FakeCachedLoader((FakeTokenizer(), FakeModel(), "cpu", FakeTorch()))
         tokenizer_loader = FakeCachedLoader(FakeTokenizer())
 
         with patch.object(main, "load_model", model_loader):
             with patch.object(main, "load_tokenizer", tokenizer_loader):
-                with patch.object(main, "MODEL_IDLE_UNLOAD_ENABLED", False):
+                with patch.object(main, "MODEL_IDLE_SECONDS", 0):
                     self.assertFalse(main.unload_model_if_idle(now=2000.0))
-                with patch.object(main, "MODEL_IDLE_UNLOAD_ENABLED", True):
-                    with patch.object(main, "MODEL_IDLE_SECONDS", 1200):
-                        with patch.object(main, "MODEL_ACTIVE_USERS", 1):
-                            with patch.object(main, "MODEL_LAST_USED", 100.0):
-                                self.assertFalse(main.unload_model_if_idle(now=2000.0))
+                with patch.object(main, "MODEL_IDLE_SECONDS", 1200):
+                    with patch.object(main, "MODEL_ACTIVE_USERS", 1):
+                        with patch.object(main, "MODEL_LAST_USED", 100.0):
+                            self.assertFalse(main.unload_model_if_idle(now=2000.0))
 
         self.assertFalse(model_loader.cleared)
         self.assertFalse(tokenizer_loader.cleared)
@@ -2046,11 +2040,9 @@ class MainTests(unittest.TestCase):
         torch_module = FakeTorchWithThreads()
 
         with patch.object(main, "CPU_THREADS", 3):
-            with patch.object(main, "CPU_INTEROP_THREADS", 2):
-                main.configure_torch_threads(torch_module)
+            main.configure_torch_threads(torch_module)
 
         self.assertEqual(torch_module.threads, 3)
-        self.assertEqual(torch_module.interop_threads, 2)
 
     def test_languages_endpoint_returns_core_languages_without_loading_a_model(self):
         client = TestClient(main.app)

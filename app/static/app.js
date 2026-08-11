@@ -6,12 +6,14 @@ let languageData = null;
     let currentSourceFormat = "txt";
     let currentOriginalExtension = "txt";
     let fullResultText = "";
+    // Overwritten from /languages on load unless this browser has been switched by hand, in
+    // which case its own choice wins over the installation's default.
     let currentUiLanguage = localStorage.getItem("linguinator_ui_language") || "en";
     let historyItems = [];
     let historyPage = 0;
     let historyFilterText = "";
     let historyTimezone = "UTC";
-    let timeFormat = "auto";
+    let timeFormat = "24h";
     const seenCompletedJobIds = new Set();
     const HISTORY_PAGE_SIZE = 5;
     const baseTitle = document.title || "Linguinator";
@@ -799,8 +801,12 @@ let languageData = null;
       if (!languageData || !Array.isArray(languageData.languages) || !languageData.languages.length) {
         throw new Error("Language response was empty.");
       }
-      const sourceFallback = languageCodeOrFallback(languageData.source_default, "eng_Latn");
-      const targetFallback = languageCodeOrFallback(languageData.target_default, "deu_Latn");
+      if (!localStorage.getItem("linguinator_ui_language") && uiText[languageData.ui_language]) {
+        currentUiLanguage = languageData.ui_language;
+        applyUiLanguage();
+      }
+      const sourceFallback = languageCodeOrFallback(languageData.source_default, AUTO_LANGUAGE.code);
+      const targetFallback = languageCodeOrFallback(languageData.target_default, "eng_Latn");
       renderSelect("source", languageCodeOrFallback(getRecent("source")[0], sourceFallback));
       renderSelect("target", languageCodeOrFallback(getRecent("target")[0], targetFallback));
     }
@@ -970,7 +976,7 @@ let languageData = null;
       const data = await response.json();
       maxChars = data.max_chars || 0;
       historyTimezone = data.timezone || "UTC";
-      timeFormat = data.time_format || "auto";
+      timeFormat = data.time_format === "12h" ? "12h" : "24h";
       updateCounter();
       const versionEl = document.getElementById("appVersion");
       if (versionEl && data.version) versionEl.textContent = " v" + data.version;
@@ -1024,9 +1030,8 @@ let languageData = null;
     }
 
     function hour12Option() {
-      if (timeFormat === "12h") return true;
-      if (timeFormat === "24h") return false;
-      return undefined;
+      // Set per installation, the same for every UI language.
+      return timeFormat === "12h";
     }
 
     function formatJobTime(timestamp) {

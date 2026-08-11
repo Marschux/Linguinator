@@ -22,7 +22,7 @@ services:
         max-size: "10m"
         max-file: "3"
     healthcheck:
-      test: ["CMD", "python", "-c", "import os, ssl, urllib.request; scheme = 'https' if os.getenv('LINGUINATOR_SSL_CERTFILE') and os.getenv('LINGUINATOR_SSL_KEYFILE') else 'http'; context = ssl._create_unverified_context() if scheme == 'https' else None; urllib.request.urlopen(f'{scheme}://localhost:5051/health', timeout=5, context=context)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5051/health', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -44,7 +44,6 @@ services:
       - history:/data/history
     environment:
       HF_HOME: /cache/huggingface
-      LINGUINATOR_DEVICE: cuda
     networks:
       - proxy-net
     deploy:

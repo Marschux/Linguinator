@@ -62,38 +62,33 @@ The `.env` file is grouped by topic:
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `LINGUINATOR_MODEL` | `Helsinki-NLP/opus-mt-tc-bible-big-mul-mul` | Fallback model, used for any language pair without a dedicated model in `app/opus_pairs.json`. Another model can carry another licence, which would make the licensing section below wrong for your deployment. |
-| `LINGUINATOR_MODEL_CACHE_SIZE` | `1` | How many models (dedicated pair models plus the fallback) stay loaded in memory at once. Each entry costs its own RAM; raise only if RAM allows and pairs alternate often. |
-| `LINGUINATOR_DEVICE` | `cpu` | Runtime device. `cuda` only works on the `linguinator-gpu` service, which is the one with the GPU reservation and which sets this itself; setting `cuda` in `.env` does not give the normal service a GPU. |
-| `LINGUINATOR_MAX_CHARS` | `2000` | Maximum characters per translation chunk. This is not a model limit: every chunk is split into single sentences before translation, and a chunk's sentences are then translated in one batched model call. The value therefore governs peak memory per call and how finely job progress advances, not how much text the model sees at once. |
-| `LINGUINATOR_MAX_FILE_MB` | `50` | Maximum upload size in megabytes. |
-| `LINGUINATOR_CPU_THREADS` | `0` | Optional Torch, OMP, and MKL thread count for CPU translation. `0` keeps library defaults. |
-| `LINGUINATOR_CPU_INTEROP_THREADS` | `0` | Optional Torch inter-op thread count. `0` keeps library defaults. |
+| `LINGUINATOR_MAX_FILE_MB` | `50` | Maximum upload size in megabytes. Office archives are additionally capped at ten times that once unpacked. |
+| `LINGUINATOR_CPU_THREADS` | `0` | Torch, OMP and MKL thread count. `0` keeps the library defaults, which take every core; set a number when the container shares its host. |
+| `LINGUINATOR_MODEL_IDLE_SECONDS` | `600` | Seconds of idleness before the loaded model is dropped from memory. It reloads on the next job, which costs a few seconds. `0` keeps it loaded for good. |
 | `LINGUINATOR_HISTORY_DAYS` | `7` | Number of days to keep saved translation history, including retained source files. |
-| `LINGUINATOR_HISTORY_DIR` | `/data/history` | Directory for saved history files, source files, and metadata inside the container. |
-| `LINGUINATOR_TIMEZONE` | `UTC` | IANA timezone name (e.g. `Europe/Berlin`) used to display the completion time next to each history entry. |
-| `LINGUINATOR_TIME_FORMAT` | `auto` | `auto` follows the UI language's own convention (English defaults to 12h, German/French/Spanish to 24h); `12h` or `24h` forces it regardless of UI language. |
-| `LINGUINATOR_JOB_WORKERS` | `1` | Number of queued translation jobs that may run in parallel. Higher values can use more CPU/RAM. |
-| `LINGUINATOR_JOBS_DIR` | `/data/history/jobs` | Directory for persisted queue metadata and pending PDF payloads. |
-| `LINGUINATOR_DEFAULT_SOURCE` | `eng_Latn` | Default source language code. |
-| `LINGUINATOR_DEFAULT_TARGET` | `deu_Latn` | Default target language code. |
+| `LINGUINATOR_TIMEZONE` | `Europe/Berlin` | IANA timezone name used to display the completion time next to each history entry. Display only, stored times are UTC. |
+| `LINGUINATOR_TIME_FORMAT` | `24h` | `12h` or `24h`, the same for every UI language. Anything else is read as `24h`. |
+| `LINGUINATOR_UI_LANGUAGE` | `en` | UI language a fresh browser starts with: `en`, `de`, `es`, `fr`. A browser switched by hand keeps its own choice. |
+| `LINGUINATOR_DEFAULT_TARGET` | `eng_Latn` | Preselected target language. The source starts on auto-detect and is not configurable. |
 | `LINGUINATOR_FAVORITE_LANGUAGES` | `deu_Latn,spa_Latn,fra_Latn` | Favourites at the top of both language pickers, comma-separated. At most three are used; English is always added, so the list shows up to four. Codes not on offer are ignored. |
-| `LINGUINATOR_PDF_FONT` | empty | TrueType font embedded into generated PDFs. Defaults to DejaVu Sans from the image; needed for non-Latin target languages. Ignored for CJK/Arabic/Devanagari/Hebrew text, which always uses the bundled Noto fonts (DejaVu Sans has no glyphs for those scripts). |
-| `LINGUINATOR_PDF_FONT_BOLD` | empty | Bold variant of the embedded PDF font. |
-| `LINGUINATOR_PDF_LAYOUT_BATCH_SIZE` | `4` | How many layout-PDF paragraphs are translated in one model call. Higher trades more peak memory (padding to the longest paragraph in the batch) for fewer, faster calls. |
 | `LINGUINATOR_AUTH_ENABLED` | `false` | Enables HTTP Basic Auth for the UI and API. `/health` stays public for health checks. |
-| `LINGUINATOR_AUTH_USERNAME` | `admin` | Basic Auth username. |
+| `LINGUINATOR_AUTH_USERNAME` | `Translator` | Basic Auth username. |
 | `LINGUINATOR_AUTH_PASSWORD` | empty | Basic Auth password. Set one before enabling auth; while it is empty the app answers every request with 500 rather than letting anyone in. |
 | `LINGUINATOR_ROOT_PATH` | empty | URL prefix when the app is mounted below a reverse-proxy path, for example `/linguinator`. |
-| `LINGUINATOR_TRUST_PROXY_HEADERS` | `true` | Lets Uvicorn trust forwarded proxy headers. |
-| `LINGUINATOR_FORWARDED_ALLOW_IPS` | `*` | IP allow-list for forwarded headers. `*` means anyone who reaches the container directly can set `X-Forwarded-For` and friends to whatever they like. Nothing in the app decides by client IP today, so this costs nothing here, but narrow it to the proxy's address if you publish the port. |
-| `LINGUINATOR_HOST` / `LINGUINATOR_PORT` | `0.0.0.0` / `5051` | Listening address and port. Both are deliberately absent from `.env.example`: the compose port mapping and the healthcheck hard-code 5051, so changing the port there stops the container from passing its own healthcheck. |
-| `LINGUINATOR_SSL_CERTFILE` | empty | Optional certificate path for direct HTTPS inside the container. Usually leave empty behind a reverse proxy. |
-| `LINGUINATOR_SSL_KEYFILE` | empty | Optional private key path for direct HTTPS inside the container. |
-| `LINGUINATOR_UNLOAD_MODEL_AFTER_IDLE` | `true` | Unloads cached model objects after an idle period. |
-| `LINGUINATOR_MODEL_IDLE_SECONDS` | `1200` | Idle time in seconds before unloading the model cache. |
+| `LINGUINATOR_TRUST_PROXY_HEADERS` | `true` | Lets Uvicorn trust forwarded proxy headers, so the app knows it is reached over HTTPS even though the proxy speaks HTTP to it. |
 
-Queue worker count defaults to one because multiple simultaneous model jobs can increase memory usage sharply, especially with larger models.
+Everything else is fixed in `app/main.py` rather than configurable, because it either has one right
+answer here (one model in memory, one job at a time) or cannot be changed usefully from a `.env`
+alone (font files and certificates would first have to be mounted into the container). The device
+is not a setting either: the GPU is used when there is one, the CPU otherwise.
+
+### Where data is stored
+
+| Path in the container | Volume | Contents |
+| --- | --- | --- |
+| `/data/history` | `history` | Saved translations, retained source files, metadata. Cleaned up after `LINGUINATOR_HISTORY_DAYS`. |
+| `/data/history/jobs` | `history` | Queue state and pending payloads, so jobs survive a restart. |
+| `/cache/huggingface` | `hf-cache` | Downloaded models. Several GB once a few language pairs have been used; nothing removes them automatically. |
 
 ## Notes
 
@@ -116,5 +111,6 @@ every dedicated pair model actually in use; the fallback model,
 
 Model cards: https://huggingface.co/Helsinki-NLP
 
-Before deploying with a different `LINGUINATOR_MODEL` or an extended `app/opus_pairs.json`, check
-that model's own license and training-data rights.
+The fallback model is fixed in `app/main.py` rather than configurable, so that this section stays
+true for every deployment. Before swapping it there, or extending `app/opus_pairs.json`, check that
+model's own license and training-data rights.

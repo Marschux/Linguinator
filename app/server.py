@@ -8,19 +8,15 @@ def enabled(name: str, default: str = "false") -> bool:
 
 
 def main():
-    options = {
-        "app": "app.main:app",
-        "host": os.getenv("LINGUINATOR_HOST", "0.0.0.0"),
-        "port": int(os.getenv("LINGUINATOR_PORT", "5051")),
-        "proxy_headers": enabled("LINGUINATOR_TRUST_PROXY_HEADERS", "true"),
-        "forwarded_allow_ips": os.getenv("LINGUINATOR_FORWARDED_ALLOW_IPS", "*"),
-    }
-    certfile = os.getenv("LINGUINATOR_SSL_CERTFILE", "").strip()
-    keyfile = os.getenv("LINGUINATOR_SSL_KEYFILE", "").strip()
-    if certfile and keyfile:
-        options["ssl_certfile"] = certfile
-        options["ssl_keyfile"] = keyfile
-    uvicorn.run(**options)
+    uvicorn.run(
+        app="app.main:app",
+        host=os.getenv("LINGUINATOR_HOST", "0.0.0.0"),
+        port=int(os.getenv("LINGUINATOR_PORT", "5051")),
+        proxy_headers=enabled("LINGUINATOR_TRUST_PROXY_HEADERS", "true"),
+        # Anyone reaching the container directly can claim any forwarded address. Nothing here
+        # decides by client IP, so this only feeds the scheme the app thinks it was reached over.
+        forwarded_allow_ips="*",
+    )
 
 
 if __name__ == "__main__":

@@ -46,30 +46,38 @@ def env_value(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
-FALLBACK_MODEL_ID = env_value("LINGUINATOR_MODEL", "Helsinki-NLP/opus-mt-tc-bible-big-mul-mul")
-MODEL_CACHE_SIZE = max(1, int(env_value("LINGUINATOR_MODEL_CACHE_SIZE", "1")))
-DEVICE_SETTING = env_value("LINGUINATOR_DEVICE", "cpu")
-MAX_CHARS = int(env_value("LINGUINATOR_MAX_CHARS", "2000"))
+# Not configurable: another model can carry another licence, and other model families expect
+# other language tokens, which does not fail, it translates into the wrong language.
+FALLBACK_MODEL_ID = "Helsinki-NLP/opus-mt-tc-bible-big-mul-mul"
+# One model resident at a time: each costs 0.5-1 GB, and the queue runs one job anyway.
+MODEL_CACHE_SIZE = 1
+# Characters per chunk. Not a model limit, every chunk is split into single sentences before
+# translation; this bounds how many of them land in one batched call, and with it peak memory.
+MAX_CHARS = 2000
 MAX_FILE_MB = int(env_value("LINGUINATOR_MAX_FILE_MB", "50"))
 MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
 MAX_ZIP_UNCOMPRESSED_BYTES = MAX_FILE_BYTES * 10
 HISTORY_DAYS = int(env_value("LINGUINATOR_HISTORY_DAYS", "7"))
-HISTORY_DIR = Path(env_value("LINGUINATOR_HISTORY_DIR", "/data/history"))
-HISTORY_TIMEZONE = env_value("LINGUINATOR_TIMEZONE", "UTC")
-# "auto" leaves it to the browser's UI-language locale (English defaults to 12h, German/French/
-# Spanish to 24h); "12h"/"24h" force it regardless of UI language.
-TIME_FORMAT = env_value("LINGUINATOR_TIME_FORMAT", "auto")
-JOB_WORKERS = max(1, int(env_value("LINGUINATOR_JOB_WORKERS", "1")))
-JOBS_DIR = Path(env_value("LINGUINATOR_JOBS_DIR", str(HISTORY_DIR / "jobs")))
+# Fixed, because the compose volume is mounted here: a different path would write into the
+# container filesystem and be gone with the next restart.
+HISTORY_DIR = Path("/data/history")
+JOBS_DIR = HISTORY_DIR / "jobs"
+HISTORY_TIMEZONE = env_value("LINGUINATOR_TIMEZONE", "Europe/Berlin")
+# "12h" or "24h", the same for every UI language. Anything else falls back to 24h rather than
+# failing, so an outdated .env (this used to accept "auto") does not stop the container.
+TIME_FORMAT = "12h" if env_value("LINGUINATOR_TIME_FORMAT", "24h").strip() == "12h" else "24h"
+# One job at a time: two jobs on different language pairs would each want their own model.
+JOB_WORKERS = 1
 CPU_THREADS = int(env_value("LINGUINATOR_CPU_THREADS", "0"))
-CPU_INTEROP_THREADS = int(env_value("LINGUINATOR_CPU_INTEROP_THREADS", "0"))
-DEFAULT_SOURCE = env_value("LINGUINATOR_DEFAULT_SOURCE", "eng_Latn")
-DEFAULT_TARGET = env_value("LINGUINATOR_DEFAULT_TARGET", "deu_Latn")
+# What the UI starts with; a browser that has been switched keeps its own choice.
+UI_LANGUAGE = env_value("LINGUINATOR_UI_LANGUAGE", "en")
+# Where detection lands when it fails. Not the UI's preselection, which is auto-detect.
+DEFAULT_SOURCE = "eng_Latn"
+DEFAULT_TARGET = env_value("LINGUINATOR_DEFAULT_TARGET", "eng_Latn")
 AUTH_ENABLED = env_value("LINGUINATOR_AUTH_ENABLED", "false").lower() in ("1", "true", "yes", "on")
-AUTH_USERNAME = env_value("LINGUINATOR_AUTH_USERNAME", "admin")
+AUTH_USERNAME = env_value("LINGUINATOR_AUTH_USERNAME", "Translator")
 AUTH_PASSWORD = env_value("LINGUINATOR_AUTH_PASSWORD", "")
-MODEL_IDLE_UNLOAD_ENABLED = env_value("LINGUINATOR_UNLOAD_MODEL_AFTER_IDLE", "true").lower() in ("1", "true", "yes", "on")
-MODEL_IDLE_SECONDS = int(env_value("LINGUINATOR_MODEL_IDLE_SECONDS", "1200"))
+MODEL_IDLE_SECONDS = int(env_value("LINGUINATOR_MODEL_IDLE_SECONDS", "600"))
 TRUST_PROXY_HEADERS = os.getenv("LINGUINATOR_TRUST_PROXY_HEADERS", "true").lower() in ("1", "true", "yes", "on")
 PDF_LOW_TEXT_CHARS = 20
 PDF_PAGE_WIDTH = 595
@@ -95,9 +103,7 @@ PDF_LAYOUT_TIGHTEN_SCALE = 0.9
 # each call on fixed beam-search overhead. Batched via the tensor's batch dimension (not string
 # concatenation), so paragraph boundaries stay exact; kept small to cap the extra padding memory
 # a batch costs over a single call.
-PDF_LAYOUT_BATCH_SIZE = int(env_value("LINGUINATOR_PDF_LAYOUT_BATCH_SIZE", "4"))
-PDF_FONT_FILE = env_value("LINGUINATOR_PDF_FONT", "")
-PDF_FONT_BOLD_FILE = env_value("LINGUINATOR_PDF_FONT_BOLD", "")
+PDF_LAYOUT_BATCH_SIZE = 4
 PDF_FONT_CANDIDATES = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     "C:/Windows/Fonts/arial.ttf",
@@ -293,26 +299,20 @@ async def require_basic_auth(request: Request, call_next):
     return await call_next(request)
 
 
+@lru_cache(maxsize=1)
 def selected_device():
-    if DEVICE_SETTING != "cuda":
-        return "cpu"
+    """The GPU when there is one, otherwise the CPU. Nothing to configure: asking for cuda on a
+    host without a GPU only ever meant a silent fall back to cpu anyway."""
     try:
         import torch
     except ImportError:
         return "cpu"
-    if torch.cuda.is_available():
-        return "cuda"
-    return "cpu"
+    return "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def configure_torch_threads(torch_module):
     if CPU_THREADS > 0 and hasattr(torch_module, "set_num_threads"):
         torch_module.set_num_threads(CPU_THREADS)
-    if CPU_INTEROP_THREADS > 0 and hasattr(torch_module, "set_num_interop_threads"):
-        try:
-            torch_module.set_num_interop_threads(CPU_INTEROP_THREADS)
-        except RuntimeError:
-            pass
 
 
 @lru_cache(maxsize=MODEL_CACHE_SIZE)
@@ -377,7 +377,7 @@ def unload_model_cache() -> bool:
 
 
 def unload_model_if_idle(now: float | None = None) -> bool:
-    if not MODEL_IDLE_UNLOAD_ENABLED or MODEL_IDLE_SECONDS <= 0:
+    if MODEL_IDLE_SECONDS <= 0:
         return False
     current_time = time.time() if now is None else now
     with MODEL_LOCK:
@@ -395,7 +395,7 @@ def model_idle_unloader():
         unload_model_if_idle()
 
 
-if MODEL_IDLE_UNLOAD_ENABLED and MODEL_IDLE_SECONDS > 0:
+if MODEL_IDLE_SECONDS > 0:
     threading.Thread(target=model_idle_unloader, daemon=True).start()
 
 
@@ -708,16 +708,11 @@ def load_embedded_font(bold: bool = False, script: str = "", serif: bool = False
 
     if script and script in PDF_SCRIPT_FONT_CANDIDATES:
         candidates = PDF_SCRIPT_FONT_CANDIDATES[script]
-        configured = ""
     elif serif:
-        # No env override for serif: LINGUINATOR_PDF_FONT names the document font, and a serif
-        # variant of an arbitrary configured font cannot be derived from it.
-        configured = ""
         candidates = PDF_SERIF_BOLD_CANDIDATES if bold else PDF_SERIF_CANDIDATES
     else:
-        configured = PDF_FONT_BOLD_FILE if bold else PDF_FONT_FILE
         candidates = PDF_FONT_BOLD_CANDIDATES if bold else PDF_FONT_CANDIDATES
-    for path in (configured, *candidates):
+    for path in candidates:
         if not path or not Path(path).exists():
             continue
         try:
@@ -3484,15 +3479,13 @@ def health():
         "fallback_model": FALLBACK_MODEL_ID,
         "dedicated_pairs": len(OPUS_PAIRS),
         "device": selected_device(),
+        # Not a setting any more, but the UI's character counter works from it.
         "max_chars": MAX_CHARS,
         "max_file_mb": MAX_FILE_MB,
         "ocr_available": ocr_available,
         "ocr_languages": list(installed_ocr_languages()) if ocr_available else [],
-        "model_idle_unload_enabled": MODEL_IDLE_UNLOAD_ENABLED,
         "model_idle_seconds": MODEL_IDLE_SECONDS,
-        "job_workers": JOB_WORKERS,
         "cpu_threads": CPU_THREADS,
-        "cpu_interop_threads": CPU_INTEROP_THREADS,
         "model_loaded": model_cache_loaded(),
         "root_path": ROOT_PATH,
         "trust_proxy_headers": TRUST_PROXY_HEADERS,
@@ -3509,8 +3502,10 @@ def languages():
         if source in CORE_LANGUAGES and target in CORE_LANGUAGES:
             dedicated_pairs.append([CORE_LANGUAGES[source], CORE_LANGUAGES[target]])
     return {
-        "source_default": DEFAULT_SOURCE,
+        # The picker starts on auto-detect; DEFAULT_SOURCE is only where failed detection lands.
+        "source_default": AUTO_SOURCE,
         "target_default": DEFAULT_TARGET,
+        "ui_language": UI_LANGUAGE,
         "languages": [{"code": code, "name": code} for code in language_codes()],
         "favorites": FAVORITE_LANGUAGES,
         "dedicated_pairs": dedicated_pairs,
