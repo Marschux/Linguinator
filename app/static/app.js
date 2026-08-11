@@ -74,7 +74,7 @@ let languageData = null;
         formatOriginal: "Original Format",
         modelDedicated: "Dedicated model for this language pair.",
         modelFallback: "No dedicated model for this pair, using the multilingual fallback.",
-        modelAutoDetect: "Source language will be detected automatically. Scanned PDFs are read twice for this and take longer.",
+        modelAutoDetect: "Source language will be detected automatically. Scanned PDFs are read twice for this and take longer. A scan mixing two scripts needs the source language set, otherwise one of them is lost.",
         autoDetect: "Auto-detect",
         ownJobDone: "Your job is done:"
       },
@@ -133,7 +133,7 @@ let languageData = null;
         formatOriginal: "Originalformat",
         modelDedicated: "Eigenes Modell fuer dieses Sprachpaar.",
         modelFallback: "Kein eigenes Modell fuer dieses Paar, nutzt den mehrsprachigen Fallback.",
-        modelAutoDetect: "Quellsprache wird automatisch erkannt. Gescannte PDFs werden dafuer zweimal gelesen und brauchen laenger.",
+        modelAutoDetect: "Quellsprache wird automatisch erkannt. Gescannte PDFs werden dafuer zweimal gelesen und brauchen laenger. Bei einem Scan mit zwei Schriften muss die Quellsprache gesetzt werden, sonst geht eine davon verloren.",
         autoDetect: "Automatisch erkennen",
         ownJobDone: "Dein Job ist fertig:"
       },
@@ -192,7 +192,7 @@ let languageData = null;
         formatOriginal: "Formato original",
         modelDedicated: "Modelo dedicado para este par de idiomas.",
         modelFallback: "Sin modelo dedicado para este par, se usa el alternativo multilingue.",
-        modelAutoDetect: "El idioma de origen se detectara automaticamente. Los PDF escaneados se leen dos veces y tardan mas.",
+        modelAutoDetect: "El idioma de origen se detectara automaticamente. Los PDF escaneados se leen dos veces y tardan mas. Si un escaneo mezcla dos alfabetos, hay que fijar el idioma de origen o se pierde uno de ellos.",
         autoDetect: "Deteccion automatica",
         ownJobDone: "Tu trabajo esta listo:"
       },
@@ -251,13 +251,17 @@ let languageData = null;
         formatOriginal: "Format original",
         modelDedicated: "Modele dedie pour cette paire de langues.",
         modelFallback: "Pas de modele dedie pour cette paire, utilise le modele multilingue.",
-        modelAutoDetect: "La langue source sera detectee automatiquement. Les PDF numerises sont lus deux fois et prennent plus de temps.",
+        modelAutoDetect: "La langue source sera detectee automatiquement. Les PDF numerises sont lus deux fois et prennent plus de temps. Si un scan melange deux ecritures, il faut choisir la langue source, sinon l'une des deux est perdue.",
         autoDetect: "Detection automatique",
         ownJobDone: "Ton job est termine :"
       }
     };
     const AUTO_LANGUAGE = {code: "auto", name: "auto"};
-    const languageNames = new Intl.DisplayNames(["en"], {type: "language"});
+    // Names follow the UI language, so this is rebuilt whenever that changes. The English names
+    // stay available for the menu search: someone who learned the list in English should still
+    // find "Spanish" after switching the interface to German.
+    let languageNames = new Intl.DisplayNames([currentUiLanguage], {type: "language"});
+    const englishLanguageNames = new Intl.DisplayNames(["en"], {type: "language"});
     const languageFallbacks = {
       ace: "Acehnese",
       acm: "Mesopotamian Arabic",
@@ -385,6 +389,11 @@ let languageData = null;
 
     function applyUiLanguage() {
       document.documentElement.lang = currentUiLanguage;
+      try {
+        languageNames = new Intl.DisplayNames([currentUiLanguage], {type: "language"});
+      } catch {
+        languageNames = new Intl.DisplayNames(["en"], {type: "language"});
+      }
       const uiLanguage = document.getElementById("uiLanguage");
       if (uiLanguage) uiLanguage.value = currentUiLanguage;
       setText(".subtle", "subtitle");
@@ -530,12 +539,25 @@ let languageData = null;
       } catch {
         intlName = "";
       }
-      let name = languageFallbacks[languagePart] || intlName || languagePart;
+      // Intl first now: it knows the name in the UI language, the fallback table is English only
+      // and covers the codes Intl does not know.
+      let name = intlName || languageFallbacks[languagePart] || languagePart;
       if (name === languagePart) {
         name = titleCase(languagePart);
       }
       const flag = countryFlag(languageCountries[languagePart]);
       return {name, flag};
+    }
+
+    function englishLanguageName(languageCode) {
+      const languagePart = languageCode.split("_")[0];
+      let intlName = "";
+      try {
+        intlName = englishLanguageNames.of(languagePart) || "";
+      } catch {
+        intlName = "";
+      }
+      return languageFallbacks[languagePart] || intlName || languagePart;
     }
 
     function formatLanguageLabel(languageCode) {
@@ -619,7 +641,8 @@ let languageData = null;
       // The server hands the list back sorted by language code, which puts Greek under "ell"
       // and Dutch under "nld". The menu shows names, so it sorts by name.
       return [...languageData.languages].sort((a, b) =>
-        languageDisplayName(a.code).name.localeCompare(languageDisplayName(b.code).name, "en"));
+        languageDisplayName(a.code).name.localeCompare(
+          languageDisplayName(b.code).name, currentUiLanguage));
     }
 
     function languageByCode(code) {
@@ -680,6 +703,7 @@ let languageData = null;
       option.type = "button";
       option.className = "language-option";
       option.dataset.code = language.code;
+      option.dataset.english = englishLanguageName(language.code).toLowerCase();
       option.title = "Select " + formatLanguageLabel(language.code) + ".";
       option.innerHTML =
         '<span class="language-name">' + escapeHtml(formatLanguageLabel(language.code)) + '</span>' +
@@ -774,7 +798,8 @@ let languageData = null;
         }
         const matches = !normalized ||
           child.dataset.code.toLowerCase().includes(normalized) ||
-          child.textContent.toLowerCase().includes(normalized);
+          child.textContent.toLowerCase().includes(normalized) ||
+          (child.dataset.english || "").includes(normalized);
         child.classList.toggle("hidden", !matches);
         if (matches) currentGroupHasMatch = true;
       }

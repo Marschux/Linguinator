@@ -1800,6 +1800,10 @@ OCR_SCRIPT_SUFFIXES = {
     "Hebrew": "Hebr", "Devanagari": "Deva", "Han": "Hans", "HanS": "Hans", "HanT": "Hans",
     "Japanese": "Jpan", "Hiragana": "Jpan", "Katakana": "Jpan",
 }
+# Traditional Chinese has no entry in CORE_LANGUAGES - we translate to and from simplified - but
+# reading a traditional scan with the simplified model rewrites characters and gets some wrong
+# (生成器 became 生成锅). Where OSD names the traditional variant, read it with its own model.
+OCR_SCRIPT_LANGUAGES = {"HanT": ("chi_tra",)}
 # Each further language in one -l makes tesseract less accurate, so the probe stays short:
 # coverage comes from the script OSD read off the image, not from a longer list.
 OCR_PROBE_LIMIT = 3
@@ -1842,8 +1846,9 @@ def ocr_probe_languages(script: str) -> str:
     """Languages for the probe run, as one -l argument. Order follows CORE_LANGUAGES."""
     suffix = OCR_SCRIPT_SUFFIXES.get(script)
     installed = installed_ocr_languages()
-    codes = []
-    if suffix:
+    codes = [code for code in OCR_SCRIPT_LANGUAGES.get(script, ())
+             if not installed or code in installed]
+    if suffix and len(codes) < OCR_PROBE_LIMIT:
         for internal in CORE_LANGUAGES.values():
             if not internal.endswith(suffix):
                 continue

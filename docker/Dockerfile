@@ -13,7 +13,7 @@ RUN apt-get update \
        tesseract-ocr-nld tesseract-ocr-por tesseract-ocr-pol tesseract-ocr-rus tesseract-ocr-ukr \
        tesseract-ocr-ces tesseract-ocr-swe tesseract-ocr-dan tesseract-ocr-fin tesseract-ocr-ell \
        tesseract-ocr-hun tesseract-ocr-bul tesseract-ocr-ara \
-       tesseract-ocr-chi-sim tesseract-ocr-jpn tesseract-ocr-heb tesseract-ocr-hin \
+       tesseract-ocr-chi-sim tesseract-ocr-chi-tra tesseract-ocr-jpn tesseract-ocr-heb tesseract-ocr-hin \
        tesseract-ocr-vie tesseract-ocr-ind tesseract-ocr-tur tesseract-ocr-sqi \
     && rm -rf /var/lib/apt/lists/*
 

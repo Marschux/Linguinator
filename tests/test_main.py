@@ -1020,6 +1020,15 @@ class MainTests(unittest.TestCase):
         with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout=report)):
             self.assertEqual(main.ocr_page_script(Path("page.png")), "Cyrillic")
 
+    def test_ocr_probe_reads_traditional_chinese_with_its_own_model(self):
+        installed = ("chi_sim", "chi_tra", "deu", "eng", "fra")
+        with patch.object(main, "installed_ocr_languages", return_value=installed):
+            self.assertEqual(main.ocr_probe_languages("HanT"), "chi_tra+chi_sim")
+            self.assertEqual(main.ocr_probe_languages("Han"), "chi_sim")
+        # Without the package it must not appear, an unknown -l aborts tesseract.
+        with patch.object(main, "installed_ocr_languages", return_value=("chi_sim", "eng")):
+            self.assertEqual(main.ocr_probe_languages("HanT"), "chi_sim")
+
     def test_ocr_page_script_lowers_the_osd_character_threshold(self):
         # Without this, a page holding one short line gets no answer at all.
         report = "Script: Japanese\nScript confidence: 1.2\n"
