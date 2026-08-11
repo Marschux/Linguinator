@@ -1885,10 +1885,19 @@ def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE) ->
         text = run_tesseract(image_path, probe)
         if not text:
             return text
-        code = ocr_language_code(detect_source_language(text))
-        if code == probe:
-            return text
-        return run_tesseract(image_path, code) or text
+        read_with = probe
+        # Two reads at most on top of the probe. The probe mangles diacritics, which is enough to
+        # make langdetect pick a close relative - a Czech page came back as Slovak - so the guess
+        # is checked once more against the clean text the chosen language produced.
+        for _ in range(2):
+            code = ocr_language_code(detect_source_language(text))
+            if code == read_with:
+                break
+            better = run_tesseract(image_path, code)
+            if not better:
+                break
+            text, read_with = better, code
+        return text
 
 
 def extract_pdf_markdown_from_bytes(

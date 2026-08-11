@@ -1036,6 +1036,22 @@ class MainTests(unittest.TestCase):
         self.assertEqual(text, "Der Vertrag wurde geprüft")
         self.assertEqual([call.args[1] for call in reads.call_args_list], ["eng+deu+fra", "deu"])
 
+    def test_auto_detect_rechecks_the_language_on_the_clean_text(self):
+        # The probe mangles diacritics, so langdetect can land on a close relative. The clean
+        # text from that read settles it.
+        detections = iter(["slk_Latn", "ces_Latn", "ces_Latn"])
+
+        with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
+            with patch.object(main, "installed_ocr_languages", return_value=("ces", "deu", "eng", "fra", "slk")):
+                with patch.object(main, "ocr_page_script", return_value="Latin"):
+                    with patch.object(main, "detect_source_language", side_effect=lambda _text: next(detections)):
+                        with patch.object(main, "run_tesseract", side_effect=["probe", "slovak read", "czech read"]) as reads:
+                            with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout="")):
+                                text = main.ocr_pdf_page(b"%PDF", 1)
+
+        self.assertEqual(text, "czech read")
+        self.assertEqual([call.args[1] for call in reads.call_args_list], ["eng+deu+fra", "slk", "ces"])
+
     def test_auto_detect_skips_the_second_read_when_the_probe_was_one_language(self):
         with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
             with patch.object(main, "installed_ocr_languages", return_value=("eng", "heb")):
