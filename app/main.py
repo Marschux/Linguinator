@@ -1820,13 +1820,19 @@ def ocr_page_script(image_path: Path) -> str:
     """The script OSD sees in a page image ("Latin", "Cyrillic", …), empty when it cannot tell."""
     try:
         result = subprocess.run(
-            ["tesseract", str(image_path), "stdout", "--psm", "0"],
+            # OSD refuses below 50 characters by default and exits with an error. A scanned page
+            # holding one short line is exactly the case that needs it most: measured on a
+            # Japanese book, two of three pages got no answer at all, fell back to English and
+            # came back empty, because English reads nothing off Japanese script.
+            ["tesseract", str(image_path), "stdout", "--psm", "0",
+             "-c", "min_characters_to_try=10"],
             check=True,
             capture_output=True,
             text=True,
         )
     except Exception:
-        # Too little text, no osd traineddata, a failed call: none of that may end the job.
+        # Too little text even for that, no osd traineddata, a failed call: none of it may end
+        # the job. A wrong script only costs the throwaway probe, which the recheck can correct.
         return ""
     match = OSD_SCRIPT.search(result.stdout)
     return match.group(1) if match else ""

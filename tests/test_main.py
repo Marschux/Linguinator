@@ -1020,6 +1020,14 @@ class MainTests(unittest.TestCase):
         with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout=report)):
             self.assertEqual(main.ocr_page_script(Path("page.png")), "Cyrillic")
 
+    def test_ocr_page_script_lowers_the_osd_character_threshold(self):
+        # Without this, a page holding one short line gets no answer at all.
+        report = "Script: Japanese\nScript confidence: 1.2\n"
+        with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout=report)) as run:
+            main.ocr_page_script(Path("page.png"))
+
+        self.assertIn("min_characters_to_try=10", run.call_args.args[0])
+
     def test_ocr_page_script_stays_quiet_when_osd_fails(self):
         # No osd data or too little text: the job must go on, not die.
         with patch.object(main.subprocess, "run", side_effect=OSError("no osd")):
