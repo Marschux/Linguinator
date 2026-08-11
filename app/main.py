@@ -979,7 +979,78 @@ def pdf_document_font_texts(pages: List[Dict[str, Any]]) -> Dict[str, List[str]]
     return texts
 
 
+# Scripts whose glyphs have to be reordered and merged before they can be drawn: a Devanagari
+# vowel sign is stored after its consonant but printed in front of it, and Arabic letters change
+# shape depending on their neighbours. The writer below maps codepoints straight to glyphs, which
+# is right for Latin, Cyrillic, Greek, CJK and Hebrew and wrong for these - Hindi came out with
+# its matras behind the wrong letters and no conjuncts at all. MuPDF shapes text as it draws it,
+# so pages holding one of these scripts are written with MuPDF instead.
+PDF_SHAPED_SCRIPTS = ("devanagari", "arabic", "thai")
+# Base-14 stand-ins, used when no file for the face could be loaded.
+PDF_BASE_FONTS = {(False, False): "helv", (True, False): "hebo",
+                  (False, True): "tiro", (True, True): "tibo"}
+
+
+def pages_need_shaping(pages: List[Dict[str, Any]]) -> bool:
+    return any(detect_pdf_script(line["text"]) in PDF_SHAPED_SCRIPTS
+               for page in pages for line in page["lines"] if line["text"])
+
+
+def draw_shaped_line(page, registered: set, text: str, x: float, y: float, face: str,
+                     size: float, color: int, height: float) -> None:
+    """One line of text on a MuPDF page, at the same place our own writer would put it.
+
+    `y` is a PDF baseline, counted up from the bottom of the page; MuPDF counts down from the
+    top, hence the flip. A font loaded from disk has to be registered on the page before
+    insert_text can refer to it by name, and only once per page.
+    """
+    bold, serif = PDF_FONT_FACES.get(face, (False, False))
+    font = load_embedded_font(bold, detect_pdf_script(text), serif)
+    fontname = re.sub(r"\W", "", font.name)[:30] if font else PDF_BASE_FONTS[(bold, serif)]
+    if font and fontname not in registered:
+        page.insert_font(fontname=fontname, fontbuffer=font.data)
+        registered.add(fontname)
+    page.insert_text(
+        (x, height - y),
+        text,
+        fontname=fontname,
+        fontsize=size,
+        color=((color >> 16 & 0xFF) / 255, (color >> 8 & 0xFF) / 255, (color & 0xFF) / 255),
+    )
+
+
+def create_shaped_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
+    """Same pages, written by MuPDF so that complex scripts come out shaped."""
+    document = pymupdf.open()
+    for output_page_number, page_data in enumerate(pages, start=1):
+        width = page_data.get("width", PDF_PAGE_WIDTH)
+        height = page_data.get("height", PDF_PAGE_HEIGHT)
+        margin = page_data.get("margin", PDF_MARGIN)
+        page = document.new_page(width=width, height=height)
+        registered: set = set()
+        y = height - margin
+        if page_data["source_page"]:
+            heading = "Page " + page_data["source_page"]
+            if page_data["continuation"]:
+                heading += " continued"
+            draw_shaped_line(page, registered, heading, margin, y, "F2",
+                             PDF_HEADING_FONT_SIZE, 0, height)
+            y -= 24
+        for line in page_data["lines"]:
+            if line["text"]:
+                draw_shaped_line(page, registered, line["text"], line.get("x", margin),
+                                 line.get("y", y), line["font"], line["size"],
+                                 line.get("color", 0), height)
+            y -= line["line_height"]
+        if page_data.get("footer", True):
+            draw_shaped_line(page, registered, f"{output_page_number}", width - margin,
+                             margin // 2, "F1", PDF_FOOTER_FONT_SIZE, 0, height)
+    return document.tobytes(garbage=3, deflate=True)
+
+
 def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
+    if pages_need_shaping(pages):
+        return create_shaped_pdf_from_pages(pages)
     objects: List[bytes] = [b"<< /Type /Catalog /Pages 2 0 R >>"]
     page_refs = []
     next_object_id = 3

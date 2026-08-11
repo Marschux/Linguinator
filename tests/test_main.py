@@ -1823,6 +1823,36 @@ class MainTests(unittest.TestCase):
         # Pages without a single coloured line are written exactly as before.
         self.assertNotIn("rg", main.pdf_line_command("x", 0, 0, "F1", 10))
 
+    def test_pages_need_shaping_only_for_the_scripts_that_do(self):
+        def page(text):
+            return {"lines": [{"text": text, "font": "F1"}], "source_page": ""}
+
+        # Matras move in front of their consonant, Arabic letters join: drawn codepoint by
+        # codepoint these come out wrong, so MuPDF writes the page instead.
+        self.assertTrue(main.pages_need_shaping([page("सितारों की कुंजी")]))
+        self.assertTrue(main.pages_need_shaping([page("مفتاح النجوم")]))
+        # Everything else our own writer gets right, and keeps writing byte for byte as before.
+        for text in ("Guten Morgen", "Привет", "星の鍵", "מפתח הכוכבים", ""):
+            with self.subTest(text=text):
+                self.assertFalse(main.pages_need_shaping([page(text)]))
+
+    def test_shaped_pages_come_out_as_a_readable_pdf(self):
+        pdf = main.create_pdf_from_pages([{
+            "width": 300, "height": 200, "margin": 20,
+            "source_page": "", "continuation": False, "footer": False,
+            "lines": [{"text": "सितारों की कुंजी", "font": "F1", "size": 12,
+                       "line_height": 14, "x": 20, "y": 150}],
+        }])
+
+        self.assertTrue(pdf.startswith(b"%PDF"))
+        page = pymupdf.open(stream=pdf, filetype="pdf")[0]
+        self.assertEqual(len(pymupdf.open(stream=pdf, filetype="pdf")), 1)
+        # Drawn near the baseline it was given, counted from the bottom of the page.
+        drawn = [span for block in page.get_text("dict")["blocks"]
+                 for line in block.get("lines", []) for span in line["spans"]]
+        if drawn:  # no Devanagari font on the machine means nothing to place, not a failure
+            self.assertAlmostEqual(200 - drawn[0]["origin"][1], 150, delta=2)
+
     def test_coloured_page_names_the_colour_on_every_line(self):
         # `rg` outlives its text object: a black line drawn after a white one and left to the
         # default would inherit the white and vanish.
