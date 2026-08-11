@@ -27,7 +27,7 @@ http://localhost:5051/
 - Persistent global job queue with configurable worker count.
 - Interface language selector for English, German, Spanish, and French.
 - Optional HTTP Basic Auth.
-- OCR fallback for scanned PDFs, always on when the image includes the OCR binaries. It reads in the source language picked for the job and covers every language the app offers. With the source set to auto-detect, the script is read off the page image first and the page is then read twice, so a scan finds its own language; that first page takes correspondingly longer. `/health` lists what the running image can read.
+- OCR fallback for scanned PDFs, always on when the image includes the OCR binaries. It reads in the source language picked for the job and covers every language the app offers. With the source set to auto-detect, the script is read off the page image first and the page is then read twice, so a scan finds its own language; that first page takes correspondingly longer. Pages printed in two scripts are split into their text blocks and each block is read in its own language, so a page mixing, say, Devanagari and Latin no longer loses one of them. `/health` lists what the running image can read.
 
 ## Usage
 

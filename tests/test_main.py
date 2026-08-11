@@ -989,6 +989,108 @@ class MainTests(unittest.TestCase):
         tesseract_call = mocked_run.call_args_list[-1].args[0]
         self.assertEqual(tesseract_call[-2:], ["-l", "rus"])
 
+    def test_ocr_page_blocks_reads_the_layout_out_of_the_tsv(self):
+        # level 2 is a block, level 5 a word; the words belong to whichever block number they
+        # carry, and blocks come back in tesseract's reading order.
+        tsv = "\n".join([
+            "level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext",
+            "2\t1\t1\t0\t0\t0\t100\t50\t400\t30\t-1\t",
+            "5\t1\t1\t1\t1\t1\t100\t50\t180\t30\t96\tÜberschrift",
+            "2\t1\t2\t0\t0\t0\t100\t120\t900\t200\t-1\t",
+            "5\t1\t2\t1\t1\t1\t100\t120\t100\t20\t95\tErster",
+            "5\t1\t2\t1\t1\t2\t210\t120\t100\t20\t95\tSatz",
+            "2\t1\t3\t0\t0\t0\t100\t400\t900\t200\t-1\t",
+            "5\t1\t3\t1\t1\t1\t100\t400\t100\t20\t20\t   ",
+        ])
+
+        with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout=tsv)):
+            blocks = main.ocr_page_blocks(Path("page.png"), "deu")
+
+        self.assertEqual([block["text"] for block in blocks], ["Überschrift", "Erster Satz"])
+        self.assertEqual(blocks[1]["box"], (100, 120, 1000, 320))
+
+    def test_ocr_page_blocks_survives_a_failed_call(self):
+        # No layout means the caller reads the whole page, which is the old behaviour.
+        with patch.object(main.subprocess, "run", side_effect=OSError("boom")):
+            self.assertEqual(main.ocr_page_blocks(Path("page.png"), "deu"), [])
+
+    def test_ocr_block_scripts_only_trusts_blocks_with_enough_text(self):
+        # OSD answers whatever it likes on a short block: a 17-character Japanese heading came
+        # back "Arabic". Only blocks past the threshold are asked at all.
+        blocks = [
+            {"box": (0, 0, 500, 300), "text": "x" * main.OCR_BLOCK_MIN_CHARS},
+            {"box": (0, 400, 500, 440), "text": "kurz"},
+        ]
+        with patch.object(main, "render_pdf_region", return_value=Path("crop.png")):
+            with patch.object(main, "ocr_page_script", return_value="Devanagari") as osd:
+                scripts = main.ocr_block_scripts(b"%PDF", 1, blocks, "Latin", "/tmp")
+
+        self.assertEqual(scripts, ["Devanagari", "Latin"])
+        self.assertEqual(osd.call_count, 1)
+
+    def test_ocr_block_scripts_ignores_scripts_no_language_exists_for(self):
+        # A Chinese page had a block come back "Korean". ocr_probe_languages can only answer
+        # English for that, and reading Han as English returns nothing at all.
+        blocks = [{"box": (0, 0, 500, 300), "text": "x" * main.OCR_BLOCK_MIN_CHARS}]
+        with patch.object(main, "render_pdf_region", return_value=Path("crop.png")):
+            for reported in ("Korean", "HanT", ""):
+                with self.subTest(script=reported):
+                    with patch.object(main, "ocr_page_script", return_value=reported):
+                        self.assertEqual(
+                            main.ocr_block_scripts(b"%PDF", 1, blocks, "Han", "/tmp"), ["Han"]
+                        )
+
+    def test_scripts_are_compatible_covers_the_han_variants(self):
+        self.assertTrue(main.scripts_are_compatible("HanS", "Han"))
+        self.assertTrue(main.scripts_are_compatible("HanT", "HanS"))
+        # Japanese is written with Han characters, so those two never contradict each other.
+        self.assertTrue(main.scripts_are_compatible("Han", "Japanese"))
+        self.assertFalse(main.scripts_are_compatible("Han", "Latin"))
+        self.assertFalse(main.scripts_are_compatible("Devanagari", "Latin"))
+
+    def test_ocr_pdf_page_reads_a_mixed_page_block_by_block(self):
+        # One script per page is what OSD gives, so a page holding two loses the minority one:
+        # measured on a half-Hindi half-German scan, the Hindi came back as invented Latin.
+        blocks = [
+            {"box": (0, 0, 500, 300), "text": "d" * main.OCR_BLOCK_MIN_CHARS},
+            {"box": (0, 400, 500, 700), "text": "l" * main.OCR_BLOCK_MIN_CHARS},
+        ]
+        reads = []
+
+        def fake_read(image_path, script):
+            reads.append(script)
+            return f"text in {script}"
+
+        with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
+            with patch.object(main, "render_pdf_page", return_value=Path("page.png")):
+                with patch.object(main, "render_pdf_region", return_value=Path("crop.png")):
+                    with patch.object(main, "ocr_page_script", return_value="Latin"):
+                        with patch.object(main, "ocr_page_blocks", return_value=blocks):
+                            with patch.object(main, "ocr_block_scripts",
+                                              return_value=["Devanagari", "Latin"]):
+                                with patch.object(main, "ocr_read_with_detection", fake_read):
+                                    text = main.ocr_pdf_page(b"%PDF", 1)
+
+        self.assertEqual(reads, ["Devanagari", "Latin"])
+        self.assertEqual(text, "text in Devanagari\n\ntext in Latin")
+
+    def test_ocr_pdf_page_reads_a_single_script_page_in_one_go(self):
+        # Splitting a page only to read every block in the same language would cost several OCR
+        # runs and throw away the layout analysis' view of the whole page.
+        blocks = [{"box": (0, 0, 500, 300), "text": "x" * main.OCR_BLOCK_MIN_CHARS}] * 3
+
+        with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
+            with patch.object(main, "render_pdf_page", return_value=Path("page.png")):
+                with patch.object(main, "ocr_page_script", return_value="Latin"):
+                    with patch.object(main, "ocr_page_blocks", return_value=blocks):
+                        with patch.object(main, "ocr_block_scripts", return_value=["Latin"] * 3):
+                            with patch.object(main, "ocr_read_with_detection",
+                                              return_value="whole page") as read:
+                                text = main.ocr_pdf_page(b"%PDF", 1)
+
+        self.assertEqual(text, "whole page")
+        self.assertEqual(read.call_args.args, (Path("page.png"), "Latin"))
+
     def test_ocr_probe_languages_stay_within_the_detected_script(self):
         installed = ("ara", "bul", "deu", "eng", "fra", "heb", "rus", "spa", "ukr")
         with patch.object(main, "installed_ocr_languages", return_value=installed):

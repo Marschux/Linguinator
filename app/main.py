@@ -1868,6 +1868,12 @@ OCR_SCRIPT_LANGUAGES = {"HanT": ("chi_tra",)}
 # coverage comes from the script OSD read off the image, not from a longer list.
 OCR_PROBE_LIMIT = 3
 OSD_SCRIPT = re.compile(r"^Script:\s*(\S+)", re.MULTILINE)
+# Levels in tesseract's TSV output: 2 is a block of text, 5 a single word.
+TSV_BLOCK_LEVEL = 2
+TSV_WORD_LEVEL = 5
+# How much text a block has to hold before its own OSD reading is trusted over the page's. See
+# ocr_block_scripts for the measurement behind it.
+OCR_BLOCK_MIN_CHARS = 100
 
 
 def run_tesseract(image_path: Path, languages: str) -> str:
@@ -1902,6 +1908,22 @@ def ocr_page_script(image_path: Path) -> str:
     return match.group(1) if match else ""
 
 
+def ocr_script_is_usable(script: str) -> bool:
+    """Whether a language can be picked for this script at all.
+
+    ocr_probe_languages answers English for anything it does not know, so an unusable script is
+    worse than no script: it reads Han or Devanagari as English, which returns nothing.
+    """
+    return bool(script) and (script in OCR_SCRIPT_SUFFIXES or script in OCR_SCRIPT_LANGUAGES)
+
+
+def scripts_are_compatible(first: str, second: str) -> bool:
+    """Whether two OSD script names describe writing that is read with the same language."""
+    normalise = lambda name: "Han" if name in ("HanS", "HanT") else name  # noqa: E731
+    first, second = normalise(first), normalise(second)
+    return first == second or frozenset((first, second)) in COMPATIBLE_SCRIPTS
+
+
 def ocr_probe_languages(script: str) -> str:
     """Languages for the probe run, as one -l argument. Order follows CORE_LANGUAGES."""
     suffix = OCR_SCRIPT_SUFFIXES.get(script)
@@ -1922,6 +1944,11 @@ def ocr_probe_languages(script: str) -> str:
     return "+".join(codes) if codes else OCR_FALLBACK_LANGUAGE
 
 
+# pdftoppm's own default, but stated rather than assumed: the block boxes tesseract reports are
+# in pixels of this rendering, and render_pdf_region has to map them back to PDF points.
+OCR_DPI = 150
+
+
 def render_pdf_page(content: bytes, page_number: int, temp_dir: str) -> Path:
     """One page of a PDF as a PNG, the form both OSD and tesseract want."""
     pdf_path = Path(temp_dir) / "input.pdf"
@@ -1934,6 +1961,8 @@ def render_pdf_page(content: bytes, page_number: int, temp_dir: str) -> Path:
             str(page_number),
             "-l",
             str(page_number),
+            "-r",
+            str(OCR_DPI),
             "-png",
             "-singlefile",
             str(pdf_path),
@@ -1944,6 +1973,30 @@ def render_pdf_page(content: bytes, page_number: int, temp_dir: str) -> Path:
         text=True,
     )
     return output_prefix.with_suffix(".png")
+
+
+# A block is re-rendered slightly larger than tesseract measured it: its box hugs the ink, and
+# characters right against the edge of an image read worse than ones with a margin around them.
+OCR_REGION_PADDING = 8
+
+
+def render_pdf_region(content: bytes, page_number: int, box: Tuple[int, int, int, int],
+                      temp_dir: str, name: str) -> Path:
+    """One block of a page as its own PNG, `box` in pixels of the OCR_DPI page rendering.
+
+    Re-rendered from the PDF rather than cut out of the page image: PyMuPDF has no working
+    pixmap-crop constructor left, and rasterising the region directly is both sharper and one
+    step shorter.
+    """
+    page = pymupdf.open(stream=content, filetype="pdf")[page_number - 1]
+    left, top, right, bottom = box
+    clip = pymupdf.Rect(
+        left - OCR_REGION_PADDING, top - OCR_REGION_PADDING,
+        right + OCR_REGION_PADDING, bottom + OCR_REGION_PADDING,
+    ) * (72.0 / OCR_DPI)
+    path = Path(temp_dir) / f"{name}.png"
+    page.get_pixmap(dpi=OCR_DPI, clip=clip & page.rect).save(str(path))
+    return path
 
 
 # Character ranges per script, named the way OSD names them so the two can be compared.
@@ -1988,12 +2041,100 @@ def text_layer_is_trustworthy(content: bytes, page_number: int, text: str) -> bo
             printed = ocr_page_script(render_pdf_page(content, page_number, temp_dir))
     except Exception:
         return True
-    if not printed or printed == claimed:
-        return True
-    printed = "Han" if printed in ("HanS", "HanT") else printed
-    if printed == claimed or frozenset((printed, claimed)) in COMPATIBLE_SCRIPTS:
-        return True
-    return False
+    return not printed or scripts_are_compatible(printed, claimed)
+
+
+def ocr_page_blocks(image_path: Path, languages: str) -> List[Dict[str, Any]]:
+    """The text blocks tesseract's layout analysis found, in reading order.
+
+    Layout analysis is driven by connected components, not by the language, so the boxes are
+    usable even though `languages` is only the throwaway probe. The recognised words come along
+    for free in the same call and say how much text a block holds, which decides below whether
+    its own script reading can be believed.
+    """
+    try:
+        output = subprocess.run(
+            ["tesseract", str(image_path), "stdout", "-l", languages, "tsv"],
+            check=True, capture_output=True, text=True,
+        ).stdout
+    except Exception:
+        # No layout, no per-block reading: the caller falls back to reading the whole page.
+        return []
+
+    blocks: Dict[int, Dict[str, Any]] = {}
+    order: List[int] = []
+    for line in output.splitlines()[1:]:
+        columns = line.split("\t")
+        if len(columns) < 12:
+            continue
+        level, number = int(columns[0]), int(columns[2])
+        if level == TSV_BLOCK_LEVEL:
+            left, top, width, height = (int(columns[column]) for column in (6, 7, 8, 9))
+            blocks[number] = {"box": (left, top, left + width, top + height), "words": []}
+            order.append(number)
+        elif level == TSV_WORD_LEVEL and number in blocks and columns[11].strip():
+            blocks[number]["words"].append(columns[11].strip())
+
+    found = []
+    for number in order:
+        block = blocks[number]
+        block["text"] = " ".join(block["words"])
+        if block["text"]:
+            found.append(block)
+    return found
+
+
+def ocr_read_with_detection(image_path: Path, script: str) -> str:
+    """Read an image whose language is unknown, given the script it is printed in.
+
+    Auto-detect on a scan is a chicken-and-egg: detection needs text, text needs OCR, OCR needs
+    the language. So read once with a few languages of that script. That result is thrown away
+    and only has to be good enough for langdetect; the image is then read again with the single
+    language langdetect named.
+    """
+    probe = ocr_probe_languages(script)
+    text = run_tesseract(image_path, probe)
+    if not text:
+        return text
+    read_with = probe
+    # Two reads at most on top of the probe. The probe mangles diacritics, which is enough to
+    # make langdetect pick a close relative - a Czech page came back as Slovak - so the guess
+    # is checked once more against the clean text the chosen language produced.
+    for _ in range(2):
+        code = ocr_language_code(detect_source_language(text))
+        if code == read_with:
+            break
+        better = run_tesseract(image_path, code)
+        if not better:
+            break
+        text, read_with = better, code
+    return text
+
+
+def ocr_block_scripts(content: bytes, page_number: int, blocks: List[Dict[str, Any]],
+                      page_script: str, temp_dir: str) -> List[str]:
+    """The script each block is printed in, one entry per block.
+
+    OSD needs a fair amount of text before its answer means anything, and it does not say so - it
+    answers anyway. Measured on the scanned fixtures: blocks of 200+ characters were right every
+    time, while a 17-character Japanese heading came back "Arabic" and a 9-character one "Han".
+    Reading those in the script OSD named would have replaced the heading with invented Arabic,
+    so short blocks are not asked at all and take the page's script instead.
+    """
+    scripts = []
+    for index, block in enumerate(blocks):
+        script = ""
+        if len(block["text"]) >= OCR_BLOCK_MIN_CHARS:
+            region = render_pdf_region(content, page_number, block["box"], temp_dir, f"block{index}")
+            script = ocr_page_script(region)
+        if not ocr_script_is_usable(script) or scripts_are_compatible(script, page_script):
+            # Either OSD named something no language can be picked for - a Chinese page had one
+            # block come back "Korean", which ocr_probe_languages can only answer with English,
+            # and reading Han as English deletes it - or it named a script that is written with
+            # the page's anyway (kanji in a Japanese page). Neither is a reason to split.
+            script = page_script
+        scripts.append(script)
+    return scripts
 
 
 def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE) -> str:
@@ -2003,27 +2144,26 @@ def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE) ->
         if source != AUTO_SOURCE:
             return run_tesseract(image_path, ocr_language_code(source))
 
-        # Auto-detect on a scan is a chicken-and-egg: detection needs text, text needs OCR, OCR
-        # needs the language. So read once with a few languages of the script OSD found. That
-        # result is thrown away and only has to be good enough for langdetect; the page is then
-        # read again with the single language langdetect named.
-        probe = ocr_probe_languages(ocr_page_script(image_path))
-        text = run_tesseract(image_path, probe)
-        if not text:
-            return text
-        read_with = probe
-        # Two reads at most on top of the probe. The probe mangles diacritics, which is enough to
-        # make langdetect pick a close relative - a Czech page came back as Slovak - so the guess
-        # is checked once more against the clean text the chosen language produced.
-        for _ in range(2):
-            code = ocr_language_code(detect_source_language(text))
-            if code == read_with:
-                break
-            better = run_tesseract(image_path, code)
-            if not better:
-                break
-            text, read_with = better, code
-        return text
+        page_script = ocr_page_script(image_path)
+        blocks = ocr_page_blocks(image_path, ocr_probe_languages(page_script))
+        scripts = ocr_block_scripts(content, page_number, blocks, page_script, temp_dir)
+        if len(set(scripts)) < 2:
+            # One script on the page, which is the normal case: read it in one go. Splitting a
+            # page into blocks only to read each in the same language would cost several OCR
+            # runs and lose the layout analysis' view of the whole page for nothing.
+            return ocr_read_with_detection(image_path, page_script)
+
+        # A mixed page. OSD picks one script for the whole image, so reading it in one go always
+        # loses the other script's text: the majority wins and the rest is either dropped or
+        # reinvented in the wrong alphabet. Each block is read in its own script instead and the
+        # results are put back together in tesseract's reading order.
+        pieces = []
+        for index, (block, script) in enumerate(zip(blocks, scripts)):
+            region = render_pdf_region(content, page_number, block["box"], temp_dir, f"read{index}")
+            text = ocr_read_with_detection(region, script)
+            if text.strip():
+                pieces.append(text.strip())
+        return "\n\n".join(pieces)
 
 
 def extract_pdf_markdown_from_bytes(
