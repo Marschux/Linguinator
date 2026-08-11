@@ -47,9 +47,24 @@ class FakeDocument:
         return self.pages[index]
 
 
-def mupdf_span(text, x, y, size=11.0, bold=False, direction=(1.0, 0.0), font="Helvetica"):
-    """One span as PyMuPDF reports it: baseline origin and bbox in MuPDF's top-down space."""
+def mupdf_span(text, x, y, size=11.0, bold=False, direction=(1.0, 0.0), font="Helvetica",
+               draw_order=None):
+    """One span as PyMuPDF reports it: baseline origin and bbox in MuPDF's top-down space.
+
+    Characters are placed left to right in the order of `text`; `draw_order` hands over the
+    same characters in the order the page paints them, which is what a right-to-left producer
+    reorders.
+    """
     width = 0.5 * size * len(text)
+    characters = [{"c": char, "origin": (x + 0.5 * size * index, y)}
+                  for index, char in enumerate(text)]
+    if draw_order:
+        remaining = list(characters)
+        characters = []
+        for char in draw_order:
+            entry = next(item for item in remaining if item["c"] == char)
+            remaining.remove(entry)
+            characters.append(entry)
     return {
         "text": text,
         "origin": (x, y),
@@ -58,6 +73,7 @@ def mupdf_span(text, x, y, size=11.0, bold=False, direction=(1.0, 0.0), font="He
         "flags": main.MUPDF_BOLD_FLAG if bold else 0,
         "dir": direction,
         "font": font,
+        "chars": characters,
     }
 
 
@@ -1772,17 +1788,33 @@ class MainTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertFalse(main.is_rtl_text(text))
 
-    def test_pdf_page_runs_leaves_right_to_left_text_alone(self):
-        # A translation over RTL text needs the bidirectional algorithm, which is not in here.
-        # Half-doing it scrambled the words and half-erased the original underneath.
-        page = FakeMuPdfPage([
-            mupdf_span("Guten Morgen", 50, 700),
-            mupdf_span("מפתח הכוכבים", 50, 680),
-        ])
+    def test_pdf_page_runs_reads_right_to_left_characters_in_page_order(self):
+        # The order a span is painted in is the producer's business; the x of each character is
+        # not. A Hebrew span whose glyphs are drawn out of order still has to come back in the
+        # order it stands on the page, so the line can be turned around later.
+        visual = "םיבכוכה חתפמ"
+        page = FakeMuPdfPage([mupdf_span(visual, 50, 700, draw_order=visual[::-1])])
 
         runs = main.pdf_page_runs(page)
 
-        self.assertEqual([run["text"] for run in runs], ["Guten Morgen"])
+        self.assertEqual([run["text"] for run in runs], [visual])
+
+    def test_group_pdf_lines_turns_right_to_left_text_into_reading_order(self):
+        # Assembled left to right, a Hebrew line arrives back to front. The model needs it the
+        # way it is read.
+        logical = "שלום עולם"
+        page = FakeMuPdfPage([mupdf_span(logical[::-1], 50, 700)])
+
+        lines = main.group_pdf_lines(main.pdf_page_runs(page))
+
+        self.assertEqual([line["text"] for line in lines], [logical])
+
+    def test_visual_to_logical_keeps_digits_and_latin_words_readable(self):
+        # Numbers and Latin words inside a Hebrew line already run left to right; reversing the
+        # line as a whole would turn "2024" into "4202".
+        self.assertEqual(main.visual_to_logical("2024 םילשורי"), "ירושלים 2024")
+        # The full stop of an RTL sentence stands at its left end.
+        self.assertEqual(main.visual_to_logical(".םולש"), "שלום.")
 
     def test_pdf_page_runs_drops_a_second_copy_drawn_over_the_first(self):
         # Synthetic bold paints the same glyphs twice ("PPoowweerr"), and some generators leave a
@@ -1799,15 +1831,15 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual([run["text"] for run in runs], ["Kapitel eins", "Eigener Absatz"])
 
-    def test_pdf_page_runs_records_rtl_ink_so_duplicates_over_it_are_caught(self):
-        # The RTL run is skipped, but it is still ink: a copy drawn over it has to be recognised
-        # as the duplicate it is instead of coming through as text of its own.
+    def test_pdf_page_runs_drops_a_broken_copy_drawn_over_rtl_text(self):
+        # The generator of the Hebrew sample leaves a second, broken-encoded copy over the real
+        # text. Only the first one drawn is what the reader sees.
         page = FakeMuPdfPage([
-            mupdf_span("מפתח הכוכבים", 50, 700),
+            mupdf_span("םיבכוכה חתפמ", 50, 700),
             mupdf_span("ԿԮԧԴԳԬԹԵ", 50.5, 700),
         ])
 
-        self.assertEqual(main.pdf_page_runs(page), [])
+        self.assertEqual([run["text"] for run in main.pdf_page_runs(page)], ["םיבכוכה חתפמ"])
 
     def test_reflow_paragraph_carries_the_original_colour(self):
         # A title set in white on a dark cover image was redrawn in the default black.

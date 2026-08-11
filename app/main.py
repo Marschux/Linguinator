@@ -2314,10 +2314,42 @@ def overlaps_mostly(box, other) -> bool:
     return smaller > 0 and (box & other).get_area() > PDF_RUN_OVERLAP * smaller
 
 
+def is_rtl_char(char: str) -> bool:
+    return any(low <= ord(char) <= high for low, high in RTL_RANGES)
+
+
 def is_rtl_text(text: str) -> bool:
     """Whether a string is mostly written right to left."""
-    rtl = sum(1 for char in text if any(low <= ord(char) <= high for low, high in RTL_RANGES))
+    rtl = sum(1 for char in text if is_rtl_char(char))
     return rtl > 0 and rtl * 2 > sum(1 for char in text if char.isalpha())
+
+
+def visual_to_logical(text: str) -> str:
+    """Turn a right-to-left line from the order it stands on the page into reading order.
+
+    The layout pipeline assembles a line from left to right, which for Hebrew or Arabic is the
+    order a reader ends on. Reversing it restores the reading order the model needs; digits and
+    Latin words inside the line already run left to right and are reversed back into place, and
+    spaces or punctuation stay with the segment they were found in.
+    """
+    segments: List[List[str]] = []
+    directions: List[bool] = []
+    for char in text:
+        rtl = is_rtl_char(char)
+        # Only a letter or digit switches direction. A space between two Hebrew words is not a
+        # segment of its own, otherwise the two words swap places.
+        if segments and (not char.isalnum() or rtl == directions[-1]):
+            segments[-1].append(char)
+        else:
+            segments.append([char])
+            directions.append(rtl)
+    parts = [
+        "".join(reversed(chars) if rtl else chars).strip()
+        for chars, rtl in zip(segments, directions)
+    ]
+    # A sentence's full stop sits at the left end of an RTL line and becomes a segment of its
+    # own, which would otherwise leave a space in front of it after the turn.
+    return re.sub(r"\s+([,.;:!?])", r"\1", " ".join(part for part in reversed(parts) if part))
 
 
 def pdf_page_runs(page) -> List[Dict[str, Any]]:
@@ -2327,19 +2359,29 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
     measured bounding box, rendered size and font flags. Its own coordinates count downwards
     from the top-left of the page, so every point is mapped back through the inverse page
     transformation into the user space the overlay is later drawn in.
+
+    Read as `rawdict` rather than `dict` for the position of every single character: a span's
+    ready-made text follows the order the page paints in, which for right-to-left text is the
+    producer's business and not something to rely on. Sorting the characters by their own x
+    gives the order they stand in on the page, whoever wrote the file.
     """
     runs: List[Dict[str, Any]] = []
     # ponytail: O(runs^2) per page, a few hundred runs at most; index by row if a page ever
     # shows up where it isn't.
     boxes: List[Any] = []
     inverse = ~page.transformation_matrix
-    for block in page.get_text("dict")["blocks"]:
+    # ponytail: rawdict carries a dict per character, heavier than dict on long documents;
+    # narrow it to pages that hold right-to-left text if extraction ever shows up in a profile.
+    for block in page.get_text("rawdict")["blocks"]:
         for line in block.get("lines", []):
             # The overlay is drawn horizontally; rotated or vertical text keeps its original.
             if abs(line["dir"][1]) > 0.01 or line["dir"][0] <= 0:
                 continue
             for span in line["spans"]:
-                text = span["text"]
+                characters = span["chars"]
+                if any(is_rtl_char(item["c"]) for item in characters):
+                    characters = sorted(characters, key=lambda item: item["origin"][0])
+                text = "".join(item["c"] for item in characters)
                 if not text.strip():
                     continue
                 x, y = pymupdf.Point(span["origin"]) * inverse
@@ -2363,15 +2405,6 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
                 # duplicate it is. Skipping it earlier left the second copy without a partner to
                 # match against, and it came through as text in its own right.
                 boxes.append(box)
-                # Right-to-left text keeps its original, the same way rotated text does. Placing a
-                # translation over it needs the bidirectional algorithm at three separate points:
-                # the runs come out of MuPDF in visual order, so reading them left to right
-                # reverses every word; the column is aligned to its right edge, not its left; and
-                # an RTL target would have to be laid out right to left as well. None of that is
-                # in here, and half of it is worse than leaving the page alone - the original was
-                # left half-readable underneath while a scrambled translation ran across it.
-                if is_rtl_text(text):
-                    continue
                 runs.append({
                     "text": text,
                     "x": x,
@@ -2445,6 +2478,12 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             current["color_chars"][run.get("color", 0)] += length
         for cell in cells:
             cell["text"] = re.sub(r"\s+", " ", cell["text"]).strip()
+            # The single point where reading order is restored: the cell has just been put
+            # together from left to right, out of runs that stand in page order, so this is the
+            # only place the whole visual line exists. Doing it per run instead would reverse
+            # each run on its own and leave them in the wrong order relative to each other.
+            if is_rtl_text(cell["text"]):
+                cell["text"] = visual_to_logical(cell["text"])
             total = cell.pop("total_chars")
             cell["bold"] = cell.pop("bold_chars") * 2 > total
             cell["serif"] = cell.pop("serif_chars") * 2 > total
