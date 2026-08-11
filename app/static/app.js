@@ -116,7 +116,7 @@ let languageData = null;
         tipRepo: "Open the Linguinator repository.",
         modelDedicated: "Dedicated model for this language pair.",
         modelFallback: "No dedicated model for this pair, using the multilingual fallback.",
-        modelAutoDetect: "Source language will be detected automatically. Scanned PDFs are read twice for this and take longer. A scan mixing two scripts needs the source language set, otherwise one of them is lost.",
+        modelAutoDetect: "Detected automatically. Scans take longer, and a scan mixing two scripts needs the language set.",
         autoDetect: "Auto-detect",
         ownJobDone: "Your job is done:"
       },
@@ -217,7 +217,7 @@ let languageData = null;
         tipRepo: "Linguinator-Repository oeffnen.",
         modelDedicated: "Eigenes Modell fuer dieses Sprachpaar.",
         modelFallback: "Kein eigenes Modell fuer dieses Paar, nutzt den mehrsprachigen Fallback.",
-        modelAutoDetect: "Quellsprache wird automatisch erkannt. Gescannte PDFs werden dafuer zweimal gelesen und brauchen laenger. Bei einem Scan mit zwei Schriften muss die Quellsprache gesetzt werden, sonst geht eine davon verloren.",
+        modelAutoDetect: "Wird automatisch erkannt. Scans dauern laenger, bei zwei Schriften die Sprache selbst setzen.",
         autoDetect: "Automatisch erkennen",
         ownJobDone: "Dein Job ist fertig:"
       },
@@ -318,7 +318,7 @@ let languageData = null;
         tipRepo: "Abrir el repositorio de Linguinator.",
         modelDedicated: "Modelo dedicado para este par de idiomas.",
         modelFallback: "Sin modelo dedicado para este par, se usa el alternativo multilingue.",
-        modelAutoDetect: "El idioma de origen se detectara automaticamente. Los PDF escaneados se leen dos veces y tardan mas. Si un escaneo mezcla dos alfabetos, hay que fijar el idioma de origen o se pierde uno de ellos.",
+        modelAutoDetect: "Se detecta automaticamente. Los escaneos tardan mas; si mezclan dos alfabetos, fija el idioma.",
         autoDetect: "Deteccion automatica",
         ownJobDone: "Tu trabajo esta listo:"
       },
@@ -419,7 +419,7 @@ let languageData = null;
         tipRepo: "Ouvrir le depot de Linguinator.",
         modelDedicated: "Modele dedie pour cette paire de langues.",
         modelFallback: "Pas de modele dedie pour cette paire, utilise le modele multilingue.",
-        modelAutoDetect: "La langue source sera detectee automatiquement. Les PDF numerises sont lus deux fois et prennent plus de temps. Si un scan melange deux ecritures, il faut choisir la langue source, sinon l'une des deux est perdue.",
+        modelAutoDetect: "Detectee automatiquement. Les scans prennent plus de temps; si deux ecritures se melangent, choisis la langue.",
         autoDetect: "Detection automatique",
         ownJobDone: "Ton job est termine :"
       }
