@@ -15,6 +15,7 @@ page, so more pages cost runtime without covering anything new.
 """
 import sys
 import unittest
+from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 
@@ -23,15 +24,42 @@ import pymupdf
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import app.main as main
+from fastapi import HTTPException
 
 TESTFILES_DIR = Path(__file__).resolve().parent / "testfiles"
 MAX_PAGES = 5
 
 
+# Translated output the maintainer keeps for review lives here, next to the sources it was made
+# from. It is a result, not an input, and must not be fed back in as one.
+RESULTS_DIR = "testergebnisfiles"
+
+
 def testfile_pdfs():
+    # Recursive: the documents are sorted into subfolders ("Real Tests", "Language Tests/..."),
+    # and a flat glob finds none of them, which turns the whole suite into a silent skip.
     if not TESTFILES_DIR.is_dir():
         return []
-    return sorted(TESTFILES_DIR.glob("*.pdf"))
+    return sorted(path for path in TESTFILES_DIR.rglob("*.pdf")
+                  if RESULTS_DIR not in path.relative_to(TESTFILES_DIR).parts)
+
+
+@lru_cache(maxsize=1)
+def layout_pdfs():
+    """The documents the layout pipeline can work on at all.
+
+    Scanned and image-only PDFs are deliberately part of the set - they are what the OCR path is
+    tested against - but they carry no positioned text, so extract_pdf_layout rejects them by
+    design and every test below would fail on something that is working correctly.
+    """
+    usable = []
+    for path in testfile_pdfs():
+        try:
+            main.extract_pdf_layout(path.read_bytes(), "1")
+        except HTTPException:
+            continue
+        usable.append(path)
+    return usable
 
 
 def page_range_for(content: bytes) -> str:
@@ -49,7 +77,7 @@ class TestfilePdfRoundTripTests(unittest.TestCase):
     def test_layout_extraction_is_deterministic(self):
         # The history re-export re-extracts the original instead of storing the paragraph list,
         # so a second extraction that differs at all silently shifts every translation.
-        for path in testfile_pdfs():
+        for path in layout_pdfs():
             with self.subTest(document=path.name):
                 content = path.read_bytes()
                 page_range = page_range_for(content)
@@ -65,7 +93,7 @@ class TestfilePdfRoundTripTests(unittest.TestCase):
         # export_pdf_layout_with_translated_text splits the stored text on "\n\n" and zips the
         # blocks against re-extracted paragraphs by position. A paragraph holding a blank line
         # would produce more blocks than paragraphs and misalign everything after it.
-        for path in testfile_pdfs():
+        for path in layout_pdfs():
             with self.subTest(document=path.name):
                 content = path.read_bytes()
                 for page in main.extract_pdf_layout(content, page_range_for(content)):
@@ -75,7 +103,7 @@ class TestfilePdfRoundTripTests(unittest.TestCase):
     def test_identity_roundtrip_keeps_every_paragraph_aligned(self):
         # Feed each paragraph's own text back in as its "translation": the re-export must find
         # exactly as many paragraphs as there are blocks, so nothing shifts or gets dropped.
-        for path in testfile_pdfs():
+        for path in layout_pdfs():
             with self.subTest(document=path.name):
                 content = path.read_bytes()
                 page_range = page_range_for(content)
@@ -96,7 +124,7 @@ class TestfilePdfRoundTripTests(unittest.TestCase):
                 )
 
     def test_selected_pages_only_are_exported(self):
-        for path in testfile_pdfs():
+        for path in layout_pdfs():
             with self.subTest(document=path.name):
                 content = path.read_bytes()
                 total = len(main.PdfReader(BytesIO(content)).pages)
@@ -117,7 +145,7 @@ class TestfileRedactionTests(unittest.TestCase):
         back in as its own "translation" and then asking the exported PDF for its text: only the
         substituted marker may survive.
         """
-        for path in testfile_pdfs():
+        for path in layout_pdfs():
             with self.subTest(document=path.name):
                 content = path.read_bytes()
                 pages = main.extract_pdf_layout(content, "1")
@@ -147,7 +175,7 @@ class TestfileRedactionTests(unittest.TestCase):
         def solid_areas(page):
             return [d for d in page.get_drawings() if d["rect"].height >= 2.0 and d["rect"].width >= 2.0]
 
-        for path in testfile_pdfs():
+        for path in layout_pdfs():
             with self.subTest(document=path.name):
                 content = path.read_bytes()
                 pages = main.extract_pdf_layout(content, "1")
@@ -167,7 +195,7 @@ class TestfileRedactionTests(unittest.TestCase):
     def test_redaction_removes_link_underlines_with_their_text(self):
         # Reddit_discussion is the document that has them: every link is underlined, and the
         # underlines used to stay put while the text under them changed length.
-        document = next((p for p in testfile_pdfs() if p.name.startswith("Reddit_discussion")), None)
+        document = next((p for p in layout_pdfs() if p.name.startswith("Reddit_discussion")), None)
         if document is None:
             self.skipTest("Reddit_discussion.pdf not in tests/testfiles/")
 
