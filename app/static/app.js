@@ -685,7 +685,13 @@ let languageData = null;
         '<span class="language-name">' + escapeHtml(formatLanguageLabel(language.code)) + '</span>' +
         '<span class="language-code">' + escapeHtml(language.code) + '</span>';
       option.classList.toggle("active", language.code === selectedValue);
-      option.addEventListener("click", () => setPickerValue(id, language.code));
+      option.addEventListener("click", () => {
+        setPickerValue(id, language.code);
+        // Store the pick here rather than in setPickerValue, which also runs while the menu is
+        // being built: a job start is too late, picking a language and reloading without
+        // translating anything used to throw the choice away.
+        saveRecent(id, language.code);
+      });
       menu.appendChild(option);
     }
 
@@ -1571,13 +1577,13 @@ let languageData = null;
         setPanelCollapsed(bodyId, iconId, storageKey, !body.classList.contains("hidden"));
       });
       // Only an explicit "0" counts as "the user opened it": an absent key is a first visit,
-      // which for the queue means collapsed.
+      // which for the queue and the history means collapsed.
       const stored = localStorage.getItem(storageKey);
       const collapsed = stored === null ? collapsedByDefault : stored === "1";
       setPanelCollapsed(bodyId, iconId, storageKey, collapsed);
     }
 
-    setupPanelCollapse("historyCollapse", "historyBody", "historyCollapseIcon", "linguinator_history_collapsed");
+    setupPanelCollapse("historyCollapse", "historyBody", "historyCollapseIcon", "linguinator_history_collapsed", true);
     setupPanelCollapse("queueCollapse", "queueBody", "queueCollapseIcon", "linguinator_queue_collapsed", true);
 
     function setTheme(theme) {
