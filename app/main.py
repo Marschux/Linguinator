@@ -2227,6 +2227,27 @@ def extract_pdf_markdown_from_bytes(
 
 MUPDF_BOLD_FLAG = 1 << 4  # span flag bit 4, per PyMuPDF's text-extraction flag table
 
+# Hebrew, Arabic, Syriac, Thaana, NKo and the Arabic presentation forms. Devanagari (0900-097F)
+# is deliberately outside: it runs left to right.
+RTL_RANGES = ((0x0590, 0x08FF), (0xFB1D, 0xFDFF), (0xFE70, 0xFEFF))
+
+
+# How much of the smaller of two text boxes has to be inside the larger before they count as the
+# same ink. Well below full containment, since a duplicate layer is usually drawn with a slightly
+# different font and lands a point or two off.
+PDF_RUN_OVERLAP = 0.5
+
+
+def overlaps_mostly(box, other) -> bool:
+    smaller = min(box.get_area(), other.get_area())
+    return smaller > 0 and (box & other).get_area() > PDF_RUN_OVERLAP * smaller
+
+
+def is_rtl_text(text: str) -> bool:
+    """Whether a string is mostly written right to left."""
+    rtl = sum(1 for char in text if any(low <= ord(char) <= high for low, high in RTL_RANGES))
+    return rtl > 0 and rtl * 2 > sum(1 for char in text if char.isalpha())
+
 
 def pdf_page_runs(page) -> List[Dict[str, Any]]:
     """Every text run on a PyMuPDF page, positioned in PDF user space.
@@ -2237,6 +2258,9 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
     transformation into the user space the overlay is later drawn in.
     """
     runs: List[Dict[str, Any]] = []
+    # ponytail: O(runs^2) per page, a few hundred runs at most; index by row if a page ever
+    # shows up where it isn't.
+    boxes: List[Any] = []
     inverse = ~page.transformation_matrix
     for block in page.get_text("dict")["blocks"]:
         for line in block.get("lines", []):
@@ -2252,17 +2276,31 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
                     # Some generators dump a hidden duplicate of the page's text anchored at the
                     # origin (accessibility/search layer). It is never real, visible content.
                     continue
-                # Synthetic bold (no real bold face available) is faked by drawing the same
-                # glyphs twice at the same spot; one copy is enough, or lines double up into
-                # "PPoowweerr".
-                if runs:
-                    previous = runs[-1]
-                    if (
-                        previous["text"].strip() == text.strip()
-                        and abs(previous["x"] - x) < 0.5
-                        and abs(previous["y"] - y) < 0.5
-                    ):
-                        continue
+                # Text drawn on top of text that is already there. Two sources of it: synthetic
+                # bold, where the same glyphs are painted twice at the same spot to fake a weight
+                # the font does not have (one copy is enough, or lines double up into
+                # "PPoowweerr"), and generators that leave a second full copy of the page's text
+                # behind, offset and often with a broken encoding. Only one of them can be the
+                # text the reader sees, so the first one drawn is kept and later ones covering
+                # the same ink are dropped: extracting both would translate the page twice and
+                # stamp the second translation across the first.
+                box = pymupdf.Rect(span["bbox"])
+                if any(overlaps_mostly(box, taken) for taken in boxes):
+                    continue
+                # Recorded before the direction check, not after: an RTL run is ink on the page
+                # like any other, and a duplicate layer drawn over it has to be recognised as the
+                # duplicate it is. Skipping it earlier left the second copy without a partner to
+                # match against, and it came through as text in its own right.
+                boxes.append(box)
+                # Right-to-left text keeps its original, the same way rotated text does. Placing a
+                # translation over it needs the bidirectional algorithm at three separate points:
+                # the runs come out of MuPDF in visual order, so reading them left to right
+                # reverses every word; the column is aligned to its right edge, not its left; and
+                # an RTL target would have to be laid out right to left as well. None of that is
+                # in here, and half of it is worse than leaving the page alone - the original was
+                # left half-readable underneath while a scrambled translation ran across it.
+                if is_rtl_text(text):
+                    continue
                 runs.append({
                     "text": text,
                     "x": x,

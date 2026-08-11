@@ -1761,6 +1761,54 @@ class MainTests(unittest.TestCase):
         self.assertIn("Chapter one", text)
         self.assertNotIn("ENTWICKLUNG", text)
 
+    def test_is_rtl_text_recognises_the_right_to_left_scripts(self):
+        for text in ("מפתח הכוכבים ויער האשליות", "الكتاب", "שלום 2026"):
+            with self.subTest(text=text):
+                self.assertTrue(main.is_rtl_text(text))
+        # Devanagari runs left to right, and a stray Hebrew word in a German line does not turn
+        # the line around.
+        for text in ("Guten Morgen", "सितारों की कुंजी", "2026-08-11", "",
+                     "Das hebräische Wort שלום bedeutet Frieden und Ganzheit"):
+            with self.subTest(text=text):
+                self.assertFalse(main.is_rtl_text(text))
+
+    def test_pdf_page_runs_leaves_right_to_left_text_alone(self):
+        # A translation over RTL text needs the bidirectional algorithm, which is not in here.
+        # Half-doing it scrambled the words and half-erased the original underneath.
+        page = FakeMuPdfPage([
+            mupdf_span("Guten Morgen", 50, 700),
+            mupdf_span("מפתח הכוכבים", 50, 680),
+        ])
+
+        runs = main.pdf_page_runs(page)
+
+        self.assertEqual([run["text"] for run in runs], ["Guten Morgen"])
+
+    def test_pdf_page_runs_drops_a_second_copy_drawn_over_the_first(self):
+        # Synthetic bold paints the same glyphs twice ("PPoowweerr"), and some generators leave a
+        # whole second copy of the page's text behind, offset and often broken. Only one of them
+        # is what the reader sees.
+        page = FakeMuPdfPage([
+            mupdf_span("Kapitel eins", 50, 700),
+            mupdf_span("Kapitel eins", 50.3, 700),      # synthetic bold
+            mupdf_span("ԿԮԧԴԳԬԹԵ", 51, 699),            # broken duplicate layer, offset
+            mupdf_span("Eigener Absatz", 50, 660),
+        ])
+
+        runs = main.pdf_page_runs(page)
+
+        self.assertEqual([run["text"] for run in runs], ["Kapitel eins", "Eigener Absatz"])
+
+    def test_pdf_page_runs_records_rtl_ink_so_duplicates_over_it_are_caught(self):
+        # The RTL run is skipped, but it is still ink: a copy drawn over it has to be recognised
+        # as the duplicate it is instead of coming through as text of its own.
+        page = FakeMuPdfPage([
+            mupdf_span("מפתח הכוכבים", 50, 700),
+            mupdf_span("ԿԮԧԴԳԬԹԵ", 50.5, 700),
+        ])
+
+        self.assertEqual(main.pdf_page_runs(page), [])
+
     def test_reflow_paragraph_carries_the_original_colour(self):
         # A title set in white on a dark cover image was redrawn in the default black.
         white = 0xFFFFFF
