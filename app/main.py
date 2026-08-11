@@ -190,6 +190,30 @@ CORE_LANGUAGES = {
 }
 INTERNAL_TO_ISO_639_1 = {internal: short for short, internal in CORE_LANGUAGES.items()}
 
+# The favourites at the top of both language pickers. English is always among them, so the
+# setting names the other three at most: more than four entries turn the shortcut back into
+# the long list it is meant to shorten.
+FAVORITE_LANGUAGE_LIMIT = 3
+FIXED_FAVORITE_LANGUAGE = "eng_Latn"
+
+
+def parse_favorite_languages(value: str) -> List[str]:
+    favorites: List[str] = []
+    for entry in value.split(","):
+        code = entry.strip()
+        if code in INTERNAL_TO_ISO_639_1 and code not in favorites:
+            favorites.append(code)
+        if len(favorites) >= FAVORITE_LANGUAGE_LIMIT:
+            break
+    if FIXED_FAVORITE_LANGUAGE not in favorites:
+        favorites.append(FIXED_FAVORITE_LANGUAGE)
+    return favorites
+
+
+FAVORITE_LANGUAGES = parse_favorite_languages(
+    env_value("LINGUINATOR_FAVORITE_LANGUAGES", "deu_Latn,spa_Latn,fra_Latn")
+)
+
 if CPU_THREADS > 0:
     os.environ.setdefault("OMP_NUM_THREADS", str(CPU_THREADS))
     os.environ.setdefault("MKL_NUM_THREADS", str(CPU_THREADS))
@@ -3490,6 +3514,7 @@ def languages():
         "source_default": DEFAULT_SOURCE,
         "target_default": DEFAULT_TARGET,
         "languages": [{"code": code, "name": code} for code in language_codes()],
+        "favorites": FAVORITE_LANGUAGES,
         "dedicated_pairs": dedicated_pairs,
     }
 

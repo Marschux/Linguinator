@@ -255,8 +255,6 @@ let languageData = null;
       }
     };
     const AUTO_LANGUAGE = {code: "auto", name: "auto"};
-    const FAVORITE_LANGUAGE_COUNT = 4;
-    const defaultFavoriteLanguages = ["eng_Latn", "deu_Latn", "fra_Latn", "spa_Latn"];
     const languageNames = new Intl.DisplayNames(["en"], {type: "language"});
     const languageFallbacks = {
       ace: "Acehnese",
@@ -464,27 +462,6 @@ let languageData = null;
     function saveRecent(id, code) {
       const recent = [code, ...getRecent(id).filter((item) => item !== code)].slice(0, 3);
       localStorage.setItem(recentKey(id), JSON.stringify(recent));
-      saveRecentLanguage(code);
-    }
-
-    function recentLanguagesKey() {
-      return "linguinator_recent_languages";
-    }
-
-    function getRecentLanguages() {
-      try {
-        return JSON.parse(localStorage.getItem(recentLanguagesKey()) || "[]");
-      } catch {
-        return [];
-      }
-    }
-
-    function saveRecentLanguage(code) {
-      // Auto-detect is not a language and never belongs in the recents: the source menu already
-      // pins it above the favourites, so storing it there listed it a second time.
-      if (code === AUTO_LANGUAGE.code) return;
-      const recent = [code, ...getRecentLanguages().filter((item) => item !== code)].slice(0, FAVORITE_LANGUAGE_COUNT * 2);
-      localStorage.setItem(recentLanguagesKey(), JSON.stringify(recent));
     }
 
     // Linguinator has no user accounts (Basic Auth, when enabled, shares one credential pair
@@ -519,17 +496,10 @@ let languageData = null;
     }
 
     function getFavoriteLanguages() {
-      // Every candidate is checked against the languages actually on offer *before* the list is
-      // topped up. A recent entry can name a language that no longer exists (Croatian, Thai,
-      // Norwegian and Romanian were dropped) or auto-detect, which is not a language; dropping
-      // those only after filling up left three or even two favourites on show.
-      const usable = (code) => code !== AUTO_LANGUAGE.code && Boolean(languageByCode(code));
-      const favorites = getRecentLanguages().filter(usable).slice(0, FAVORITE_LANGUAGE_COUNT);
-      for (const code of [...defaultFavoriteLanguages, ...languageData.languages.map((l) => l.code)]) {
-        if (favorites.length >= FAVORITE_LANGUAGE_COUNT) break;
-        if (!favorites.includes(code) && usable(code)) favorites.push(code);
-      }
-      return favorites;
+      // Set per installation via LINGUINATOR_FAVORITE_LANGUAGES, English always included.
+      // Still filtered against the languages on offer: the setting can name one that a later
+      // release dropped, and an entry with no language behind it would render as an empty row.
+      return (languageData.favorites || []).filter((code) => Boolean(languageByCode(code)));
     }
 
     function addOption(select, language) {
@@ -729,7 +699,7 @@ let languageData = null;
       const select = document.getElementById(id);
       const menu = document.getElementById(id + "Menu");
       const favoriteCodes = getFavoriteLanguages();
-      const favorites = favoriteCodes.map(languageByCode).filter(Boolean).filter((language) => language.code !== AUTO_LANGUAGE.code);
+      const favorites = favoriteCodes.map(languageByCode);
       select.innerHTML = "";
       menu.innerHTML = "";
 

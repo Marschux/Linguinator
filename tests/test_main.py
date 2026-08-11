@@ -955,6 +955,26 @@ class MainTests(unittest.TestCase):
         self.assertIn("OCR text", markdown)
         mocked_ocr.assert_called_once_with(b"%PDF", 1, main.AUTO_SOURCE)
 
+    def test_favorite_languages_cap_at_three_plus_english(self):
+        self.assertEqual(
+            main.parse_favorite_languages("deu_Latn,spa_Latn,fra_Latn"),
+            ["deu_Latn", "spa_Latn", "fra_Latn", "eng_Latn"],
+        )
+        # A fourth entry is dropped, not shown alongside the always-present English.
+        self.assertEqual(len(main.parse_favorite_languages("deu_Latn,spa_Latn,fra_Latn,ita_Latn")), 4)
+        # Unknown codes, blanks and duplicates are ignored; English is never listed twice.
+        self.assertEqual(
+            main.parse_favorite_languages(" deu_Latn , hrv_Latn, deu_Latn ,eng_Latn"),
+            ["deu_Latn", "eng_Latn"],
+        )
+        self.assertEqual(main.parse_favorite_languages(""), ["eng_Latn"])
+
+    def test_languages_route_reports_the_favorites(self):
+        payload = TestClient(main.app).get("/languages").json()
+
+        self.assertEqual(payload["favorites"], main.FAVORITE_LANGUAGES)
+        self.assertIn("eng_Latn", payload["favorites"])
+
     def test_ocr_language_code_maps_source_language_to_tesseract(self):
         with patch.object(main, "installed_ocr_languages", return_value=("deu", "eng", "fra", "ara", "chi_sim")):
             self.assertEqual(main.ocr_language_code("deu_Latn"), "deu")
