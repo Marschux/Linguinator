@@ -72,7 +72,7 @@ let languageData = null;
         formatOriginal: "Original Format",
         modelDedicated: "Dedicated model for this language pair.",
         modelFallback: "No dedicated model for this pair, using the multilingual fallback.",
-        modelAutoDetect: "Source language will be detected automatically.",
+        modelAutoDetect: "Source language will be detected automatically. Scanned PDFs are read twice for this and take longer.",
         autoDetect: "Auto-detect",
         ownJobDone: "Your job is done:"
       },
@@ -131,7 +131,7 @@ let languageData = null;
         formatOriginal: "Originalformat",
         modelDedicated: "Eigenes Modell fuer dieses Sprachpaar.",
         modelFallback: "Kein eigenes Modell fuer dieses Paar, nutzt den mehrsprachigen Fallback.",
-        modelAutoDetect: "Quellsprache wird automatisch erkannt.",
+        modelAutoDetect: "Quellsprache wird automatisch erkannt. Gescannte PDFs werden dafuer zweimal gelesen und brauchen laenger.",
         autoDetect: "Automatisch erkennen",
         ownJobDone: "Dein Job ist fertig:"
       },
@@ -190,7 +190,7 @@ let languageData = null;
         formatOriginal: "Formato original",
         modelDedicated: "Modelo dedicado para este par de idiomas.",
         modelFallback: "Sin modelo dedicado para este par, se usa el alternativo multilingue.",
-        modelAutoDetect: "El idioma de origen se detectara automaticamente.",
+        modelAutoDetect: "El idioma de origen se detectara automaticamente. Los PDF escaneados se leen dos veces y tardan mas.",
         autoDetect: "Deteccion automatica",
         ownJobDone: "Tu trabajo esta listo:"
       },
@@ -249,7 +249,7 @@ let languageData = null;
         formatOriginal: "Format original",
         modelDedicated: "Modele dedie pour cette paire de langues.",
         modelFallback: "Pas de modele dedie pour cette paire, utilise le modele multilingue.",
-        modelAutoDetect: "La langue source sera detectee automatiquement.",
+        modelAutoDetect: "La langue source sera detectee automatiquement. Les PDF numerises sont lus deux fois et prennent plus de temps.",
         autoDetect: "Detection automatique",
         ownJobDone: "Ton job est termine :"
       }

@@ -980,6 +980,60 @@ class MainTests(unittest.TestCase):
         tesseract_call = mocked_run.call_args_list[-1].args[0]
         self.assertEqual(tesseract_call[-2:], ["-l", "rus"])
 
+    def test_ocr_probe_languages_stay_within_the_detected_script(self):
+        installed = ("ara", "bul", "deu", "eng", "fra", "heb", "rus", "spa", "ukr")
+        with patch.object(main, "installed_ocr_languages", return_value=installed):
+            # Latin: English is in there, and never more than three.
+            latin = main.ocr_probe_languages("Latin").split("+")
+            self.assertIn("eng", latin)
+            self.assertLessEqual(len(latin), main.OCR_PROBE_LIMIT)
+            # Cyrillic: no English, it does not occur in that script.
+            self.assertEqual(main.ocr_probe_languages("Cyrillic"), "rus+ukr+bul")
+            self.assertEqual(main.ocr_probe_languages("Hebrew"), "heb")
+            self.assertEqual(main.ocr_probe_languages(""), "eng")
+            self.assertEqual(main.ocr_probe_languages("Klingon"), "eng")
+
+    def test_ocr_page_script_reads_the_osd_report(self):
+        report = "Page number: 0\nOrientation in degrees: 0\nScript: Cyrillic\nScript confidence: 3.4\n"
+        with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout=report)):
+            self.assertEqual(main.ocr_page_script(Path("page.png")), "Cyrillic")
+
+    def test_ocr_page_script_stays_quiet_when_osd_fails(self):
+        # No osd data or too little text: the job must go on, not die.
+        with patch.object(main.subprocess, "run", side_effect=OSError("no osd")):
+            self.assertEqual(main.ocr_page_script(Path("page.png")), "")
+
+    def test_auto_detect_reads_a_scan_twice(self):
+        with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
+            with patch.object(main, "installed_ocr_languages", return_value=("deu", "eng", "fra")):
+                with patch.object(main, "ocr_page_script", return_value="Latin"):
+                    with patch.object(main, "run_tesseract", side_effect=["Der Vertrag wurde geprueft", "Der Vertrag wurde geprüft"]) as reads:
+                        with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout="")):
+                            text = main.ocr_pdf_page(b"%PDF", 1)
+
+        self.assertEqual(text, "Der Vertrag wurde geprüft")
+        self.assertEqual([call.args[1] for call in reads.call_args_list], ["eng+deu+fra", "deu"])
+
+    def test_auto_detect_skips_the_second_read_when_the_probe_was_one_language(self):
+        with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
+            with patch.object(main, "installed_ocr_languages", return_value=("eng", "heb")):
+                with patch.object(main, "ocr_page_script", return_value="Hebrew"):
+                    with patch.object(main, "run_tesseract", return_value="טקסט") as reads:
+                        with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout="")):
+                            main.ocr_pdf_page(b"%PDF", 1)
+
+        self.assertEqual(reads.call_count, 1)
+
+    def test_pdf_extraction_reuses_the_language_found_on_the_first_scanned_page(self):
+        document = FakeDocument([FakePage(""), FakePage("")])
+
+        with patch.object(main.pymupdf, "open", return_value=document):
+            with patch.object(main, "detect_source_language", return_value="fra_Latn"):
+                with patch.object(main, "ocr_pdf_page", return_value="texte") as mocked_ocr:
+                    main.extract_pdf_markdown_from_bytes(b"%PDF")
+
+        self.assertEqual([call.args[2] for call in mocked_ocr.call_args_list], [main.AUTO_SOURCE, "fra_Latn"])
+
     def test_pdf_extraction_passes_the_source_language_to_ocr(self):
         document = FakeDocument([FakePage("")])
 

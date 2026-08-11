@@ -1770,6 +1770,61 @@ def ocr_language_code(source: str) -> str:
     return code
 
 
+# What OSD calls a script, and the suffix CORE_LANGUAGES uses for it.
+OCR_SCRIPT_SUFFIXES = {
+    "Latin": "Latn", "Cyrillic": "Cyrl", "Arabic": "Arab", "Greek": "Grek",
+    "Hebrew": "Hebr", "Devanagari": "Deva", "Han": "Hans", "HanS": "Hans", "HanT": "Hans",
+    "Japanese": "Jpan", "Hiragana": "Jpan", "Katakana": "Jpan",
+}
+# Each further language in one -l makes tesseract less accurate, so the probe stays short:
+# coverage comes from the script OSD read off the image, not from a longer list.
+OCR_PROBE_LIMIT = 3
+OSD_SCRIPT = re.compile(r"^Script:\s*(\S+)", re.MULTILINE)
+
+
+def run_tesseract(image_path: Path, languages: str) -> str:
+    result = subprocess.run(
+        ["tesseract", str(image_path), "stdout", "-l", languages],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def ocr_page_script(image_path: Path) -> str:
+    """The script OSD sees in a page image ("Latin", "Cyrillic", …), empty when it cannot tell."""
+    try:
+        result = subprocess.run(
+            ["tesseract", str(image_path), "stdout", "--psm", "0"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except Exception:
+        # Too little text, no osd traineddata, a failed call: none of that may end the job.
+        return ""
+    match = OSD_SCRIPT.search(result.stdout)
+    return match.group(1) if match else ""
+
+
+def ocr_probe_languages(script: str) -> str:
+    """Languages for the probe run, as one -l argument. Order follows CORE_LANGUAGES."""
+    suffix = OCR_SCRIPT_SUFFIXES.get(script)
+    installed = installed_ocr_languages()
+    codes = []
+    if suffix:
+        for internal in CORE_LANGUAGES.values():
+            if not internal.endswith(suffix):
+                continue
+            code = ocr_language_code(internal)
+            if code not in codes and (not installed or code in installed):
+                codes.append(code)
+            if len(codes) >= OCR_PROBE_LIMIT:
+                break
+    return "+".join(codes) if codes else OCR_FALLBACK_LANGUAGE
+
+
 def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE) -> str:
     ensure_ocr_tools()
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -1793,13 +1848,21 @@ def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE) ->
             text=True,
         )
         image_path = output_prefix.with_suffix(".png")
-        result = subprocess.run(
-            ["tesseract", str(image_path), "stdout", "-l", ocr_language_code(source)],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    return result.stdout.strip()
+        if source != AUTO_SOURCE:
+            return run_tesseract(image_path, ocr_language_code(source))
+
+        # Auto-detect on a scan is a chicken-and-egg: detection needs text, text needs OCR, OCR
+        # needs the language. So read once with a few languages of the script OSD found — that
+        # result is thrown away, it only has to be good enough for langdetect — then read again
+        # with the single language it named.
+        probe = ocr_probe_languages(ocr_page_script(image_path))
+        text = run_tesseract(image_path, probe)
+        if not text:
+            return text
+        code = ocr_language_code(detect_source_language(text))
+        if code == probe:
+            return text
+        return run_tesseract(image_path, code) or text
 
 
 def extract_pdf_markdown_from_bytes(
@@ -1833,6 +1896,10 @@ def extract_pdf_markdown_from_bytes(
             ocr_text = ocr_pdf_page(content, index, source)
             if ocr_text:
                 text = ocr_text
+                if source == AUTO_SOURCE:
+                    # Keep what the first scanned page turned out to be: the pages after it then
+                    # read in one pass instead of probing the same document over and over.
+                    source = detect_source_language(ocr_text)
 
         if text:
             pages_with_text += 1
@@ -3253,7 +3320,10 @@ def run_pdf_translate_job(
     layout_fallback: bool = False,
 ):
     try:
-        update_job(job_id, status="running", message="Extracting PDF", started_at=time.time())
+        # A scanned page with no source language set is read twice, which takes noticeably longer,
+        # so the message says why instead of letting the job look stuck.
+        extracting = "Extracting PDF (detecting scan language)" if source == AUTO_SOURCE else "Extracting PDF"
+        update_job(job_id, status="running", message=extracting, started_at=time.time())
         markdown = extract_pdf_markdown_from_bytes(content, content_type, page_range, source)
         if source == AUTO_SOURCE:
             source = detect_source_language(markdown)
