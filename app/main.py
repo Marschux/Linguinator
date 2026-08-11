@@ -70,7 +70,6 @@ AUTH_USERNAME = env_value("LINGUINATOR_AUTH_USERNAME", "admin")
 AUTH_PASSWORD = env_value("LINGUINATOR_AUTH_PASSWORD", "")
 MODEL_IDLE_UNLOAD_ENABLED = env_value("LINGUINATOR_UNLOAD_MODEL_AFTER_IDLE", "true").lower() in ("1", "true", "yes", "on")
 MODEL_IDLE_SECONDS = int(env_value("LINGUINATOR_MODEL_IDLE_SECONDS", "1200"))
-PUBLIC_URL = os.getenv("LINGUINATOR_PUBLIC_URL", "").rstrip("/")
 TRUST_PROXY_HEADERS = os.getenv("LINGUINATOR_TRUST_PROXY_HEADERS", "true").lower() in ("1", "true", "yes", "on")
 PDF_LOW_TEXT_CHARS = 20
 PDF_PAGE_WIDTH = 595
@@ -3496,7 +3495,6 @@ def health():
         "cpu_interop_threads": CPU_INTEROP_THREADS,
         "model_loaded": model_cache_loaded(),
         "root_path": ROOT_PATH,
-        "public_url": PUBLIC_URL,
         "trust_proxy_headers": TRUST_PROXY_HEADERS,
         "timezone": HISTORY_TIMEZONE,
         "time_format": TIME_FORMAT,

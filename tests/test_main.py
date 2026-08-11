@@ -400,13 +400,11 @@ class MainTests(unittest.TestCase):
 
     def test_health_reports_proxy_configuration(self):
         with patch.object(main, "ROOT_PATH", "/linguinator"):
-            with patch.object(main, "PUBLIC_URL", "https://example.test/linguinator"):
-                with patch.object(main, "TRUST_PROXY_HEADERS", True):
-                    response = TestClient(main.app).get("/health")
+            with patch.object(main, "TRUST_PROXY_HEADERS", True):
+                response = TestClient(main.app).get("/health")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["root_path"], "/linguinator")
-        self.assertEqual(response.json()["public_url"], "https://example.test/linguinator")
         self.assertTrue(response.json()["trust_proxy_headers"])
 
     def test_root_path_is_normalized_for_reverse_proxy_prefixes(self):

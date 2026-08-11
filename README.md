@@ -62,10 +62,10 @@ The `.env` file is grouped by topic:
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `LINGUINATOR_MODEL` | `Helsinki-NLP/opus-mt-tc-bible-big-mul-mul` | Fallback model, used for any language pair without a dedicated model in `app/opus_pairs.json`. |
+| `LINGUINATOR_MODEL` | `Helsinki-NLP/opus-mt-tc-bible-big-mul-mul` | Fallback model, used for any language pair without a dedicated model in `app/opus_pairs.json`. Another model can carry another licence, which would make the licensing section below wrong for your deployment. |
 | `LINGUINATOR_MODEL_CACHE_SIZE` | `1` | How many models (dedicated pair models plus the fallback) stay loaded in memory at once. Each entry costs its own RAM; raise only if RAM allows and pairs alternate often. |
-| `LINGUINATOR_DEVICE` | `cpu` | Runtime device. Use `cuda` with the GPU compose profile and a CUDA-capable host. |
-| `LINGUINATOR_MAX_CHARS` | `2000` | Maximum characters per translation chunk. Longer input is split into multiple chunks. Sized for OPUS-MT's ~512-token limit; a hard `TRANSLATE_MAX_TOKENS` cap in the code truncates the rare oversized chunk instead of crashing. |
+| `LINGUINATOR_DEVICE` | `cpu` | Runtime device. `cuda` only works on the `linguinator-gpu` service, which is the one with the GPU reservation and which sets this itself; setting `cuda` in `.env` does not give the normal service a GPU. |
+| `LINGUINATOR_MAX_CHARS` | `2000` | Maximum characters per translation chunk. This is not a model limit: every chunk is split into single sentences before translation, and a chunk's sentences are then translated in one batched model call. The value therefore governs peak memory per call and how finely job progress advances, not how much text the model sees at once. |
 | `LINGUINATOR_MAX_FILE_MB` | `50` | Maximum upload size in megabytes. |
 | `LINGUINATOR_CPU_THREADS` | `0` | Optional Torch, OMP, and MKL thread count for CPU translation. `0` keeps library defaults. |
 | `LINGUINATOR_CPU_INTEROP_THREADS` | `0` | Optional Torch inter-op thread count. `0` keeps library defaults. |
@@ -83,11 +83,11 @@ The `.env` file is grouped by topic:
 | `LINGUINATOR_PDF_LAYOUT_BATCH_SIZE` | `4` | How many layout-PDF paragraphs are translated in one model call. Higher trades more peak memory (padding to the longest paragraph in the batch) for fewer, faster calls. |
 | `LINGUINATOR_AUTH_ENABLED` | `false` | Enables HTTP Basic Auth for the UI and API. `/health` stays public for health checks. |
 | `LINGUINATOR_AUTH_USERNAME` | `admin` | Basic Auth username. |
-| `LINGUINATOR_AUTH_PASSWORD` | `changeme` | Basic Auth password. Change this before enabling auth. |
+| `LINGUINATOR_AUTH_PASSWORD` | empty | Basic Auth password. Set one before enabling auth; while it is empty the app answers every request with 500 rather than letting anyone in. |
 | `LINGUINATOR_ROOT_PATH` | empty | URL prefix when the app is mounted below a reverse-proxy path, for example `/linguinator`. |
-| `LINGUINATOR_PUBLIC_URL` | empty | Optional externally visible base URL reported by `/health`. |
 | `LINGUINATOR_TRUST_PROXY_HEADERS` | `true` | Lets Uvicorn trust forwarded proxy headers. |
-| `LINGUINATOR_FORWARDED_ALLOW_IPS` | `*` | IP allow-list for forwarded headers. Narrow this in stricter deployments. |
+| `LINGUINATOR_FORWARDED_ALLOW_IPS` | `*` | IP allow-list for forwarded headers. `*` means anyone who reaches the container directly can set `X-Forwarded-For` and friends to whatever they like. Nothing in the app decides by client IP today, so this costs nothing here, but narrow it to the proxy's address if you publish the port. |
+| `LINGUINATOR_HOST` / `LINGUINATOR_PORT` | `0.0.0.0` / `5051` | Listening address and port. Both are deliberately absent from `.env.example`: the compose port mapping and the healthcheck hard-code 5051, so changing the port there stops the container from passing its own healthcheck. |
 | `LINGUINATOR_SSL_CERTFILE` | empty | Optional certificate path for direct HTTPS inside the container. Usually leave empty behind a reverse proxy. |
 | `LINGUINATOR_SSL_KEYFILE` | empty | Optional private key path for direct HTTPS inside the container. |
 | `LINGUINATOR_UNLOAD_MODEL_AFTER_IDLE` | `true` | Unloads cached model objects after an idle period. |
