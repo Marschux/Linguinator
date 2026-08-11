@@ -72,6 +72,14 @@ let languageData = null;
         formatPdf: "Plain PDF",
         formatDoc: "Plain Doc",
         formatOriginal: "Original Format",
+        download: "Download",
+        downloadItem: "Download this history item.",
+        historyFormat: "Select the history download format.",
+        selectLanguage: "Select {language}.",
+        pageRangeHint: "Pages, e.g. 1-3,5",
+        sheetNameHint: "XLSX sheet name, optional",
+        csvColumnsHint: "CSV/XLSX columns, e.g. title,description or A,B",
+        historyFilterHint: "Filter history...",
         modelDedicated: "Dedicated model for this language pair.",
         modelFallback: "No dedicated model for this pair, using the multilingual fallback.",
         modelAutoDetect: "Source language will be detected automatically. Scanned PDFs are read twice for this and take longer. A scan mixing two scripts needs the source language set, otherwise one of them is lost.",
@@ -131,6 +139,14 @@ let languageData = null;
         formatPdf: "Nur Text-PDF",
         formatDoc: "Nur Text-Doc",
         formatOriginal: "Originalformat",
+        download: "Herunterladen",
+        downloadItem: "Diesen History-Eintrag herunterladen.",
+        historyFormat: "Format fuer den History-Download waehlen.",
+        selectLanguage: "{language} auswaehlen.",
+        pageRangeHint: "Seiten, z. B. 1-3,5",
+        sheetNameHint: "XLSX-Blattname, optional",
+        csvColumnsHint: "CSV/XLSX-Spalten, z. B. titel,beschreibung oder A,B",
+        historyFilterHint: "History filtern...",
         modelDedicated: "Eigenes Modell fuer dieses Sprachpaar.",
         modelFallback: "Kein eigenes Modell fuer dieses Paar, nutzt den mehrsprachigen Fallback.",
         modelAutoDetect: "Quellsprache wird automatisch erkannt. Gescannte PDFs werden dafuer zweimal gelesen und brauchen laenger. Bei einem Scan mit zwei Schriften muss die Quellsprache gesetzt werden, sonst geht eine davon verloren.",
@@ -190,6 +206,14 @@ let languageData = null;
         formatPdf: "PDF simple",
         formatDoc: "Doc simple",
         formatOriginal: "Formato original",
+        download: "Descargar",
+        downloadItem: "Descargar este elemento del historial.",
+        historyFormat: "Elegir el formato de descarga del historial.",
+        selectLanguage: "Seleccionar {language}.",
+        pageRangeHint: "Paginas, p. ej. 1-3,5",
+        sheetNameHint: "Nombre de hoja XLSX, opcional",
+        csvColumnsHint: "Columnas CSV/XLSX, p. ej. titulo,descripcion o A,B",
+        historyFilterHint: "Filtrar historial...",
         modelDedicated: "Modelo dedicado para este par de idiomas.",
         modelFallback: "Sin modelo dedicado para este par, se usa el alternativo multilingue.",
         modelAutoDetect: "El idioma de origen se detectara automaticamente. Los PDF escaneados se leen dos veces y tardan mas. Si un escaneo mezcla dos alfabetos, hay que fijar el idioma de origen o se pierde uno de ellos.",
@@ -249,6 +273,14 @@ let languageData = null;
         formatPdf: "PDF simple",
         formatDoc: "Doc simple",
         formatOriginal: "Format original",
+        download: "Telecharger",
+        downloadItem: "Telecharger cet element de l'historique.",
+        historyFormat: "Choisir le format de telechargement de l'historique.",
+        selectLanguage: "Selectionner {language}.",
+        pageRangeHint: "Pages, p. ex. 1-3,5",
+        sheetNameHint: "Nom de feuille XLSX, optionnel",
+        csvColumnsHint: "Colonnes CSV/XLSX, p. ex. titre,description ou A,B",
+        historyFilterHint: "Filtrer l'historique...",
         modelDedicated: "Modele dedie pour cette paire de langues.",
         modelFallback: "Pas de modele dedie pour cette paire, utilise le modele multilingue.",
         modelAutoDetect: "La langue source sera detectee automatiquement. Les PDF numerises sont lus deux fois et prennent plus de temps. Si un scan melange deux ecritures, il faut choisir la langue source, sinon l'une des deux est perdue.",
@@ -382,6 +414,11 @@ let languageData = null;
       if (element) element.textContent = t(key);
     }
 
+    function setPlaceholder(selector, key) {
+      const element = document.querySelector(selector);
+      if (element) element.placeholder = t(key);
+    }
+
     function setTitle(selector, key) {
       const element = document.querySelector(selector);
       if (element) element.title = t(key);
@@ -421,6 +458,10 @@ let languageData = null;
       setText("#stopJob", "stop");
       setText('label[for="history"]', "history");
       setTitle("#uiLanguage", "uiLanguage");
+      setPlaceholder("#pageRange", "pageRangeHint");
+      setPlaceholder("#sheetName", "sheetNameHint");
+      setPlaceholder("#csvColumns", "csvColumnsHint");
+      setPlaceholder("#historyFilter", "historyFilterHint");
       refreshInputLabels();
       refreshInputTabSelectLabels();
       updateCounter();
@@ -704,7 +745,7 @@ let languageData = null;
       option.className = "language-option";
       option.dataset.code = language.code;
       option.dataset.english = englishLanguageName(language.code).toLowerCase();
-      option.title = "Select " + formatLanguageLabel(language.code) + ".";
+      option.title = t("selectLanguage").replace("{language}", formatLanguageLabel(language.code));
       option.innerHTML =
         '<span class="language-name">' + escapeHtml(formatLanguageLabel(language.code)) + '</span>' +
         '<span class="language-code">' + escapeHtml(language.code) + '</span>';
@@ -1499,7 +1540,7 @@ let languageData = null;
         + " | " + formatBytes(item.size_bytes);
       const format = document.createElement("select");
       format.className = "history-format";
-      format.title = "Select the history download format.";
+      format.title = t("historyFormat");
       const hasOriginal = item.has_source_file && item.source_extension;
       const historyFormats = ["md", "txt", "pdf", "doc"];
       if (hasOriginal) {
@@ -1516,7 +1557,7 @@ let languageData = null;
       const download = document.createElement("a");
       download.className = "history-download secondary-link";
       download.textContent = t("download");
-      download.title = "Download this history item.";
+      download.title = t("downloadItem");
       const syncDownloadHref = () => {
         const href = format.value === "md"
           ? "history/" + item.id
