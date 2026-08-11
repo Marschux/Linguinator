@@ -75,7 +75,6 @@ The `.env` file is grouped by topic:
 | `LINGUINATOR_AUTH_USERNAME` | `Translator` | Basic Auth username. |
 | `LINGUINATOR_AUTH_PASSWORD` | empty | Basic Auth password. Set one before enabling auth; while it is empty the app answers every request with 500 rather than letting anyone in. |
 | `LINGUINATOR_ROOT_PATH` | empty | URL prefix when the app is mounted below a reverse-proxy path, for example `/linguinator`. |
-| `LINGUINATOR_TRUST_PROXY_HEADERS` | `true` | Lets Uvicorn trust forwarded proxy headers, so the app knows it is reached over HTTPS even though the proxy speaks HTTP to it. |
 
 Everything else is fixed in `app/main.py` rather than configurable, because it either has one right
 answer here (one model in memory, one job at a time) or cannot be changed usefully from a `.env`

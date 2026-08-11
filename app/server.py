@@ -3,18 +3,17 @@ import os
 import uvicorn
 
 
-def enabled(name: str, default: str = "false") -> bool:
-    return os.getenv(name, default).lower() in ("1", "true", "yes", "on")
-
-
 def main():
     uvicorn.run(
         app="app.main:app",
         host=os.getenv("LINGUINATOR_HOST", "0.0.0.0"),
         port=int(os.getenv("LINGUINATOR_PORT", "5051")),
-        proxy_headers=enabled("LINGUINATOR_TRUST_PROXY_HEADERS", "true"),
-        # Anyone reaching the container directly can claim any forwarded address. Nothing here
-        # decides by client IP, so this only feeds the scheme the app thinks it was reached over.
+        # Always on, from anyone. Without a proxy nobody sends these headers, so there is nothing
+        # to pick up; with one they are needed. A client that forges them can claim another
+        # address or scheme, which changes nothing while no code here reads either. Should that
+        # change - an access log, rate limiting, an IP block - both the switch and a narrower
+        # allow list have to come back.
+        proxy_headers=True,
         forwarded_allow_ips="*",
     )
 

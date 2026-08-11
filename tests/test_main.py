@@ -400,12 +400,10 @@ class MainTests(unittest.TestCase):
 
     def test_health_reports_proxy_configuration(self):
         with patch.object(main, "ROOT_PATH", "/linguinator"):
-            with patch.object(main, "TRUST_PROXY_HEADERS", True):
-                response = TestClient(main.app).get("/health")
+            response = TestClient(main.app).get("/health")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["root_path"], "/linguinator")
-        self.assertTrue(response.json()["trust_proxy_headers"])
 
     def test_root_path_is_normalized_for_reverse_proxy_prefixes(self):
         self.assertEqual(main.normalized_root_path("linguinator"), "/linguinator")
@@ -418,11 +416,10 @@ class MainTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(main.env_value("LINGUINATOR_MODEL", "default"), "default")
 
-    def test_server_reads_host_port_and_proxy_env(self):
+    def test_server_reads_host_and_port_env(self):
         env = {
             "LINGUINATOR_HOST": "127.0.0.1",
             "LINGUINATOR_PORT": "5443",
-            "LINGUINATOR_TRUST_PROXY_HEADERS": "false",
         }
 
         with patch.dict(os.environ, env, clear=False):
@@ -434,7 +431,7 @@ class MainTests(unittest.TestCase):
         self.assertEqual(options["app"], "app.main:app")
         self.assertEqual(options["host"], "127.0.0.1")
         self.assertEqual(options["port"], 5443)
-        self.assertFalse(options["proxy_headers"])
+        self.assertTrue(options["proxy_headers"])
         # Direct HTTPS is gone: TLS belongs to the reverse proxy.
         self.assertNotIn("ssl_certfile", options)
 
