@@ -98,6 +98,11 @@ PDF_LAYOUT_EDGE_MARGIN = 20.0
 # paragraph in the test documents needed more than that to absorb the substitute font's extra
 # width; past it, an extra line is the lesser evil.
 PDF_LAYOUT_TIGHTEN_SCALE = 0.9
+# A reflow taller than this multiple of the paragraph it replaces is not laid out at all; the
+# original stays instead. Overflowing by a line or two is normal (German runs longer, and the
+# substitute font wider), a block three times the height is the model having invented text, and
+# it lands on top of everything below it.
+PDF_LAYOUT_MAX_LINE_GROWTH = 3
 # Layout-PDF paragraphs are usually short, so translating one per model call wastes most of
 # each call on fixed beam-search overhead. Batched via the tensor's batch dimension (not string
 # concatenation), so paragraph boundaries stay exact; kept small to cap the extra padding memory
@@ -564,7 +569,41 @@ def split_to_token_limit(tokenizer, text: str) -> List[str]:
             + split_to_token_limit(tokenizer, text[split_at:]))
 
 
+# Dot leaders ("Kapitel eins . . . . . . 12") are decoration, not language. Handed to the model
+# they read as an unfinished sentence, and it answers with whatever its training data pairs with
+# a row of dots - for this model, several lines of European Parliament session boilerplate. They
+# are dropped rather than put back afterwards: a leader is sized to the width the *original* line
+# had left over, which the translation no longer has.
+LEADER_RUN = re.compile(r"\s*(?:\.\s*){4,}")
+
+# A result this much longer than its source is not a translation. The fallback model answers short,
+# low-content fragments - a page number, a list marker, a heading - by dumping training data
+# ("Der Präsident. — Das Wort hat die Fraktion...", "== Weblinks =="), which the layout pipeline
+# then lays out as if it were text and runs across the whole page. Generous enough that no real
+# translation trips it: German runs some 20% longer than English, and the constant leaves genuinely
+# short strings room to grow.
+HALLUCINATION_LENGTH_FACTOR = 3.0
+HALLUCINATION_LENGTH_MARGIN = 20
+
+# Degenerate repetition ("ENTWICKLUNG DER ENTWICKLUNG DER ...", "iv iv iv iv") is the other half of
+# the same failure, and beam search alone does not break out of it. Six *tokens* is more than one
+# period of such a loop but still well above anything a single sentence repeats on purpose.
+NO_REPEAT_NGRAM_SIZE = 6
+
+
+def clean_source_text(text: str) -> str:
+    return LEADER_RUN.sub(" ", text).strip()
+
+
+def guard_hallucination(source: str, translated: str) -> str:
+    """Keep the original wherever the model clearly invented rather than translated."""
+    if len(translated) > HALLUCINATION_LENGTH_FACTOR * len(source) + HALLUCINATION_LENGTH_MARGIN:
+        return source
+    return translated
+
+
 def translate_one(text: str, source: str, target: str) -> str:
+    text = clean_source_text(text)
     if not text:
         return ""
 
@@ -583,9 +622,11 @@ def translate_one(text: str, source: str, target: str) -> str:
                     **generate_kwargs,
                     max_new_tokens=TRANSLATE_MAX_TOKENS,
                     num_beams=4,
+                    no_repeat_ngram_size=NO_REPEAT_NGRAM_SIZE,
                 )
             results.append(tokenizer.batch_decode(generated, skip_special_tokens=True)[0])
-        return normalize_translated_text(" ".join(part.strip() for part in results if part.strip()))
+        joined = normalize_translated_text(" ".join(part.strip() for part in results if part.strip()))
+        return guard_hallucination(text, joined)
     finally:
         end_model_use()
 
@@ -593,6 +634,7 @@ def translate_one(text: str, source: str, target: str) -> str:
 def translate_batch(texts: List[str], source: str, target: str) -> List[str]:
     """Translate several short texts in a single model.generate() call (real tensor batching,
     not string concatenation, so each result maps back to its input by position)."""
+    texts = [clean_source_text(text) for text in texts]
     indices = [i for i, text in enumerate(texts) if text]
     if not indices:
         return ["" for _ in texts]
@@ -617,7 +659,12 @@ def translate_batch(texts: List[str], source: str, target: str) -> List[str]:
         ).to(device)
 
         with torch_module.inference_mode():
-            generated = model.generate(**inputs, max_new_tokens=TRANSLATE_MAX_TOKENS, num_beams=4)
+            generated = model.generate(
+                **inputs,
+                max_new_tokens=TRANSLATE_MAX_TOKENS,
+                num_beams=4,
+                no_repeat_ngram_size=NO_REPEAT_NGRAM_SIZE,
+            )
         decoded = tokenizer.batch_decode(generated, skip_special_tokens=True)
     finally:
         end_model_use()
@@ -628,7 +675,7 @@ def translate_batch(texts: List[str], source: str, target: str) -> List[str]:
             parts.setdefault(owner, []).append(text.strip())
     results = ["" for _ in texts]
     for owner, pieces in parts.items():
-        results[owner] = normalize_translated_text(" ".join(pieces))
+        results[owner] = guard_hallucination(texts[owner], normalize_translated_text(" ".join(pieces)))
     return results
 
 
@@ -777,9 +824,17 @@ def wrap_pdf_line(text: str, size: float = PDF_FONT_SIZE) -> List[str]:
     return wrap_text_to_width(text, PDF_PAGE_WIDTH - 2 * PDF_MARGIN, size)
 
 
-def pdf_line_command(text: str, x: float, y: float, font: str = "F1", size: float = PDF_FONT_SIZE) -> str:
+def pdf_line_command(
+    text: str, x: float, y: float, font: str = "F1", size: float = PDF_FONT_SIZE,
+    color: Optional[int] = None,
+) -> str:
     bold, serif = PDF_FONT_FACES.get(font, (False, False))
-    return f"BT /{font} {size:g} Tf {x:.2f} {y:.2f} Td {pdf_text_object(text, bold, serif)} Tj ET"
+    # `rg` sets the fill colour in the graphics state, which outlives the text object it stands in:
+    # once one line on a page is drawn in white, every later line has to name its own colour or it
+    # inherits the white and disappears. None means the page has no coloured line at all and the
+    # operator is left out entirely, which keeps every other pipeline's output byte-for-byte.
+    fill = "" if color is None else f"{(color >> 16 & 0xFF) / 255:.3f} {(color >> 8 & 0xFF) / 255:.3f} {(color & 0xFF) / 255:.3f} rg "
+    return f"BT {fill}/{font} {size:g} Tf {x:.2f} {y:.2f} Td {pdf_text_object(text, bold, serif)} Tj ET"
 
 
 def markdown_page_sections(text: str) -> List[Dict[str, str]]:
@@ -956,19 +1011,23 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
         next_object_id += 2
         page_refs.append(f"{page_id} 0 R")
         commands = list(page.get("commands", []))
+        # Once any line on the page names a colour, every line on it has to, black ones included:
+        # see pdf_line_command. Pages without one are written exactly as before.
+        default = 0 if any(line.get("color") for line in page["lines"]) else None
         y = height - margin
         if page["source_page"]:
             heading = "Page " + page["source_page"]
             if page["continuation"]:
                 heading += " continued"
-            commands.append(pdf_line_command(heading, margin, y, "F2", PDF_HEADING_FONT_SIZE))
+            commands.append(pdf_line_command(heading, margin, y, "F2", PDF_HEADING_FONT_SIZE, default))
             y -= 24
         for line in page["lines"]:
             if line["text"]:
                 # Lines carrying their own coordinates are placed absolutely (layout overlay),
                 # everything else flows down the page from the margin.
                 commands.append(
-                    pdf_line_command(line["text"], line.get("x", margin), line.get("y", y), line["font"], line["size"])
+                    pdf_line_command(line["text"], line.get("x", margin), line.get("y", y),
+                                     line["font"], line["size"], line.get("color", default))
                 )
             y -= line["line_height"]
         if page.get("footer", True):
@@ -979,6 +1038,7 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
                     margin // 2,
                     "F1",
                     PDF_FOOTER_FONT_SIZE,
+                    default,
                 )
             )
         stream = "\n".join(commands).encode("utf-8")
@@ -2071,6 +2131,9 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
                     "width": span["bbox"][2] - span["bbox"][0],
                     "bold": bool(span["flags"] & MUPDF_BOLD_FLAG),
                     "serif": pdf_font_is_serif(span["font"]),
+                    # sRGB packed into an int by MuPDF, 0 being black. Without it a title set in
+                    # white on a dark cover image comes back drawn in the default black.
+                    "color": span.get("color", 0),
                 })
     return runs
 
@@ -2118,6 +2181,7 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     "size": run["size"],
                     "bold_chars": 0,
                     "serif_chars": 0,
+                    "color_chars": Counter(),
                     "total_chars": 0,
                 }
                 cells.append(current)
@@ -2129,11 +2193,14 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 current["bold_chars"] += length
             if run.get("serif"):
                 current["serif_chars"] += length
+            current["color_chars"][run.get("color", 0)] += length
         for cell in cells:
             cell["text"] = re.sub(r"\s+", " ", cell["text"]).strip()
             total = cell.pop("total_chars")
             cell["bold"] = cell.pop("bold_chars") * 2 > total
             cell["serif"] = cell.pop("serif_chars") * 2 > total
+            colors = cell.pop("color_chars")
+            cell["color"] = colors.most_common(1)[0][0] if colors else 0
             if cell["text"]:
                 lines.append(cell)
     return lines
@@ -2218,6 +2285,9 @@ def wrap_text_to_width(text: str, width: float, size: float, bold: bool = False,
     return lines or [""]
 
 
+ROMAN_NUMERAL = re.compile(r"(?=[ivxlcdm])m*(cm|cd|d?c{0,3})(xc|xl|l?x{0,3})(ix|iv|v?i{0,3})\.?", re.IGNORECASE)
+
+
 def has_translatable_text(text: str) -> bool:
     """Whether a paragraph holds anything a translator can work on.
 
@@ -2226,23 +2296,35 @@ def has_translatable_text(text: str) -> bool:
     inventing: a row of dots, a "== Weblinks ==*". That invention is then laid out as if it were a
     translation and runs down the whole page. Such fragments keep their original instead.
 
-    "A word" is a run of at least two letters, which also leaves dates and pure numbers alone.
+    "A word" is a run of at least two letters, which also leaves dates and pure numbers alone. A
+    roman numeral is excluded on top of that: front matter is paginated in them, and "iv" clears
+    the two-letter bar while giving the model just as little to go on as "4" would - it came back
+    as "iv iv iv iv iv" filling the bottom of the page. The odd real word that reads as a numeral
+    ("mix", "did") is only affected standing alone as a whole paragraph.
 
     A bare URL is excluded for the same reason: it is not prose, the model rewrites it into
     something else entirely (one turned into "== Weblinks ==*"), and having no spaces it cannot
     be wrapped, so whatever comes back runs off the edge of the page.
     """
-    stripped = text.strip()
+    stripped = LEADER_RUN.sub(" ", text).strip()
     if re.fullmatch(r"(https?://|www\.)\S+", stripped, re.IGNORECASE):
+        return False
+    if ROMAN_NUMERAL.fullmatch(stripped):
         return False
     return bool(re.search(r"[^\W\d_]{2,}", stripped))
 
 
-def paragraph_floor(paragraph: Dict[str, Any], others: List[Dict[str, Any]]) -> Optional[float]:
-    """The highest baseline sitting below `paragraph` in a column that overlaps it.
+def paragraph_floor(paragraph: Dict[str, Any], others: List[Dict[str, Any]]) -> float:
+    """How far down the paragraph may grow: the highest baseline below it in an overlapping
+    column, or the bottom of the page when nothing stands in its way.
 
     Paragraphs beside it (table cells on the same row, a caption in the next column) must not
     limit it, or one long cell shrinks the whole row to nothing.
+
+    Falling back to the page edge rather than "unknown" is what keeps font sizes even: a
+    paragraph with nothing below it has the whole rest of the page to overflow into, and
+    shrinking it instead left the last paragraph of a column visibly smaller than the ones
+    above it.
     """
     # ponytail: O(paragraphs^2) per page, fine at the few dozen a page holds; index by column if
     # a document ever shows up where it isn't.
@@ -2261,7 +2343,7 @@ def paragraph_floor(paragraph: Dict[str, Any], others: List[Dict[str, Any]]) -> 
         if min(line["x"] for line in other["lines"]) >= right:
             continue
         floor = other_top if floor is None else max(floor, other_top)
-    return floor
+    return PDF_LAYOUT_EDGE_MARGIN if floor is None else floor
 
 
 def paragraph_width_limit(
@@ -2315,6 +2397,7 @@ def reflow_paragraph(
     # so a bold heading stays bold instead of flattening to regular body text.
     bold = sum(1 for line in lines if line.get("bold")) * 2 > len(lines)
     serif = sum(1 for line in lines if line.get("serif")) * 2 > len(lines)
+    color = Counter(line.get("color", 0) for line in lines).most_common(1)[0][0]
     if len(lines) > 1:
         leading = (lines[0]["y"] - lines[-1]["y"]) / (len(lines) - 1)
     else:
@@ -2369,6 +2452,7 @@ def reflow_paragraph(
             "line_height": 0,
             "x": left,
             "y": y,
+            "color": color,
         })
     return placed
 
@@ -2425,18 +2509,28 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
     """Stamp the translated text onto the original pages, so images, icons and vector graphics
     survive untouched."""
     overlay_pages = []
+    # Paragraphs whose reflow is rejected below have to keep their original text, which means the
+    # redaction pass must not erase them either - it is driven off the same list.
+    kept = list(translations)
     index = 0
     for page in pages:
         lines: List[Dict[str, Any]] = []
         for paragraph in page["paragraphs"]:
             if (index < len(translations) and translations[index].strip()
                     and has_translatable_text(paragraph["text"])):
-                lines.extend(reflow_paragraph(
+                placed = reflow_paragraph(
                     paragraph,
                     translations[index],
                     paragraph_floor(paragraph, page["paragraphs"]),
                     paragraph_width_limit(paragraph, page["paragraphs"], page["width"]),
-                ))
+                )
+                if len(placed) > PDF_LAYOUT_MAX_LINE_GROWTH * len(paragraph["lines"]):
+                    # Not a translation of this paragraph any more. Overflow is tolerated, but a
+                    # block several times its original height buries whatever sits below it, and
+                    # the original is the better of the two things to be looking at.
+                    kept[index] = ""
+                else:
+                    lines.extend(placed)
             index += 1
         overlay_pages.append({
             "width": page["width"],
@@ -2450,7 +2544,7 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
         })
 
     overlay_reader = PdfReader(BytesIO(create_pdf_from_pages(overlay_pages)))
-    reader = PdfReader(BytesIO(redact_translated_text(content, pages, translations)))
+    reader = PdfReader(BytesIO(redact_translated_text(content, pages, kept)))
     writer = PdfWriter()
     # Only the selected pages are translated, so only those are exported. Keeping the untouched
     # rest would make a single-page selection look like the unconverted original.

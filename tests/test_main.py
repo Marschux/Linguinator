@@ -1567,10 +1567,41 @@ class MainTests(unittest.TestCase):
                     "http://example.com", "www.malighting.com"):
             with self.subTest(url=url):
                 self.assertFalse(main.has_translatable_text(url))
+        # Roman page numbers clear the two-letter bar but say as little as "4" does; the model
+        # answered "iv" with "iv iv iv iv iv" across the bottom of the page.
+        for numeral in ("i", "iv", "ix", "xiv", "iv.", "XXVII"):
+            with self.subTest(numeral=numeral):
+                self.assertFalse(main.has_translatable_text(numeral))
+        # Dot leaders are decoration, so a line that is only leaders has nothing to translate.
+        self.assertFalse(main.has_translatable_text(". . . . . . . ."))
         for real in ("Ja", "Hello world", "2. Scope", "16 GB", "日本語",
-                     "Mehr dazu auf https://example.com nachlesen"):
+                     "Mehr dazu auf https://example.com nachlesen",
+                     "1. Gesichtspflege . . . . . . . . 12"):
             with self.subTest(text=real):
                 self.assertTrue(main.has_translatable_text(real))
+
+    def test_clean_source_text_drops_dot_leaders(self):
+        # A row of dots reads to the model as an unfinished sentence, and it completes it with
+        # European Parliament boilerplate that then gets laid out across the page.
+        self.assertEqual(main.clean_source_text("Duschen . . . . . . . . 15 Minuten"),
+                         "Duschen 15 Minuten")
+        self.assertEqual(main.clean_source_text("Fernsehen........30 Minuten"),
+                         "Fernsehen 30 Minuten")
+        # An ellipsis is punctuation, not a leader, and stays.
+        self.assertEqual(main.clean_source_text("Warte... ich komme"), "Warte... ich komme")
+
+    def test_guard_hallucination_keeps_original_when_output_explodes(self):
+        # "Chapter 1 - Development" came back as "ENTWICKLUNG DER ENTWICKLUNG DER ..." over half
+        # the page; a page number "-" as "- Nein, nein, nein, ...".
+        source = "Kapitel 1 - Entwicklung"
+        self.assertEqual(main.guard_hallucination(source, "ENTWICKLUNG DER " * 20), source)
+        self.assertEqual(main.guard_hallucination("-", "- Nein, " * 30), "-")
+        # A genuine translation, even a much longer one, is kept.
+        self.assertEqual(main.guard_hallucination("Yes", "Ja, natürlich"), "Ja, natürlich")
+        self.assertEqual(
+            main.guard_hallucination("Building energy", "Aufbau der körperlichen Energie"),
+            "Aufbau der körperlichen Energie",
+        )
 
     def test_layout_overlay_leaves_wordless_fragments_untouched(self):
         # A fragment keeps its original: it must be neither redacted away nor redrawn, or the
@@ -1602,6 +1633,74 @@ class MainTests(unittest.TestCase):
         self.assertIn("Hallo Welt", text)
         self.assertNotIn("Hello world", text)
         self.assertIn(",", text)
+
+    def test_layout_overlay_keeps_the_original_when_the_reflow_explodes(self):
+        # The model answers a heading with several lines of invented text; laid out, that block
+        # buries everything below it. The original heading is the better of the two to keep.
+        pages = [{
+            "number": 1, "width": 400.0, "height": 300.0,
+            "paragraphs": [
+                {"text": "Chapter one", "lines": [
+                    {"text": "Chapter one", "x": 50.0, "y": 200.0, "right": 150.0, "size": 11.0},
+                ]},
+            ],
+        }]
+        source = main.create_pdf_from_pages([{
+            "width": 400, "height": 300, "margin": 40,
+            "source_page": "", "continuation": False, "footer": False,
+            "lines": [{"text": "Chapter one", "font": "F1", "size": 11, "line_height": 14,
+                       "x": 50, "y": 200}],
+        }])
+
+        overlay = main.render_pdf_layout_overlay(source, pages, ["ENTWICKLUNG DER " * 30])
+        text = pdf_text(overlay)
+
+        # Neither redacted away nor overdrawn.
+        self.assertIn("Chapter one", text)
+        self.assertNotIn("ENTWICKLUNG", text)
+
+    def test_reflow_paragraph_carries_the_original_colour(self):
+        # A title set in white on a dark cover image was redrawn in the default black.
+        white = 0xFFFFFF
+        paragraph = {"lines": [
+            {"text": "Power up", "x": 50.0, "y": 700.0, "right": 300.0, "size": 30.0, "color": white},
+        ]}
+
+        placed = main.reflow_paragraph(paragraph, "Einschalten")
+
+        self.assertEqual(placed[0]["color"], white)
+        self.assertIn("1.000 1.000 1.000 rg", main.pdf_line_command("x", 0, 0, "F1", 10, white))
+        # Pages without a single coloured line are written exactly as before.
+        self.assertNotIn("rg", main.pdf_line_command("x", 0, 0, "F1", 10))
+
+    def test_coloured_page_names_the_colour_on_every_line(self):
+        # `rg` outlives its text object: a black line drawn after a white one and left to the
+        # default would inherit the white and vanish.
+        page = {
+            "width": 300, "height": 200, "margin": 20,
+            "source_page": "", "continuation": False, "footer": True,
+            "lines": [
+                {"text": "weiss", "font": "F1", "size": 10, "line_height": 12, "color": 0xFFFFFF},
+                {"text": "schwarz", "font": "F1", "size": 10, "line_height": 12},
+            ],
+        }
+
+        pdf = main.create_pdf_from_pages([page]).decode("latin-1")
+
+        self.assertIn("1.000 1.000 1.000 rg", pdf)
+        # The black line and the page footer both state their colour rather than inheriting.
+        self.assertEqual(pdf.count("0.000 0.000 0.000 rg"), 2)
+
+    def test_group_pdf_lines_takes_the_colour_most_of_the_line_is_set_in(self):
+        runs = [
+            {"text": "weiss", "x": 50.0, "y": 700.0, "size": 10.0, "width": 30.0, "color": 0xFFFFFF},
+            {"text": "auch weiss", "x": 82.0, "y": 700.0, "size": 10.0, "width": 60.0, "color": 0xFFFFFF},
+            {"text": "rot", "x": 144.0, "y": 700.0, "size": 10.0, "width": 20.0, "color": 0xFF0000},
+        ]
+
+        lines = main.group_pdf_lines(runs)
+
+        self.assertEqual(lines[0]["color"], 0xFFFFFF)
 
     def test_paragraph_width_limit_uses_the_space_beside_the_paragraph(self):
         # A heading's own ink ends where the original wording ended, which says nothing about
@@ -1637,7 +1736,10 @@ class MainTests(unittest.TestCase):
         floor = main.paragraph_floor(target, [target, below, beside, beside_below])
 
         self.assertEqual(floor, 680.0)
-        self.assertIsNone(main.paragraph_floor(target, [target, beside, beside_below]))
+        # Nothing below in this column: the paragraph may run down to the page edge rather than
+        # being shrunk to fit its own lines.
+        self.assertEqual(main.paragraph_floor(target, [target, beside, beside_below]),
+                         main.PDF_LAYOUT_EDGE_MARGIN)
 
     def test_group_pdf_lines_marks_a_line_bold_by_majority_of_its_text(self):
         mostly_bold = main.group_pdf_lines([
