@@ -440,8 +440,10 @@
     .hidden { display: none; }
     .invisible { visibility: hidden; }
     .tabs {
-      display: flex;
-      flex-wrap: wrap;
+      /* A grid, not a flex row: every tab keeps the same width, including the ones on a second
+         line. Flex made the last line stretch its few items across the full width. */
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr));
       gap: .5rem;
     }
 
@@ -462,11 +464,7 @@
       border-color: var(--line);
       color: var(--muted);
       display: flex;
-      /* Basis from the label, not zero: the labels do not wrap, so with a zero basis a longer
-         translation ("Documento Office") pushed the row past the container instead of breaking
-         into a second one. */
-      flex: 1 1 auto;
-      height: 3.6rem;
+      min-height: 3.6rem;
       min-width: 0;
       justify-content: center;
       padding: .5rem .5rem;
@@ -475,7 +473,10 @@
     .tab-label {
       font-size: 1.05rem;
       font-weight: 700;
-      white-space: nowrap;
+      /* Wrapping, so a long translation ("Documento Office") uses a second line inside its own
+         tab instead of widening it past the others. */
+      line-height: 1.15;
+      text-align: center;
     }
 
     .tab.active,

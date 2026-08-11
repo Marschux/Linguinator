@@ -11,20 +11,20 @@
   <main class="app">
     <header>
       <div class="brand">
-        <h1><a href="." class="brand-link" title="Reload Linguinator."><img class="brand-logo" src="static/favicon.svg" alt="">Linguinator</a></h1>
+        <h1><a href="." class="brand-link" title="Reload Linguinator." data-title-key="tipReload"><img class="brand-logo" src="static/favicon.svg" alt="">Linguinator</a></h1>
         <p class="subtle">Local translation workbench for text and document workflows.</p>
       </div>
       <div class="header-right">
         <div class="header-controls">
           <label for="uiLanguage" class="visually-hidden">UI Language</label>
-          <select id="uiLanguage" title="Select the interface language.">
+          <select id="uiLanguage" title="Select the interface language." data-title-key="tipUiLanguage">
             <option value="en">English</option>
             <option value="de">Deutsch</option>
             <option value="es">Español</option>
             <option value="fr">Français</option>
           </select>
         </div>
-        <button id="themeToggle" class="theme-toggle" type="button" title="Toggle light/dark mode." aria-label="Toggle light/dark mode." aria-pressed="false">
+        <button id="themeToggle" class="theme-toggle" type="button" title="Toggle light/dark mode." data-title-key="tipTheme" aria-label="Toggle light/dark mode." aria-pressed="false">
           <svg class="theme-icon icon-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"></path></svg>
           <svg class="theme-icon icon-moon" viewBox="0 0 24 24" fill="currentColor"><path d="M20.5 14.5a8.5 8.5 0 1 1-9-13 7 7 0 0 0 9 13z"></path></svg>
         </button>
@@ -33,16 +33,16 @@
 
     <section class="grid workspace-section">
       <div class="tabs" role="tablist" aria-label="Input type">
-        <button class="tab" type="button" data-input-tab="textarea" disabled title="Type text directly into the input field."><span class="tab-label">Text Field</span></button>
-        <button class="tab" type="button" data-input-tab="text" disabled title="Load and translate a TXT file, and also HTML, SRT, VTT, JSON, YAML, PO or XLIFF."><span class="tab-label">TXT File</span></button>
-        <button class="tab" type="button" data-input-tab="markdown" disabled title="Load and translate a Markdown file."><span class="tab-label">Markdown</span></button>
-        <button class="tab" type="button" data-input-tab="website" disabled title="Translate a public web page from its address. Built, still to be tested."><span class="tab-label">Website</span></button>
-        <button class="tab" type="button" data-input-tab="office" disabled title="Load and translate a DOCX or ODT file as text."><span class="tab-label">DOC File</span></button>
-        <button class="tab" type="button" data-input-tab="pptx" disabled title="Load and translate a PowerPoint (PPTX) file as text."><span class="tab-label">PPTX File</span></button>
-        <button class="tab" type="button" data-input-tab="csv" disabled title="Load and translate selected CSV or XLSX columns."><span class="tab-label">CSV File</span></button>
-        <button class="tab active" type="button" data-input-tab="pdf" title="Extract and translate a PDF page by page."><span class="tab-label">PDF</span></button>
+        <button class="tab" type="button" data-input-tab="textarea" disabled title="Type text directly into the input field." data-title-key="tipTabTextarea"><span class="tab-label">Text Field</span></button>
+        <button class="tab" type="button" data-input-tab="text" disabled title="Load and translate a TXT file, and also HTML, SRT, VTT, JSON, YAML, PO or XLIFF." data-title-key="tipTabText"><span class="tab-label">TXT File</span></button>
+        <button class="tab" type="button" data-input-tab="markdown" disabled title="Load and translate a Markdown file." data-title-key="tipTabMarkdown"><span class="tab-label">Markdown</span></button>
+        <button class="tab" type="button" data-input-tab="website" disabled title="Translate a public web page from its address. Built, still to be tested." data-title-key="tipTabWebsite"><span class="tab-label">Website</span></button>
+        <button class="tab" type="button" data-input-tab="office" disabled title="Load and translate a DOCX or ODT file as text." data-title-key="tipTabOffice"><span class="tab-label">DOC File</span></button>
+        <button class="tab" type="button" data-input-tab="pptx" disabled title="Load and translate a PowerPoint (PPTX) file as text." data-title-key="tipTabPptx"><span class="tab-label">PPTX File</span></button>
+        <button class="tab" type="button" data-input-tab="csv" disabled title="Load and translate selected CSV or XLSX columns." data-title-key="tipTabCsv"><span class="tab-label">CSV File</span></button>
+        <button class="tab active" type="button" data-input-tab="pdf" title="Extract and translate a PDF page by page." data-title-key="tipTabPdf"><span class="tab-label">PDF</span></button>
       </div>
-      <select id="inputTabSelect" class="input-tab-select" aria-label="Input type" title="Select the input type.">
+      <select id="inputTabSelect" class="input-tab-select" aria-label="Input type" title="Select the input type." data-title-key="tipInputType">
         <option value="textarea" disabled>Text Field</option>
         <option value="text" disabled>TXT File</option>
         <option value="markdown" disabled>Markdown</option>
@@ -57,13 +57,13 @@
         <div class="language-field" data-picker="source">
           <label for="source">Source</label>
           <select id="source" class="native-select"></select>
-          <button id="sourceButton" class="language-trigger" type="button" title="Select the source language.">Loading...</button>
+          <button id="sourceButton" class="language-trigger" type="button" title="Select the source language." data-title-key="tipSource">Loading...</button>
           <div id="sourceMenu" class="language-menu"></div>
         </div>
         <div class="language-field" data-picker="target">
           <label for="target">Target</label>
           <select id="target" class="native-select"></select>
-          <button id="targetButton" class="language-trigger" type="button" title="Select the target language.">Loading...</button>
+          <button id="targetButton" class="language-trigger" type="button" title="Select the target language." data-title-key="tipTarget">Loading...</button>
           <div id="targetMenu" class="language-menu"></div>
         </div>
       </div>
@@ -71,52 +71,52 @@
 
       <div id="textareaPanel" class="tab-panel active">
         <label for="text">Text Field</label>
-        <textarea id="text" title="Enter text or load it from a file.">The default translation quality should be better.</textarea>
-        <div id="counter" class="counter" title="Characters used, character limit, and estimated translation chunks.">0 / 0</div>
+        <textarea id="text" title="Enter text or load it from a file." data-title-key="tipTextarea">The default translation quality should be better.</textarea>
+        <div id="counter" class="counter" title="Characters used, character limit, and estimated translation chunks." data-title-key="tipCounter">0 / 0</div>
       </div>
     </section>
 
     <section id="filePanel" class="section tab-panel workspace-section">
       <label id="textFileLabel" for="textFile">TXT File</label>
-      <input id="textFile" type="file" accept=".txt,text/plain" title="Select the file to load.">
-      <input id="sheetName" class="file-extra" type="text" placeholder="XLSX sheet name, optional" title="Optional XLSX sheet name. Leave empty to use the first sheet.">
-      <input id="csvColumns" class="file-extra" type="text" placeholder="CSV/XLSX columns, e.g. title,description or A,B" title="Column names or letters to translate.">
+      <input id="textFile" type="file" accept=".txt,text/plain" title="Select the file to load." data-title-key="tipFilePick">
+      <input id="sheetName" class="file-extra" type="text" placeholder="XLSX sheet name, optional" title="Optional XLSX sheet name. Leave empty to use the first sheet." data-title-key="tipSheetName">
+      <input id="csvColumns" class="file-extra" type="text" placeholder="CSV/XLSX columns, e.g. title,description or A,B" title="Column names or letters to translate." data-title-key="tipCsvColumns">
       <div class="actions">
-        <button id="loadTextFile" class="secondary" type="button" title="Load file content into the text field.">Load File</button>
+        <button id="loadTextFile" class="secondary" type="button" title="Load file content into the text field." data-title-key="tipLoadFile">Load File</button>
       </div>
     </section>
 
     <section id="websitePanel" class="section tab-panel workspace-section">
       <label id="websiteUrlLabel" for="websiteUrl">Website</label>
       <input id="websiteUrl" type="url" placeholder="https://..." disabled
-             title="Address of the page to translate. Must be publicly reachable, without a login.">
+             title="Address of the page to translate. Must be publicly reachable, without a login." data-title-key="tipWebsiteUrl">
       <p id="websiteHint" class="subtle"></p>
     </section>
 
     <section id="pdfPanel" class="section tab-panel workspace-section">
       <label for="pdf">PDF</label>
-      <input id="pdf" type="file" accept="application/pdf" title="Select the PDF to translate.">
-      <input id="pageRange" type="text" placeholder="Pages, e.g. 1-3,5" title="Optional page range, e.g. 1-3,5. Leave empty to translate all pages.">
+      <input id="pdf" type="file" accept="application/pdf" title="Select the PDF to translate." data-title-key="tipPdfPick">
+      <input id="pageRange" type="text" placeholder="Pages, e.g. 1-3,5" title="Optional page range, e.g. 1-3,5. Leave empty to translate all pages." data-title-key="tipPageRange">
     </section>
 
     <div id="progress" class="progress workspace-section"></div>
     <div id="ownJobBanner" class="own-job-banner hidden"></div>
 
     <div id="primaryActions" class="actions actions-right primary-actions">
-      <button id="translate" title="Start a new translation for the current input.">Translate Input</button>
-      <button id="clearInput" class="secondary" type="button" title="Clear the current input and result.">Clear</button>
+      <button id="translate" title="Start a new translation for the current input." data-title-key="tipTranslate">Translate Input</button>
+      <button id="clearInput" class="secondary" type="button" title="Clear the current input and result." data-title-key="tipClear">Clear</button>
     </div>
 
     <section id="queuePanel" class="section workspace-section">
       <div class="section-heading">
-        <button id="queueCollapse" class="history-toggle" type="button" title="Show or hide the queue list.">
+        <button id="queueCollapse" class="history-toggle" type="button" title="Show or hide the queue list." data-title-key="tipQueueToggle">
           <label for="queue">Queue</label>
           <span id="queueCollapseIcon" class="history-toggle-icon">&#9660;</span>
         </button>
         <div class="actions actions-right">
-          <button id="pauseJob" class="secondary" disabled title="Pause the entire queue.">Pause</button>
-          <button id="resumeJob" class="secondary" disabled title="Resume the entire queue.">Resume</button>
-          <button id="stopJob" class="secondary" disabled title="Cancel the entire queue.">Stop</button>
+          <button id="pauseJob" class="secondary" disabled title="Pause the entire queue." data-title-key="tipPause">Pause</button>
+          <button id="resumeJob" class="secondary" disabled title="Resume the entire queue." data-title-key="tipResume">Resume</button>
+          <button id="stopJob" class="secondary" disabled title="Cancel the entire queue." data-title-key="tipStop">Stop</button>
         </div>
       </div>
       <div id="queueBody">
@@ -126,24 +126,24 @@
 
     <section id="historyPanel" class="section workspace-section">
       <div class="section-heading">
-        <button id="historyCollapse" class="history-toggle" type="button" title="Show or hide the history list.">
+        <button id="historyCollapse" class="history-toggle" type="button" title="Show or hide the history list." data-title-key="tipHistoryToggle">
           <label for="history">History</label>
           <span id="historyCollapseIcon" class="history-toggle-icon">&#9660;</span>
         </button>
       </div>
       <div id="historyBody">
-        <input id="historyFilter" type="text" placeholder="Filter history..." title="Filter history by filename or languages.">
+        <input id="historyFilter" type="text" placeholder="Filter history..." title="Filter history by filename or languages." data-title-key="tipHistoryFilter">
         <div id="history" class="history"></div>
         <div id="historyPagination" class="actions history-pagination invisible">
-          <button id="historyPrevPage" class="secondary" type="button" title="Previous page.">&#8249;</button>
+          <button id="historyPrevPage" class="secondary" type="button" title="Previous page." data-title-key="tipPrevPage">&#8249;</button>
           <span id="historyPageInfo" class="section-meta"></span>
-          <button id="historyNextPage" class="secondary" type="button" title="Next page.">&#8250;</button>
+          <button id="historyNextPage" class="secondary" type="button" title="Next page." data-title-key="tipNextPage">&#8250;</button>
         </div>
       </div>
     </section>
 
     <footer>
-      AGPL-3.0-or-later - <a href="https://gitlab.com/uncoded-bytes/Linguinator" target="_blank" rel="noopener" title="Open the Linguinator repository.">Linguinator</a><span id="appVersion"></span> - by <a href="https://uncodedbytes.com" target="_blank" rel="noopener" title="Uncoded Bytes">Uncoded Bytes</a>
+      AGPL-3.0-or-later - <a href="https://gitlab.com/uncoded-bytes/Linguinator" target="_blank" rel="noopener" title="Open the Linguinator repository." data-title-key="tipRepo">Linguinator</a><span id="appVersion"></span> - by <a href="https://uncodedbytes.com" target="_blank" rel="noopener" title="Uncoded Bytes">Uncoded Bytes</a>
     </footer>
   </main>
   <script src="static/app.js"></script>
