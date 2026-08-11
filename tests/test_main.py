@@ -993,6 +993,19 @@ class MainTests(unittest.TestCase):
             self.assertEqual(main.ocr_probe_languages(""), "eng")
             self.assertEqual(main.ocr_probe_languages("Klingon"), "eng")
 
+    def test_ocr_probe_keeps_english_out_when_a_package_is_missing(self):
+        # ukr has no package here. Falling back to eng for it would put a Latin language into
+        # a Cyrillic probe, which is exactly what the probe is meant to avoid.
+        with patch.object(main, "installed_ocr_languages", return_value=("bul", "eng", "rus")):
+            self.assertEqual(main.ocr_probe_languages("Cyrillic"), "rus+bul")
+
+    def test_installed_ocr_languages_drops_only_the_header(self):
+        listing = 'List of available languages in "/usr/share/tessdata/" (3):\nara\ndeu\neng\n'
+        with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout=listing)):
+            main.installed_ocr_languages.cache_clear()
+            self.assertEqual(main.installed_ocr_languages(), ("ara", "deu", "eng"))
+        main.installed_ocr_languages.cache_clear()
+
     def test_ocr_page_script_reads_the_osd_report(self):
         report = "Page number: 0\nOrientation in degrees: 0\nScript: Cyrillic\nScript confidence: 3.4\n"
         with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout=report)):

@@ -1752,16 +1752,23 @@ def installed_ocr_languages() -> Tuple[str, ...]:
         )
     except Exception:
         return ()
-    # First line is a header ("List of available languages..."), the rest one code per line.
-    return tuple(line.strip() for line in result.stdout.splitlines()[1:] if line.strip())
+    # The list is preceded by a header line ("List of available languages in ..."); language
+    # codes never contain a space, which sorts it out without counting on it being line one.
+    return tuple(line.strip() for line in result.stdout.splitlines()
+                 if line.strip() and " " not in line.strip())
+
+
+def tesseract_code(source: str) -> str:
+    """Tesseract's name for an internal language code, whether or not it is installed."""
+    base = source.split("_")[0]
+    return OCR_LANGUAGE_ALIASES.get(base, base)
 
 
 def ocr_language_code(source: str) -> str:
     """Tesseract language for a job's source language, or English when we cannot serve it."""
     if source == AUTO_SOURCE:
         return OCR_FALLBACK_LANGUAGE
-    base = source.split("_")[0]
-    code = OCR_LANGUAGE_ALIASES.get(base, base)
+    code = tesseract_code(source)
     installed = installed_ocr_languages()
     # An unknown -l aborts tesseract and with it the whole job, which is worse than reading one
     # page in the wrong language. Empty list means we could not ask, then just try the code.
@@ -1817,7 +1824,9 @@ def ocr_probe_languages(script: str) -> str:
         for internal in CORE_LANGUAGES.values():
             if not internal.endswith(suffix):
                 continue
-            code = ocr_language_code(internal)
+            # tesseract_code, not ocr_language_code: the latter answers "eng" for a language
+            # whose package is missing, which would drop English into a Cyrillic probe.
+            code = tesseract_code(internal)
             if code not in codes and (not installed or code in installed):
                 codes.append(code)
             if len(codes) >= OCR_PROBE_LIMIT:
@@ -1852,9 +1861,9 @@ def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE) ->
             return run_tesseract(image_path, ocr_language_code(source))
 
         # Auto-detect on a scan is a chicken-and-egg: detection needs text, text needs OCR, OCR
-        # needs the language. So read once with a few languages of the script OSD found — that
-        # result is thrown away, it only has to be good enough for langdetect — then read again
-        # with the single language it named.
+        # needs the language. So read once with a few languages of the script OSD found. That
+        # result is thrown away and only has to be good enough for langdetect; the page is then
+        # read again with the single language langdetect named.
         probe = ocr_probe_languages(ocr_page_script(image_path))
         text = run_tesseract(image_path, probe)
         if not text:
