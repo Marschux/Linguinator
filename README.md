@@ -68,7 +68,7 @@ The `.env` file is grouped by topic:
 | `LINGUINATOR_HISTORY_DAYS` | `7` | Number of days to keep saved translation history, including retained source files. |
 | `LINGUINATOR_TIMEZONE` | `Europe/Berlin` | IANA timezone name used to display the completion time next to each history entry. Display only, stored times are UTC. |
 | `LINGUINATOR_TIME_FORMAT` | `24h` | `12h` or `24h`, the same for every UI language. Anything else is read as `24h`. |
-| `LINGUINATOR_UI_LANGUAGE` | `en` | UI language a fresh browser starts with: `en`, `de`, `es`, `fr`. A browser switched by hand keeps its own choice. |
+| `LINGUINATOR_UI_LANGUAGE` | `en` | UI language a fresh browser starts with: `en` (English), `de` (German), `es` (Spanish), `fr` (French). A browser switched by hand keeps its own choice. |
 | `LINGUINATOR_DEFAULT_TARGET` | `eng_Latn` | Preselected target language. The source starts on auto-detect and is not configurable. |
 | `LINGUINATOR_FAVORITE_LANGUAGES` | `deu_Latn,spa_Latn,fra_Latn` | Favourites at the top of both language pickers, comma-separated. At most three are used; English is always added, so the list shows up to four. Codes not on offer are ignored. |
 | `LINGUINATOR_AUTH_ENABLED` | `false` | Enables HTTP Basic Auth for the UI and API. `/health` stays public for health checks. |
