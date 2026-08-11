@@ -24,7 +24,7 @@ from functools import lru_cache
 from html.parser import HTMLParser
 from io import BytesIO, StringIO
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urljoin, urlparse
 from xml.etree import ElementTree
 
@@ -720,15 +720,14 @@ PDF_BASE_FONTS = {(False, False): "helv", (True, False): "hebo",
 
 
 @lru_cache(maxsize=8)
-def script_font(bold: bool = False, script: str = "", serif: bool = False):
-    """The font a face is drawn and measured with, as a MuPDF font.
+def font_file(bold: bool = False, script: str = "", serif: bool = False) -> str:
+    """The font file a face is drawn and measured with, or "" for the base-14 stand-in.
 
     A base-14 font can only show WinAnsi characters, so any non-Latin target language (Cyrillic,
     Greek, ...) would come out as garbage. `script` (from detect_pdf_script) picks a file that
     actually covers CJK/Arabic/Devanagari/Hebrew instead, where DejaVu Sans has no glyphs at all;
     those fonts are used as-is for "bold" too since covering the script matters more than the
-    weight. Cached because MuPDF parses the file again for every font object, and a long document
-    draws thousands of lines out of the same handful of faces.
+    weight.
     """
     if script and script in PDF_SCRIPT_FONT_CANDIDATES:
         candidates = PDF_SCRIPT_FONT_CANDIDATES[script]
@@ -737,13 +736,52 @@ def script_font(bold: bool = False, script: str = "", serif: bool = False):
     else:
         candidates = PDF_FONT_BOLD_CANDIDATES if bold else PDF_FONT_CANDIDATES
     for path in candidates:
-        if not path or not Path(path).exists():
-            continue
+        if path and Path(path).exists():
+            return path
+    return ""
+
+
+@lru_cache(maxsize=8)
+def script_font(bold: bool = False, script: str = "", serif: bool = False):
+    """The whole font as MuPDF sees it, for measuring. Cached because MuPDF parses the file again
+    for every font object, and a document is measured line by line."""
+    path = font_file(bold, script, serif)
+    if path:
         try:
             return pymupdf.Font(fontfile=path)
         except Exception:
-            continue
+            pass
     return pymupdf.Font(PDF_BASE_FONTS[(bold, serif)])
+
+
+def subset_font(bold: bool, script: str, serif: bool, codepoints: Set[int]):
+    """The same font cut down to the characters the document actually draws.
+
+    MuPDF embeds whatever font it is handed whole, and its own `subset_fonts` cannot cut the
+    CFF-based Noto CJK collection back down again ("format error: Index bounds"), which left a
+    single page of Japanese weighing 13.7 MB. Subsetting before drawing works for every font
+    format and brought that page to 6 KB.
+    """
+    path = font_file(bold, script, serif)
+    if path:
+        try:
+            import logging
+
+            from fontTools import subset
+            from fontTools.ttLib import TTFont
+
+            # "meta NOT subset; don't know how to subset; dropped" on every font, every document.
+            logging.getLogger("fontTools.subset").setLevel(logging.ERROR)
+            ttf = TTFont(path, fontNumber=0, lazy=True)
+            subsetter = subset.Subsetter(options=subset.Options(notdef_outline=True))
+            subsetter.populate(unicodes=sorted(codepoints))
+            subsetter.subset(ttf)
+            buffer = BytesIO()
+            ttf.save(buffer)
+            return pymupdf.Font(fontbuffer=buffer.getvalue())
+        except Exception:
+            pass
+    return script_font(bold, script, serif)
 
 
 def pdf_measure_text(text: str, size: float, bold: bool = False, serif: bool = False) -> float:
@@ -811,8 +849,14 @@ def pdf_document_pages(text: str) -> List[Dict[str, Any]]:
     return document_pages or [{"source_page": "", "continuation": False, "lines": []}]
 
 
+def pdf_font_key(text: str, face: str) -> Tuple[bool, str, bool]:
+    """Which font one line is drawn with: (bold, script, serif)."""
+    bold, serif = PDF_FONT_FACES.get(face, (False, False))
+    return bold, detect_pdf_script(text), serif
+
+
 def draw_pdf_line(page, text: str, x: float, y: float, face: str,
-                  size: float, color: int, height: float) -> None:
+                  size: float, color: int, height: float, fonts: Dict) -> None:
     """One line of text on a MuPDF page.
 
     `y` is a PDF baseline, counted up from the bottom of the page; MuPDF counts down from the
@@ -822,8 +866,7 @@ def draw_pdf_line(page, text: str, x: float, y: float, face: str,
     switch for: a Hebrew or Arabic line has to be laid down right to left, or it ends up on the
     page back to front. Everything else comes out of both the same, glyph for glyph.
     """
-    bold, serif = PDF_FONT_FACES.get(face, (False, False))
-    font = script_font(bold, detect_pdf_script(text), serif)
+    font = fonts[pdf_font_key(text, face)]
     writer = pymupdf.TextWriter(page.rect)
     if is_rtl_text(text):
         # MuPDF's own right_to_left turns the whole string around, a year or a Latin name inside
@@ -866,36 +909,52 @@ def fix_pdf_space_mapping(document) -> None:
 
 
 def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
-    """Write the pages with MuPDF, which shapes complex scripts and embeds the fonts itself."""
+    """Write the pages with MuPDF, which shapes complex scripts and embeds the fonts itself.
+
+    The lines are collected before any of them is drawn, so that each font can be subset to the
+    characters this document actually uses (see subset_font) before it is handed to MuPDF.
+    """
     document = pymupdf.open()
+    # (page index, text, x, y, face, size, color, page height). The index rather than the page:
+    # adding a page invalidates the page objects handed out before it.
+    lines: List[Tuple[int, str, float, float, str, float, int, float]] = []
     for output_page_number, page_data in enumerate(pages, start=1):
         width = page_data.get("width", PDF_PAGE_WIDTH)
         height = page_data.get("height", PDF_PAGE_HEIGHT)
         margin = page_data.get("margin", PDF_MARGIN)
-        page = document.new_page(width=width, height=height)
+        document.new_page(width=width, height=height)
+        index = output_page_number - 1
         y = height - margin
         if page_data["source_page"]:
             heading = "Page " + page_data["source_page"]
             if page_data["continuation"]:
                 heading += " continued"
-            draw_pdf_line(page, heading, margin, y, "F2",
-                          PDF_HEADING_FONT_SIZE, 0, height)
+            lines.append((index, heading, margin, y, "F2", PDF_HEADING_FONT_SIZE, 0, height))
             y -= 24
         for line in page_data["lines"]:
             if line["text"]:
-                draw_pdf_line(page, line["text"], line.get("x", margin),
-                              line.get("y", y), line["font"], line["size"],
-                              line.get("color", 0), height)
+                lines.append((index, line["text"], line.get("x", margin), line.get("y", y),
+                              line["font"], line["size"], line.get("color", 0), height))
             y -= line["line_height"]
         if page_data.get("footer", True):
-            draw_pdf_line(page, f"{output_page_number}", width - margin,
-                          margin // 2, "F1", PDF_FOOTER_FONT_SIZE, 0, height)
-    # MuPDF embeds every font whole: a page of Japanese carried 6.8 MB of MS Gothic. Subsetting
-    # to the glyphs actually drawn brings that back below what the old hand-built writer produced.
+            lines.append((index, f"{output_page_number}", width - margin, margin // 2,
+                          "F1", PDF_FOOTER_FONT_SIZE, 0, height))
+
+    codepoints: Dict[Tuple[bool, str, bool], Set[int]] = {}
+    for _, text, _, _, face, _, _, _ in lines:
+        codepoints.setdefault(pdf_font_key(text, face), set()).update(map(ord, text))
+    fonts = {key: subset_font(*key, points) for key, points in codepoints.items()}
+    for index, *line in lines:
+        draw_pdf_line(document[index], *line, fonts)
+
+    # Second pass over MuPDF's own doing: for a character none of our fonts covers it silently
+    # falls back to a built-in face and embeds that one whole (3.5 MB of Droid Sans Fallback for
+    # one Korean word). subset_fonts cuts those down; it is no help with the fonts we picked
+    # ourselves, see subset_font.
     try:
         document.subset_fonts(verbose=False)
     except Exception:
-        # Needs fontTools; a fat PDF is still a readable one.
+        # A fat PDF is still a readable one.
         pass
     fix_pdf_space_mapping(document)
     return document.tobytes(garbage=3, deflate=True)
