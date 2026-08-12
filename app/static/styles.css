@@ -668,7 +668,7 @@
       color: var(--tab-color, var(--muted));
       font-size: .7rem;
       font-weight: 700;
-      margin-right: .5rem;
+      margin-right: .9rem;
       padding: .1rem .35rem;
       white-space: nowrap;
     }
