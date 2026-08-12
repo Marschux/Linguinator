@@ -451,14 +451,22 @@
 
     .input-tab-select { display: none; }
 
-    .tab[data-input-tab="textarea"] { --tab-color: #94a3b8; --tab-rgb: 148, 163, 184; }
-    .tab[data-input-tab="text"] { --tab-color: #38bdf8; --tab-rgb: 56, 189, 248; }
-    .tab[data-input-tab="markdown"] { --tab-color: #a78bfa; --tab-rgb: 167, 139, 250; }
-    .tab[data-input-tab="office"] { --tab-color: #60a5fa; --tab-rgb: 96, 165, 250; }
-    .tab[data-input-tab="pptx"] { --tab-color: #fb923c; --tab-rgb: 251, 146, 60; }
-    .tab[data-input-tab="csv"] { --tab-color: #4ade80; --tab-rgb: 74, 222, 128; }
-    .tab[data-input-tab="website"] { --tab-color: #facc15; --tab-rgb: 250, 204, 21; }
-    .tab[data-input-tab="pdf"] { --tab-color: #f87171; --tab-rgb: 248, 113, 113; }
+    .tab[data-input-tab="textarea"],
+    [data-file-type="textarea"] { --tab-color: #94a3b8; --tab-rgb: 148, 163, 184; }
+    .tab[data-input-tab="text"],
+    [data-file-type="text"] { --tab-color: #38bdf8; --tab-rgb: 56, 189, 248; }
+    .tab[data-input-tab="markdown"],
+    [data-file-type="markdown"] { --tab-color: #a78bfa; --tab-rgb: 167, 139, 250; }
+    .tab[data-input-tab="office"],
+    [data-file-type="office"] { --tab-color: #60a5fa; --tab-rgb: 96, 165, 250; }
+    .tab[data-input-tab="pptx"],
+    [data-file-type="pptx"] { --tab-color: #fb923c; --tab-rgb: 251, 146, 60; }
+    .tab[data-input-tab="csv"],
+    [data-file-type="csv"] { --tab-color: #4ade80; --tab-rgb: 74, 222, 128; }
+    .tab[data-input-tab="website"],
+    [data-file-type="website"] { --tab-color: #facc15; --tab-rgb: 250, 204, 21; }
+    .tab[data-input-tab="pdf"],
+    [data-file-type="pdf"] { --tab-color: #f87171; --tab-rgb: 248, 113, 113; }
 
     .tab {
       align-items: center;
@@ -658,11 +666,6 @@
       border-color: #22c55e;
     }
 
-    .history-row.history-row-own {
-      background: rgba(47, 125, 246, .12);
-      border-color: var(--accent);
-    }
-
     .queue-title {
       color: var(--text);
       font-weight: 800;
@@ -670,9 +673,9 @@
     }
 
     .queue-type-badge {
-      background: rgba(var(--overlay-rgb), .1);
+      background: rgba(var(--tab-rgb, var(--overlay-rgb)), .18);
       border-radius: 4px;
-      color: var(--muted);
+      color: var(--tab-color, var(--muted));
       font-size: .7rem;
       font-weight: 700;
       margin-right: .4rem;

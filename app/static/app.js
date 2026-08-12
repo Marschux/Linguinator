@@ -651,37 +651,6 @@ let languageData = null;
       localStorage.setItem(recentKey(id), JSON.stringify(recent));
     }
 
-    // Linguinator has no user accounts (Basic Auth, when enabled, shares one credential pair
-    // and /jobs is one shared queue with no owner field), so "my jobs" can only mean "jobs this
-    // browser started". Tracked here via localStorage; it does not follow you across devices.
-    function getOwnJobIds() {
-      try {
-        return new Set(JSON.parse(localStorage.getItem("linguinator_own_jobs") || "[]"));
-      } catch {
-        return new Set();
-      }
-    }
-
-    function rememberOwnJob(jobId) {
-      const ids = getOwnJobIds();
-      ids.add(jobId);
-      localStorage.setItem("linguinator_own_jobs", JSON.stringify([...ids]));
-    }
-
-    function getOwnHistoryIds() {
-      try {
-        return new Set(JSON.parse(localStorage.getItem("linguinator_own_history") || "[]"));
-      } catch {
-        return new Set();
-      }
-    }
-
-    function rememberOwnHistory(historyId) {
-      const ids = getOwnHistoryIds();
-      ids.add(historyId);
-      localStorage.setItem("linguinator_own_history", JSON.stringify([...ids]));
-    }
-
     function getFavoriteLanguages() {
       // Set per installation via LINGUINATOR_FAVORITE_LANGUAGES, English always included.
       // Still filtered against the languages on offer: the setting can name one that a later
@@ -1347,7 +1316,6 @@ let languageData = null;
       const data = await response.json();
       queueItems = data.items;
       let hasNewlyCompleted = false;
-      const ownJobIds = getOwnJobIds();
       for (const job of data.items) {
         if (job.status === "complete" && !seenCompletedJobIds.has(job.id)) {
           seenCompletedJobIds.add(job.id);
@@ -1356,9 +1324,6 @@ let languageData = null;
           // finished_at: the two clocks need not agree. Not on the first load either, or every
           // job completed while the tab was closed would be announced as freshly done.
           if (queueLoaded) completedShownAt.set(job.id, Date.now());
-          // Catches a job this browser started that finished after a reload, when pollJob is no
-          // longer actively watching it.
-          if (job.history_id && ownJobIds.has(job.id)) rememberOwnHistory(job.history_id);
         }
       }
       queueLoaded = true;
@@ -1401,9 +1366,8 @@ let languageData = null;
         const main = document.createElement("div");
         const title = document.createElement("div");
         title.className = "queue-title";
-        const typeBadge = document.createElement("span");
-        typeBadge.className = "queue-type-badge";
-        typeBadge.textContent = (job.source_extension || "txt").toUpperCase();
+        const typeBadge = typeBadgeElement(job.source_extension);
+        row.dataset.fileType = fileTypeKey(job.source_extension);
         const position = job.position && !done ? "#" + job.position + " " : "";
         title.appendChild(typeBadge);
         title.appendChild(document.createTextNode(
@@ -1503,7 +1467,6 @@ let languageData = null;
         if (job.status === "complete") {
           setResult(job.result || "");
           lastCompletedJob = job;
-          if (job.history_id && getOwnJobIds().has(job.id)) rememberOwnHistory(job.history_id);
               loadHistory();
           loadQueue();
           playNotificationSound();
@@ -1574,7 +1537,6 @@ let languageData = null;
       }
       const data = await response.json();
       ensureAudioContext();
-      rememberOwnJob(data.job_id);
       activeJobId = data.job_id;
       const token = ++pollToken;
       loadQueue();
@@ -1624,7 +1586,6 @@ let languageData = null;
       }
       const data = await response.json();
       ensureAudioContext();
-      rememberOwnJob(data.job_id);
       activeJobId = data.job_id;
       const token = ++pollToken;
       loadQueue();
@@ -1664,7 +1625,6 @@ let languageData = null;
       }
       const data = await response.json();
       ensureAudioContext();
-      rememberOwnJob(data.job_id);
       activeJobId = data.job_id;
       const token = ++pollToken;
       loadQueue();
@@ -1728,18 +1688,37 @@ let languageData = null;
       });
     }
 
+    // The input tabs carry a colour per file type (see styles.css); a row's badge borrows it, so
+    // the same kind of document looks the same wherever it shows up.
+    const FILE_TYPE_GROUPS = {
+      pdf: "pdf", docx: "office", odt: "office", pptx: "pptx",
+      csv: "csv", xlsx: "csv", md: "markdown",
+    };
+
+    function fileTypeKey(extension) {
+      const key = String(extension || "").toLowerCase().replace(/^\./, "");
+      if (!key) return "textarea";
+      return FILE_TYPE_GROUPS[key] || "text";
+    }
+
+    function typeBadgeElement(extension) {
+      const badge = document.createElement("span");
+      badge.className = "queue-type-badge";
+      badge.textContent = (extension || "txt").toUpperCase();
+      return badge;
+    }
+
     function buildHistoryRow(item) {
       const row = document.createElement("div");
       row.className = "history-row";
       if (lastCompletedJob && lastCompletedJob.history_id === item.id) {
         row.classList.add("history-row-own-current");
-      } else if (getOwnHistoryIds().has(item.id)) {
-        row.classList.add("history-row-own");
       }
       // Same left column as the queue rows above, where a finished job carries the same tick.
       const tick = document.createElement("span");
       tick.className = "history-tick";
       tick.textContent = "✓";
+      row.dataset.fileType = fileTypeKey(item.source_extension);
       const main = document.createElement("div");
       main.className = "history-main";
       const link = document.createElement("a");
@@ -1783,6 +1762,7 @@ let languageData = null;
       if (hasOriginal) format.value = "original";
       syncDownloadHref();
       format.addEventListener("change", syncDownloadHref);
+      main.appendChild(typeBadgeElement(item.source_extension));
       main.appendChild(link);
       main.appendChild(meta);
       const actions = document.createElement("div");
