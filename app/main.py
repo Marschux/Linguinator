@@ -2534,11 +2534,22 @@ def paragraph_width_limit(
     return max(limit, max(line["right"] for line in paragraph["lines"]))
 
 
+def paragraph_base_size(paragraph: Dict[str, Any]) -> float:
+    """The size most of the paragraph's lines are set in.
+
+    A paragraph can start with a larger heading line merged into smaller body lines (grouped for
+    translation context, see group_pdf_paragraphs). Sizing the whole reflow off the maximum would
+    blow the body text up to heading size.
+    """
+    return Counter(line["size"] for line in paragraph["lines"]).most_common(1)[0][0]
+
+
 def reflow_paragraph(
     paragraph: Dict[str, Any],
     text: str,
     floor: Optional[float] = None,
     width_limit: Optional[float] = None,
+    scale: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """Lay the translation out in the column the paragraph's original lines occupied.
 
@@ -2548,15 +2559,16 @@ def reflow_paragraph(
     `floor` is the baseline of whatever sits directly below in the same column: a translation
     longer than its original keeps running past the last line, and without that limit it runs
     straight into the next paragraph. Passing None keeps the old unbounded behaviour.
+
+    `scale` sets the font size outright, as a fraction of the paragraph's own base size, instead
+    of looking for the largest one that fits. Its caller uses that to give every paragraph on a
+    page the same size, see render_pdf_layout_overlay.
     """
     lines = paragraph["lines"]
     left = min(line["x"] for line in lines)
     right = width_limit if width_limit is not None else max(line["right"] for line in lines)
     width = max(right - left, 10.0)
-    # A paragraph can start with a larger heading line merged into smaller body lines (grouped
-    # for translation context, see group_pdf_paragraphs). Sizing the whole reflow off the max
-    # would blow the body text up to heading size, so use whichever size the paragraph mostly is.
-    base_size = Counter(line["size"] for line in lines).most_common(1)[0][0]
+    base_size = paragraph_base_size(paragraph)
     # Same reasoning as base_size: a paragraph is drawn in whichever face most of its lines use,
     # so a bold heading stays bold instead of flattening to regular body text.
     bold = sum(1 for line in lines if line.get("bold")) * 2 > len(lines)
@@ -2584,17 +2596,17 @@ def reflow_paragraph(
         # the lowest overflow baseline has to clear the next paragraph's baseline by that much.
         return lowest >= floor + 1.15 * size
 
-    size = base_size
+    size = base_size if scale is None else base_size * scale
     wrapped = wrap_text_to_width(text, width, size, bold, serif)
     # The embedded substitute font runs wider than most fonts documents are set in, so text that
     # filled n lines in the original spills into n+1 here - measured across the test documents,
     # 13 of 21 paragraphs needed an extra line for *identical* text, and not one of them needed
     # more than 10% off to fit again. Tighten by up to that before accepting the extra line: a
     # slightly smaller line reads better than a paragraph that grew one.
-    while len(wrapped) > len(lines) and size > base_size * PDF_LAYOUT_TIGHTEN_SCALE:
+    while scale is None and len(wrapped) > len(lines) and size > base_size * PDF_LAYOUT_TIGHTEN_SCALE:
         size = max(size * 0.98, base_size * PDF_LAYOUT_TIGHTEN_SCALE)
         wrapped = wrap_text_to_width(text, width, size, bold, serif)
-    while not fits(len(wrapped), size) and size > base_size * PDF_LAYOUT_MIN_SCALE:
+    while scale is None and not fits(len(wrapped), size) and size > base_size * PDF_LAYOUT_MIN_SCALE:
         size = max(size * 0.95, base_size * PDF_LAYOUT_MIN_SCALE)
         wrapped = wrap_text_to_width(text, width, size, bold, serif)
 
@@ -2681,24 +2693,41 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
     kept = list(translations)
     index = 0
     for page in pages:
-        lines: List[Dict[str, Any]] = []
+        # (paragraph, translation, floor, width limit, the lines it laid out)
+        reflowed: List[Tuple[Any, ...]] = []
+        # The smallest scale any paragraph of a given base size needed, see below.
+        scales: Dict[float, float] = {}
         for paragraph in page["paragraphs"]:
             if (index < len(translations) and translations[index].strip()
                     and has_translatable_text(paragraph["text"])):
-                placed = reflow_paragraph(
-                    paragraph,
-                    translations[index],
-                    paragraph_floor(paragraph, page["paragraphs"]),
-                    paragraph_width_limit(paragraph, page["paragraphs"], page["width"]),
-                )
+                floor = paragraph_floor(paragraph, page["paragraphs"])
+                width_limit = paragraph_width_limit(paragraph, page["paragraphs"], page["width"])
+                placed = reflow_paragraph(paragraph, translations[index], floor, width_limit)
                 if len(placed) > PDF_LAYOUT_MAX_LINE_GROWTH * len(paragraph["lines"]):
                     # Not a translation of this paragraph any more. Overflow is tolerated, but a
                     # block several times its original height buries whatever sits below it, and
                     # the original is the better of the two things to be looking at.
                     kept[index] = ""
                 else:
-                    lines.extend(placed)
+                    reflowed.append((paragraph, translations[index], floor, width_limit, placed))
+                    base = paragraph_base_size(paragraph)
+                    key = round(base, 1)
+                    scales[key] = min(scales.get(key, 1.0), placed[0]["size"] / base)
             index += 1
+
+        # Every paragraph the page sets in one size is redrawn in one size. Each shrinks itself
+        # just enough to fit its own translation, which left body text at 0.7 next to body text
+        # at 1.0 in the same column - the most visible flaw in the finished document. Headings
+        # keep their own scale, they are a size of their own to begin with.
+        lines: List[Dict[str, Any]] = []
+        for paragraph, text, floor, width_limit, placed in reflowed:
+            base = paragraph_base_size(paragraph)
+            scale = scales[round(base, 1)]
+            if placed[0]["size"] > base * scale:
+                # Only ever smaller than what this paragraph found on its own, so it still fits.
+                placed = reflow_paragraph(paragraph, text, floor, width_limit, scale)
+            lines.extend(placed)
+
         overlay_pages.append({
             "width": page["width"],
             "height": page["height"],

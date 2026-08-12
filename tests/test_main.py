@@ -2127,6 +2127,33 @@ class MainTests(unittest.TestCase):
         self.assertNotEqual(fonts["Sans line"], fonts["Serif line"])
         self.assertRegex(fonts["Serif line"].lower(), r"serif|times")
 
+    def test_layout_overlay_draws_one_size_for_the_whole_page(self):
+        # Each paragraph used to shrink itself just far enough for its own translation, which put
+        # body text at 0.7 next to body text at 1.0 in the same column.
+        def line(text, y):
+            return {"text": text, "font": "F1", "size": 11, "line_height": 14, "x": 60, "y": y}
+
+        source = main.create_pdf_from_pages([{
+            "width": 400, "height": 300, "margin": 40,
+            "source_page": "", "continuation": False, "footer": False,
+            "lines": [line("The first paragraph stays as short as it was", 250),
+                      line("and needs no room beyond its own two lines.", 236),
+                      line("The second paragraph grows a good deal", 180),
+                      line("longer once it has been translated.", 166)],
+        }])
+        pages = main.extract_pdf_layout(source)
+        self.assertEqual(len(pages[0]["paragraphs"]), 2)
+
+        overlay = main.render_pdf_layout_overlay(source, pages, [
+            "Der erste Absatz bleibt so kurz wie er war und braucht keinen Platz.",
+            "Der zweite Absatz wird nach der Uebersetzung deutlich laenger, so viel "
+            "laenger dass er in seine urspruenglichen zwei Zeilen nur noch kleiner passt.",
+        ])
+
+        sizes = {round(span["size"], 2) for span in pdf_spans(overlay)}
+        self.assertEqual(len(sizes), 1, f"page drawn in {sizes}")
+        self.assertLess(sizes.pop(), 11)
+
     def test_pdf_layout_roundtrip_replaces_text_and_keeps_page_size(self):
         source = main.create_pdf_from_pages([{
             "width": 400, "height": 300, "margin": 40,
