@@ -90,6 +90,10 @@ PDF_FOOTER_FONT_SIZE = 9
 PDF_LAYOUT_MIN_SCALE = 0.7
 # Kept clear of the page edge when a paragraph has nothing to its right.
 PDF_LAYOUT_EDGE_MARGIN = 20.0
+# How far the first line of a paragraph may be indented past the ones under it and still count
+# as part of it. Half an inch is the usual tab; a centred heading sits much further in than that
+# and has to stay a paragraph of its own.
+PDF_LAYOUT_MAX_INDENT = 40.0
 # How far a paragraph may be tightened purely to keep the original's line count. 0.9 because no
 # paragraph in the test documents needed more than that to absorb the substitute font's extra
 # width; past it, an extra line is the lesser evil.
@@ -2370,21 +2374,48 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return lines
 
 
+def typical_line_spacing(lines: List[Dict[str, Any]]) -> float:
+    """The page's own leading: the smallest gap between lines that it uses more than once.
+
+    A page set at one and a half or double spacing leaves gaps no multiple of the font size
+    recognises as "the next line of this paragraph" - the dedication page of the test document
+    runs at 2.35 times its 11pt, and every line of it came out as a paragraph of its own.
+
+    Smallest rather than most common, because the gap between two paragraphs is a repeated one
+    too and often the more frequent of the two: a page of short paragraphs has more gaps between
+    them than inside them, and taking the average or the most common gap would then swallow every
+    paragraph break on the page. Gaps are rounded to half a point, PDF baselines wobble.
+    """
+    gaps = Counter(round((above["y"] - below["y"]) * 2) / 2
+                   for above, below in zip(lines, lines[1:]) if above["y"] > below["y"])
+    repeated = [gap for gap, count in gaps.items() if count > 1]
+    return min(repeated) if repeated else 0.0
+
+
 def group_pdf_paragraphs(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Bundle lines into paragraphs, purely so the model gets whole sentences.
 
     A wrong split only costs translation quality here, never placement: every line keeps its
     own coordinates and the translation is reflowed into exactly those.
     """
+    # Allowed with a bit of room over the page's own leading, so an ordinary line of the same
+    # paragraph still fits while the wider gap before the next one does not.
+    spacing_limit = 1.25 * typical_line_spacing(lines)
     paragraphs: List[Dict[str, Any]] = []
     for line in lines:
         current = paragraphs[-1] if paragraphs else None
         if current:
             previous = current["lines"][-1]
             spacing = previous["y"] - line["y"]
+            # A paragraph's first line is usually indented and the second one sets the real left
+            # edge, so measure against that once it exists. Without this the indented opening
+            # line was a paragraph of its own and went to the model without its own sentence.
+            left = current["lines"][1]["x"] if len(current["lines"]) > 1 else previous["x"]
+            aligned = (abs(left - line["x"]) <= 3
+                       or 0 < previous["x"] - line["x"] <= PDF_LAYOUT_MAX_INDENT)
             fits = (
-                0 < spacing <= 1.8 * max(previous["size"], line["size"])
-                and abs(previous["x"] - line["x"]) <= 3
+                0 < spacing <= max(1.8 * max(previous["size"], line["size"]), spacing_limit)
+                and aligned
                 and abs(previous["size"] - line["size"]) <= 0.2 * previous["size"]
             )
             if fits:

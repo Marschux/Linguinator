@@ -1549,6 +1549,35 @@ class MainTests(unittest.TestCase):
         self.assertEqual([paragraph["text"] for paragraph in paragraphs],
                          ["One still one", "far below", "indented"])
 
+    def test_group_pdf_paragraphs_reads_a_double_spaced_page(self):
+        # The dedication page of the test document runs at 2.35 times its 11pt and opens with an
+        # indented line: every line of it came out as a paragraph of its own, so the model was
+        # handed each of them without the rest of its sentence.
+        def line(text, x, y):
+            return {"text": text, "x": x, "y": y, "right": 550.0, "size": 11.0}
+
+        paragraphs = main.group_pdf_paragraphs([
+            line("This book is dedicated to those", 100.8, 642.1),
+            line("burdened with the incalculable", 64.8, 616.2),
+            line("weight of ME/CFS. It takes", 64.8, 590.4),
+            line("great courage to face each day.", 64.8, 564.6),
+            # Two blank lines further down: a new paragraph even at this leading.
+            line("Thanks to my wife.", 64.8, 486.0),
+        ])
+
+        self.assertEqual([len(paragraph["lines"]) for paragraph in paragraphs], [4, 1])
+
+    def test_typical_line_spacing_takes_the_smallest_repeated_gap(self):
+        # Not the average or the most common one: a page of short paragraphs has more gaps
+        # between paragraphs than inside them, and those would then count as the leading.
+        def line(y):
+            return {"text": "x", "x": 50.0, "y": y, "right": 100.0, "size": 10.0}
+
+        self.assertEqual(main.typical_line_spacing(
+            [line(700), line(685), line(658), line(643), line(616), line(589)]), 15.0)
+        # Nothing repeats, so no page leading can be read off it.
+        self.assertEqual(main.typical_line_spacing([line(700), line(680), line(650)]), 0.0)
+
     def test_reflow_paragraph_shrinks_instead_of_truncating(self):
         paragraph = {"lines": [
             {"text": "Short", "x": 50.0, "y": 700.0, "right": 200.0, "size": 11.0},
