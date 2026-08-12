@@ -581,7 +581,7 @@ let languageData = null;
       setText('label[for="pdf"]', "pdf");
       setText("#loadTextFile", "loadFile");
       setText("#translate", "translateInput");
-      setText("#clearInput", "clear");
+      document.getElementById("clearInput").setAttribute("aria-label", t("clear"));
       setText("#pauseJob", "pause");
       setText("#resumeJob", "resume");
       setText("#stopJob", "stop");

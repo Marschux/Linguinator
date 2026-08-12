@@ -441,6 +441,25 @@
     .section { margin-top: 1.4rem; }
     .hidden { display: none; }
     .invisible { visibility: hidden; }
+    /* The tabs and the clear button share one line, the button pinned to the right end of it. */
+    .tabs-row {
+      align-items: stretch;
+      display: flex;
+      gap: .5rem;
+    }
+
+    .tabs-row .tabs,
+    .tabs-row .input-tab-select { flex: 1 1 auto; min-width: 0; }
+
+    .clear-input {
+      flex: 0 0 auto;
+      font-size: 1.1rem;
+      line-height: 1;
+      min-height: 3.6rem;
+      padding: 0;
+      width: 3.6rem;
+    }
+
     .tabs {
       /* A grid, not a flex row: every tab keeps the same width, including the ones on a second
          line. Flex made the last line stretch its few items across the full width. */

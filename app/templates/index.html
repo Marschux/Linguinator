@@ -18,10 +18,10 @@
         <div class="header-controls">
           <label for="uiLanguage" class="visually-hidden">UI Language</label>
           <select id="uiLanguage" title="Select the interface language." data-title-key="tipUiLanguage">
-            <option value="en">English</option>
-            <option value="de">Deutsch</option>
-            <option value="es">Español</option>
-            <option value="fr">Français</option>
+              <option value="en">English</option>
+              <option value="de">Deutsch</option>
+              <option value="es">Español</option>
+              <option value="fr">Français</option>
           </select>
         </div>
         <button id="themeToggle" class="theme-toggle" type="button" title="Toggle light/dark mode." data-title-key="tipTheme" aria-label="Toggle light/dark mode." aria-pressed="false">
@@ -32,26 +32,29 @@
     </header>
 
     <section class="grid workspace-section">
-      <div class="tabs" role="tablist" aria-label="Input type">
-        <button class="tab" type="button" data-input-tab="textarea" disabled title="Type text directly into the input field." data-title-key="tipTabTextarea"><span class="tab-label">Text Field</span></button>
-        <button class="tab" type="button" data-input-tab="text" disabled title="Load and translate a TXT file, and also HTML, SRT, VTT, JSON, YAML, PO or XLIFF." data-title-key="tipTabText"><span class="tab-label">TXT File</span></button>
-        <button class="tab" type="button" data-input-tab="markdown" disabled title="Load and translate a Markdown file." data-title-key="tipTabMarkdown"><span class="tab-label">Markdown</span></button>
-        <button class="tab" type="button" data-input-tab="website" disabled title="Translate a public web page from its address. Built, still to be tested." data-title-key="tipTabWebsite"><span class="tab-label">Website</span></button>
-        <button class="tab" type="button" data-input-tab="office" disabled title="Load and translate a DOCX or ODT file as text." data-title-key="tipTabOffice"><span class="tab-label">DOC File</span></button>
-        <button class="tab" type="button" data-input-tab="pptx" disabled title="Load and translate a PowerPoint (PPTX) file as text." data-title-key="tipTabPptx"><span class="tab-label">PPTX File</span></button>
-        <button class="tab" type="button" data-input-tab="csv" disabled title="Load and translate selected CSV or XLSX columns." data-title-key="tipTabCsv"><span class="tab-label">CSV File</span></button>
-        <button class="tab active" type="button" data-input-tab="pdf" title="Extract and translate a PDF page by page." data-title-key="tipTabPdf"><span class="tab-label">PDF</span></button>
+      <div class="tabs-row">
+        <div class="tabs" role="tablist" aria-label="Input type">
+          <button class="tab" type="button" data-input-tab="textarea" disabled title="Type text directly into the input field." data-title-key="tipTabTextarea"><span class="tab-label">Text Field</span></button>
+          <button class="tab" type="button" data-input-tab="text" disabled title="Load and translate a TXT file, and also HTML, SRT, VTT, JSON, YAML, PO or XLIFF." data-title-key="tipTabText"><span class="tab-label">TXT File</span></button>
+          <button class="tab" type="button" data-input-tab="markdown" disabled title="Load and translate a Markdown file." data-title-key="tipTabMarkdown"><span class="tab-label">Markdown</span></button>
+          <button class="tab" type="button" data-input-tab="website" disabled title="Translate a public web page from its address. Built, still to be tested." data-title-key="tipTabWebsite"><span class="tab-label">Website</span></button>
+          <button class="tab" type="button" data-input-tab="office" disabled title="Load and translate a DOCX or ODT file as text." data-title-key="tipTabOffice"><span class="tab-label">DOC File</span></button>
+          <button class="tab" type="button" data-input-tab="pptx" disabled title="Load and translate a PowerPoint (PPTX) file as text." data-title-key="tipTabPptx"><span class="tab-label">PPTX File</span></button>
+          <button class="tab" type="button" data-input-tab="csv" disabled title="Load and translate selected CSV or XLSX columns." data-title-key="tipTabCsv"><span class="tab-label">CSV File</span></button>
+          <button class="tab active" type="button" data-input-tab="pdf" title="Extract and translate a PDF page by page." data-title-key="tipTabPdf"><span class="tab-label">PDF</span></button>
+        </div>
+        <select id="inputTabSelect" class="input-tab-select" aria-label="Input type" title="Select the input type." data-title-key="tipInputType">
+          <option value="textarea" disabled>Text Field</option>
+          <option value="text" disabled>TXT File</option>
+          <option value="markdown" disabled>Markdown</option>
+          <option value="website" disabled>Website</option>
+          <option value="office" disabled>DOC File</option>
+          <option value="pptx" disabled>PPTX File</option>
+          <option value="csv" disabled>CSV File</option>
+          <option value="pdf">PDF</option>
+        </select>
+        <button id="clearInput" class="secondary clear-input" type="button" title="Clear the current input and result." data-title-key="tipClear" aria-label="Clear">&#10005;</button>
       </div>
-      <select id="inputTabSelect" class="input-tab-select" aria-label="Input type" title="Select the input type." data-title-key="tipInputType">
-        <option value="textarea" disabled>Text Field</option>
-        <option value="text" disabled>TXT File</option>
-        <option value="markdown" disabled>Markdown</option>
-        <option value="website" disabled>Website</option>
-        <option value="office" disabled>DOC File</option>
-        <option value="pptx" disabled>PPTX File</option>
-        <option value="csv" disabled>CSV File</option>
-        <option value="pdf">PDF</option>
-      </select>
 
       <div class="row">
         <div class="language-field" data-picker="source">
@@ -101,7 +104,6 @@
 
     <div id="primaryActions" class="actions actions-right primary-actions">
       <button id="translate" title="Start a new translation for the current input." data-title-key="tipTranslate">Translate Input</button>
-      <button id="clearInput" class="secondary" type="button" title="Clear the current input and result." data-title-key="tipClear">Clear</button>
     </div>
 
     <section id="jobsPanel" class="section workspace-section">
