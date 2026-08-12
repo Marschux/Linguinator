@@ -1792,6 +1792,14 @@ let languageData = null;
       row.appendChild(tick);
       row.appendChild(main);
       row.appendChild(actions);
+      // Clicking a running job in the list above attaches it to this browser's tab title;
+      // clicking a finished one here lets go of it again. The marking on the row stays, it says
+      // who started the job, not what the tab is showing.
+      row.title = t("unwatchJob");
+      row.addEventListener("click", (event) => {
+        if (event.target.closest(".history-actions") || event.target.closest("a")) return;
+        unwatchJob();
+      });
       return row;
     }
 
