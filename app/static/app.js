@@ -53,12 +53,10 @@ let languageData = null;
         stop: "Stop",
         skip: "Skip",
         history: "History",
-        noQueuedJobs: "No queued jobs.",
         noHistory: "No saved translations yet.",
         noHistoryMatch: "No history entries match this filter.",
         pageInfo: "Page {page} / {total}",
         queued: "Queued",
-        completedSection: "Completed",
         jobDone: "Done",
         queuePosition: "Queue position #{position}",
         watchJob: "Click to track this job in the progress bar and tab title.",
@@ -154,12 +152,10 @@ let languageData = null;
         stop: "Stoppen",
         skip: "Ueberspringen",
         history: "History",
-        noQueuedJobs: "Keine wartenden Jobs.",
         noHistory: "Noch keine gespeicherten Uebersetzungen.",
         noHistoryMatch: "Kein History-Eintrag passt zu diesem Filter.",
         pageInfo: "Seite {page} / {total}",
         queued: "Eingereiht",
-        completedSection: "Fertig",
         jobDone: "Fertig",
         queuePosition: "Warteschlangenposition #{position}",
         watchJob: "Klicken, um diesen Job im Fortschrittsbalken und Tab-Titel zu verfolgen.",
@@ -255,12 +251,10 @@ let languageData = null;
         stop: "Detener",
         skip: "Omitir",
         history: "Historial",
-        noQueuedJobs: "No hay trabajos en cola.",
         noHistory: "Aun no hay traducciones guardadas.",
         noHistoryMatch: "Ningun elemento del historial coincide con este filtro.",
         pageInfo: "Pagina {page} / {total}",
         queued: "En cola",
-        completedSection: "Completados",
         jobDone: "Listo",
         queuePosition: "Posicion en cola #{position}",
         watchJob: "Haz clic para seguir este trabajo en la barra de progreso y el titulo de la pestana.",
@@ -356,12 +350,10 @@ let languageData = null;
         stop: "Arreter",
         skip: "Passer",
         history: "Historique",
-        noQueuedJobs: "Aucun job en file.",
         noHistory: "Aucune traduction enregistree.",
         noHistoryMatch: "Aucun element de l'historique ne correspond a ce filtre.",
         pageInfo: "Page {page} / {total}",
         queued: "En file",
-        completedSection: "Termines",
         jobDone: "Termine",
         queuePosition: "Position en file #{position}",
         watchJob: "Cliquer pour suivre ce job dans la barre de progression et le titre de l'onglet.",
@@ -573,8 +565,6 @@ let languageData = null;
       if (uiLanguage) uiLanguage.value = currentUiLanguage;
       setText(".subtle", "subtitle");
       setText('label[for="uiLanguage"]', "uiLanguage");
-      setText("#queueHeading", "queue");
-      setText("#historyHeading", "completedSection");
       setText('label[for="source"]', "source");
       setText('label[for="target"]', "target");
       setText('[data-input-tab="textarea"] .tab-label', "textField");
@@ -1369,7 +1359,6 @@ let languageData = null;
     function renderQueueRows() {
       const queue = document.getElementById("queue");
       queue.innerHTML = "";
-      queue.classList.remove("queue-empty-message");
       const activeItems = queueItems.filter((job) => !["complete", "failed", "cancelled"].includes(job.status));
       const doneItems = queueItems.filter(
         (job) => job.status === "complete" && Date.now() - (completedShownAt.get(job.id) || 0) < DONE_ROW_MS);
@@ -1385,13 +1374,6 @@ let languageData = null;
       if (activeItems.length && !hadActiveJobs) openJobsPanel();
       hadActiveJobs = activeItems.length > 0;
       if (statusRow) queue.appendChild(statusRowElement());
-      if (!visibleItems.length) {
-        if (!statusRow) {
-          queue.textContent = t("noQueuedJobs");
-          queue.classList.add("queue-empty-message");
-        }
-        return;
-      }
       for (const job of visibleItems) {
         const done = job.status === "complete";
         const row = document.createElement("div");

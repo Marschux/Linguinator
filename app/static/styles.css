@@ -514,31 +514,11 @@
       border: 1px solid var(--line);
       border-radius: 8px;
       color: var(--text);
-      flex: 1 1 12rem;
       font: inherit;
-      max-width: 22rem;
-      padding: .45rem .7rem;
+      padding: .6rem .8rem;
+      width: 100%;
     }
 
-    .section-subheading {
-      color: var(--muted);
-      font-size: .85rem;
-      font-weight: 800;
-      letter-spacing: .04em;
-      margin: 1.1rem 0 .45rem;
-      text-transform: uppercase;
-    }
-
-    /* The queue block above and the history block below, told apart by a rule rather than by a
-       second panel. */
-    .section-subheading-split {
-      align-items: center;
-      border-top: 1px solid rgba(var(--overlay-rgb), .12);
-      display: flex;
-      gap: 1rem;
-      justify-content: space-between;
-      padding-top: 1.1rem;
-    }
     .counter {
       color: var(--muted);
       font-size: .9rem;
@@ -548,15 +528,18 @@
 
     .counter.over { color: var(--warn); }
 
-    .queue {
+    /* One list, not two: the queue and the history hand their rows to the same grid, so a job
+       simply moves down it as it finishes instead of crossing a border between panels. */
+    .jobs-list {
+      align-content: start;
       display: grid;
       gap: .55rem;
       margin-top: .8rem;
+      min-height: 24rem;
     }
 
-    .queue:empty { display: none; }
-
-    .queue-empty-message { padding-left: 5ch; }
+    .queue,
+    .history { display: contents; }
 
     .queue-row {
       align-items: center;
@@ -580,6 +563,15 @@
       background: rgba(34, 197, 94, .12);
       border-color: #22c55e;
     }
+
+    /* Waiting, not working: told apart from the running job at a glance. */
+    .queue-row.status-queued {
+      background: rgba(245, 197, 66, .12);
+      border-color: var(--warn);
+    }
+
+    .queue-row.status-queued .queue-title,
+    .queue-row.status-queued .queue-ring-label { color: var(--warn); }
 
     .queue-row.status-complete .queue-title { color: var(--ok-text); }
 
@@ -611,6 +603,7 @@
       transition: stroke-dasharray .2s ease;
     }
 
+    .queue-row.status-queued .queue-ring-fill,
     .queue-row.status-paused .queue-ring-fill { stroke: var(--warn); }
     .queue-row.status-complete .queue-ring-fill { stroke: #22c55e; }
     .queue-row.status-failed .queue-ring-fill { stroke: #ef4444; }
@@ -683,14 +676,6 @@
     .queue-actions button {
       min-height: 2.25rem;
       padding: .4rem .7rem;
-    }
-
-    .history {
-      align-content: start;
-      display: grid;
-      gap: .55rem;
-      margin-top: .8rem;
-      min-height: 24rem;
     }
 
     .history-toggle {

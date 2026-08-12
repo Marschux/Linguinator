@@ -117,13 +117,11 @@
         </div>
       </div>
       <div id="jobsBody">
-        <div id="queueHeading" class="section-subheading">Queue</div>
-        <div id="queue" class="queue"></div>
-        <div class="section-subheading section-subheading-split">
-          <span id="historyHeading">Completed</span>
-          <input id="historyFilter" type="text" placeholder="Filter history..." title="Filter history by filename or languages." data-title-key="tipHistoryFilter">
+        <input id="historyFilter" type="text" placeholder="Filter history..." title="Filter history by filename or languages." data-title-key="tipHistoryFilter">
+        <div class="jobs-list">
+          <div id="queue" class="queue"></div>
+          <div id="history" class="history"></div>
         </div>
-        <div id="history" class="history"></div>
         <div id="historyPagination" class="actions history-pagination invisible">
           <button id="historyPrevPage" class="secondary" type="button" title="Previous page." data-title-key="tipPrevPage">&#8249;</button>
           <span id="historyPageInfo" class="section-meta"></span>
