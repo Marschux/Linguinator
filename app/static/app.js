@@ -59,7 +59,8 @@ let languageData = null;
         queued: "Queued",
         jobDone: "Done",
         queuePosition: "Queue position #{position}",
-        watchJob: "Click to track this job in the progress bar and tab title.",
+        watchJob: "Click to follow this job in the tab title.",
+        unwatchJob: "Click to stop following it; the tab title goes back to plain Linguinator.",
         started: "Started",
         chunks: "chunks",
         jobFailed: "Job failed.",
@@ -158,7 +159,8 @@ let languageData = null;
         queued: "Eingereiht",
         jobDone: "Fertig",
         queuePosition: "Warteschlangenposition #{position}",
-        watchJob: "Klicken, um diesen Job im Fortschrittsbalken und Tab-Titel zu verfolgen.",
+        watchJob: "Klicken, um diesen Job im Tab-Titel zu verfolgen.",
+        unwatchJob: "Klicken, um die Verfolgung zu beenden; der Tab-Titel zeigt wieder nur Linguinator.",
         started: "Gestartet",
         chunks: "Chunks",
         jobFailed: "Job fehlgeschlagen.",
@@ -257,7 +259,8 @@ let languageData = null;
         queued: "En cola",
         jobDone: "Listo",
         queuePosition: "Posicion en cola #{position}",
-        watchJob: "Haz clic para seguir este trabajo en la barra de progreso y el titulo de la pestana.",
+        watchJob: "Haz clic para seguir este trabajo en el titulo de la pestana.",
+        unwatchJob: "Haz clic para dejar de seguirlo; el titulo vuelve a ser solo Linguinator.",
         started: "Iniciado",
         chunks: "fragmentos",
         jobFailed: "El trabajo fallo.",
@@ -356,7 +359,8 @@ let languageData = null;
         queued: "En file",
         jobDone: "Termine",
         queuePosition: "Position en file #{position}",
-        watchJob: "Cliquer pour suivre ce job dans la barre de progression et le titre de l'onglet.",
+        watchJob: "Cliquer pour suivre ce job dans le titre de l'onglet.",
+        unwatchJob: "Cliquer pour ne plus le suivre ; le titre revient a Linguinator seul.",
         started: "Demarre",
         chunks: "segments",
         jobFailed: "Le job a echoue.",
@@ -1433,10 +1437,13 @@ let languageData = null;
           row.appendChild(actions);
         }
         row.classList.toggle("watched", job.id === activeJobId);
-        row.title = t("watchJob");
+        row.title = done ? t("unwatchJob") : t("watchJob");
         row.addEventListener("click", (event) => {
           if (event.target.closest(".queue-actions")) return;
-          watchJob(job.id);
+          // A finished job has nothing left to follow: clicking it drops the selection, and the
+          // tab title goes back to plain Linguinator.
+          if (done) unwatchJob();
+          else watchJob(job.id);
         });
         queue.appendChild(row);
       }
@@ -1458,6 +1465,15 @@ let languageData = null;
     }
 
     let pollToken = 0;
+
+    function unwatchJob() {
+      // Bumping the token stops whatever pollJob loop is running, so no later answer of its own
+      // puts the title back.
+      pollToken += 1;
+      activeJobId = null;
+      document.title = baseTitle;
+      renderQueueRows();
+    }
 
     function watchJob(jobId) {
       ensureAudioContext();
