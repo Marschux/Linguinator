@@ -214,6 +214,11 @@ CORE_LANGUAGES = {
     "hu": "hun_Latn", "bg": "bul_Cyrl",
     "ar": "arb_Arab", "zh": "zho_Hans", "ja": "jpn_Jpan", "he": "heb_Hebr",
     "hi": "hin_Deva", "vi": "vie_Latn", "id": "ind_Latn", "tr": "tur_Latn", "sq": "sqi_Latn",
+    # No dedicated pair model exists for Latin, and langdetect cannot name it, so auto-detect will
+    # read a Latin source as Italian or Romanian - it has to be set by hand. The fallback answers
+    # in Latin (>>lat<< is in its vocabulary, checked) but reaches for the vocabulary of its bible
+    # training: "Der Hund schlaeft im Garten" came back as "Canis dormit in jardine".
+    "la": "lat_Latn",
 }
 INTERNAL_TO_ISO_639_1 = {internal: short for short, internal in CORE_LANGUAGES.items()}
 
@@ -262,7 +267,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.10.16", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.10.17", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
