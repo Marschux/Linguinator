@@ -1292,6 +1292,55 @@ let languageData = null;
       return button;
     }
 
+    // How long a finished job stays in the queue, marked done, before it drops out of the list.
+    const DONE_ROW_MS = 6000;
+    const completedShownAt = new Map();
+    let queueLoaded = false;
+
+    function queueRing(job) {
+      const ring = document.createElement("div");
+      const done = job.status === "complete";
+      const failed = job.status === "failed";
+      // Nothing to count yet: the file is still being read or uploaded, so the ring turns
+      // instead of filling.
+      const spinning = job.status === "extracting";
+      ring.className = "queue-ring" + (spinning ? " indeterminate" : "");
+      // A quarter of the ring is what turns; a full or empty one would show no movement at all.
+      const percent = done || failed ? 100
+        : spinning ? 25 : Math.max(0, Math.min(100, Number(job.percent) || 0));
+      // 2 * PI * r, with r = 16 in the 36x36 viewBox the circles are drawn in.
+      const circumference = 100.53;
+      let label;
+      if (done) label = "✓";
+      else if (failed) label = "!";
+      else if (spinning) label = "";
+      else if (job.status === "queued" && job.position) label = "#" + job.position;
+      else label = Math.round(percent);
+      ring.innerHTML =
+        '<svg viewBox="0 0 36 36" aria-hidden="true">' +
+          '<circle class="queue-ring-track" cx="18" cy="18" r="16"/>' +
+          '<circle class="queue-ring-fill" cx="18" cy="18" r="16" stroke-dasharray="' +
+            (percent / 100 * circumference).toFixed(2) + ' ' + circumference + '"/>' +
+        '</svg>' +
+        '<span class="queue-ring-label">' + escapeHtml(label) + '</span>';
+      return ring;
+    }
+
+    function statusRowElement() {
+      const row = document.createElement("div");
+      row.className = "queue-row status-" + statusRow.status;
+      // The message alone, in the title line: the ring already says whether this is work in
+      // progress or a failure, and the raw status word ("failed") is not translated anyway.
+      const main = document.createElement("div");
+      const title = document.createElement("div");
+      title.className = "queue-title";
+      title.textContent = statusRow.info;
+      main.appendChild(title);
+      row.appendChild(queueRing(statusRow));
+      row.appendChild(main);
+      return row;
+    }
+
     async function loadQueue() {
       const response = await fetch("jobs");
       if (!response.ok) return;

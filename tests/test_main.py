@@ -485,6 +485,10 @@ class MainTests(unittest.TestCase):
         # Queue and history are one panel, and the progress bar above the buttons is gone with
         # it: a running job is shown by its own row's ring, nowhere else.
         self.assertIn('id="jobsPanel"', template)
+        # Both were once deleted along with a neighbouring block, and the Translate button went
+        # dead with them: every click ended in a ReferenceError before the upload.
+        self.assertIn("function queueRing(", script)
+        self.assertIn("function statusRowElement(", script)
         self.assertNotIn('id="progress"', template)
         self.assertNotIn("ownJobBanner", template)
         self.assertNotIn('fetch("/', script)
