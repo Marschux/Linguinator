@@ -514,10 +514,30 @@
       border: 1px solid var(--line);
       border-radius: 8px;
       color: var(--text);
+      flex: 1 1 12rem;
       font: inherit;
-      margin-top: .8rem;
-      padding: .6rem .8rem;
-      width: 100%;
+      max-width: 22rem;
+      padding: .45rem .7rem;
+    }
+
+    .section-subheading {
+      color: var(--muted);
+      font-size: .85rem;
+      font-weight: 800;
+      letter-spacing: .04em;
+      margin: 1.1rem 0 .45rem;
+      text-transform: uppercase;
+    }
+
+    /* The queue block above and the history block below, told apart by a rule rather than by a
+       second panel. */
+    .section-subheading-split {
+      align-items: center;
+      border-top: 1px solid rgba(var(--overlay-rgb), .12);
+      display: flex;
+      gap: 1rem;
+      justify-content: space-between;
+      padding-top: 1.1rem;
     }
     .counter {
       color: var(--muted);
@@ -527,75 +547,6 @@
     }
 
     .counter.over { color: var(--warn); }
-
-    .progress {
-      background: rgba(var(--overlay-rgb), .04);
-      border: 1px solid rgba(var(--overlay-rgb), .07);
-      border-radius: 8px;
-      color: var(--muted);
-      margin: 0 0 1.2rem;
-      min-height: 4.2rem;
-      padding: 1.05rem .85rem .7rem;
-    }
-
-    .own-job-banner {
-      background: rgba(34, 197, 94, .12);
-      border: 1px solid #22c55e;
-      border-radius: 8px;
-      color: var(--text);
-      margin: 0 0 1.2rem;
-      padding: .7rem .85rem;
-    }
-    .own-job-banner p { margin: 0 0 .5rem; }
-    .own-job-banner .history-row,
-    .own-job-banner .history-row.history-row-own-current { background: transparent; border-color: rgba(var(--overlay-rgb), .15); }
-
-    .progress:empty { display: none; }
-    .progress-top {
-      align-items: center;
-      display: flex;
-      gap: .55rem;
-      justify-content: space-between;
-      margin-bottom: .55rem;
-    }
-
-    .progress-status { font-weight: 800; text-transform: capitalize; }
-    .progress-info { overflow-wrap: anywhere; text-align: right; }
-    .progress-track {
-      background: rgba(var(--overlay-rgb), .08);
-      border-radius: 999px;
-      height: .55rem;
-      overflow: hidden;
-    }
-
-    .progress-fill {
-      background: var(--accent);
-      border-radius: inherit;
-      height: 100%;
-      transition: width .2s ease;
-      width: 0%;
-    }
-
-    .progress.running .progress-fill,
-    .progress.queued .progress-fill { background: var(--accent); }
-    .progress.extracting .progress-fill {
-      animation: progress-indeterminate 1.1s ease-in-out infinite;
-      background: var(--accent);
-      width: 40%;
-    }
-
-    @keyframes progress-indeterminate {
-      0% { margin-left: -40%; }
-      100% { margin-left: 100%; }
-    }
-    .progress.complete .progress-fill { background: #22c55e; }
-    .progress.paused .progress-fill { background: var(--warn); }
-    .progress.failed .progress-fill,
-    .progress.cancelled .progress-fill { background: #ef4444; }
-    .progress.complete .progress-status { color: var(--ok-text); }
-    .progress.paused .progress-status { color: var(--warn); }
-    .progress.failed .progress-status,
-    .progress.cancelled .progress-status { color: var(--err-text); }
 
     .queue {
       display: grid;
@@ -662,6 +613,23 @@
 
     .queue-row.status-paused .queue-ring-fill { stroke: var(--warn); }
     .queue-row.status-complete .queue-ring-fill { stroke: #22c55e; }
+    .queue-row.status-failed .queue-ring-fill { stroke: #ef4444; }
+
+    .queue-row.status-failed {
+      background: rgba(239, 68, 68, .1);
+      border-color: #ef4444;
+    }
+
+    .queue-row.status-failed .queue-title,
+    .queue-row.status-failed .queue-ring-label { color: var(--err-text); }
+
+    /* Reading a file or uploading it has nothing to count, so the ring turns instead. */
+    .queue-ring.indeterminate svg { animation: queue-ring-spin 1.1s linear infinite; }
+
+    @keyframes queue-ring-spin {
+      from { transform: rotate(-90deg); }
+      to { transform: rotate(270deg); }
+    }
 
     .queue-ring-label {
       color: var(--text);
@@ -762,7 +730,14 @@
       padding: .7rem .85rem;
     }
 
-    .history-main { min-width: 0; }
+    .history-tick {
+      color: #22c55e;
+      flex: 0 0 2.6rem;
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .history-main { min-width: 0; flex: 1 1 auto; }
     .history-meta { color: var(--muted); font-size: .85rem; margin-top: .15rem; overflow-wrap: anywhere; }
     .history-actions {
       align-items: center;

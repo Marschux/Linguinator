@@ -10,6 +10,8 @@ let languageData = null;
     // which case its own choice wins over the installation's default.
     let currentUiLanguage = localStorage.getItem("linguinator_ui_language") || "en";
     let historyItems = [];
+    let queueItems = [];
+    let hadActiveJobs = false;
     let historyPage = 0;
     let historyFilterText = "";
     let historyTimezone = "UTC";
@@ -56,6 +58,7 @@ let languageData = null;
         noHistoryMatch: "No history entries match this filter.",
         pageInfo: "Page {page} / {total}",
         queued: "Queued",
+        completedSection: "Completed",
         jobDone: "Done",
         queuePosition: "Queue position #{position}",
         watchJob: "Click to track this job in the progress bar and tab title.",
@@ -106,7 +109,6 @@ let languageData = null;
         tipPageRange: "Optional page range, e.g. 1-3,5. Leave empty to translate all pages.",
         tipTranslate: "Start a new translation for the current input.",
         tipClear: "Clear the current input and result.",
-        tipQueueToggle: "Show or hide the queue list.",
         tipPause: "Pause the entire queue.",
         tipResume: "Resume the entire queue.",
         tipStop: "Cancel the entire queue.",
@@ -119,7 +121,6 @@ let languageData = null;
         modelFallback: "No dedicated model for this pair, using the multilingual fallback.",
         modelAutoDetect: "Detected automatically. Scans take longer, and a scan mixing two scripts needs the language set.",
         autoDetect: "Auto-detect",
-        ownJobDone: "Your job is done:"
       },
       de: {
         uiLanguage: "UI-Sprache",
@@ -158,6 +159,7 @@ let languageData = null;
         noHistoryMatch: "Kein History-Eintrag passt zu diesem Filter.",
         pageInfo: "Seite {page} / {total}",
         queued: "Eingereiht",
+        completedSection: "Fertig",
         jobDone: "Fertig",
         queuePosition: "Warteschlangenposition #{position}",
         watchJob: "Klicken, um diesen Job im Fortschrittsbalken und Tab-Titel zu verfolgen.",
@@ -208,7 +210,6 @@ let languageData = null;
         tipPageRange: "Optionaler Seitenbereich, z. B. 1-3,5. Leer uebersetzt alle Seiten.",
         tipTranslate: "Neue Uebersetzung fuer die aktuelle Eingabe starten.",
         tipClear: "Aktuelle Eingabe und Ergebnis leeren.",
-        tipQueueToggle: "Warteschlange ein- oder ausklappen.",
         tipPause: "Gesamte Warteschlange pausieren.",
         tipResume: "Gesamte Warteschlange fortsetzen.",
         tipStop: "Gesamte Warteschlange abbrechen.",
@@ -221,7 +222,6 @@ let languageData = null;
         modelFallback: "Kein eigenes Modell fuer dieses Paar, nutzt den mehrsprachigen Fallback.",
         modelAutoDetect: "Wird automatisch erkannt. Scans dauern laenger, bei zwei Schriften die Sprache selbst setzen.",
         autoDetect: "Automatisch erkennen",
-        ownJobDone: "Dein Job ist fertig:"
       },
       es: {
         uiLanguage: "Idioma de UI",
@@ -260,6 +260,7 @@ let languageData = null;
         noHistoryMatch: "Ningun elemento del historial coincide con este filtro.",
         pageInfo: "Pagina {page} / {total}",
         queued: "En cola",
+        completedSection: "Completados",
         jobDone: "Listo",
         queuePosition: "Posicion en cola #{position}",
         watchJob: "Haz clic para seguir este trabajo en la barra de progreso y el titulo de la pestana.",
@@ -310,7 +311,6 @@ let languageData = null;
         tipPageRange: "Rango de paginas opcional, p. ej. 1-3,5. Vacio traduce todas.",
         tipTranslate: "Iniciar una traduccion para la entrada actual.",
         tipClear: "Limpiar la entrada y el resultado actuales.",
-        tipQueueToggle: "Mostrar u ocultar la cola.",
         tipPause: "Pausar toda la cola.",
         tipResume: "Continuar toda la cola.",
         tipStop: "Cancelar toda la cola.",
@@ -323,7 +323,6 @@ let languageData = null;
         modelFallback: "Sin modelo dedicado para este par, se usa el alternativo multilingue.",
         modelAutoDetect: "Se detecta automaticamente. Los escaneos tardan mas; si mezclan dos alfabetos, fija el idioma.",
         autoDetect: "Deteccion automatica",
-        ownJobDone: "Tu trabajo esta listo:"
       },
       fr: {
         uiLanguage: "Langue UI",
@@ -362,6 +361,7 @@ let languageData = null;
         noHistoryMatch: "Aucun element de l'historique ne correspond a ce filtre.",
         pageInfo: "Page {page} / {total}",
         queued: "En file",
+        completedSection: "Termines",
         jobDone: "Termine",
         queuePosition: "Position en file #{position}",
         watchJob: "Cliquer pour suivre ce job dans la barre de progression et le titre de l'onglet.",
@@ -412,7 +412,6 @@ let languageData = null;
         tipPageRange: "Plage de pages optionnelle, p. ex. 1-3,5. Vide traduit tout.",
         tipTranslate: "Lancer une traduction pour l'entree actuelle.",
         tipClear: "Effacer l'entree et le resultat actuels.",
-        tipQueueToggle: "Afficher ou masquer la file d'attente.",
         tipPause: "Mettre toute la file en pause.",
         tipResume: "Reprendre toute la file.",
         tipStop: "Annuler toute la file.",
@@ -425,7 +424,6 @@ let languageData = null;
         modelFallback: "Pas de modele dedie pour cette paire, utilise le modele multilingue.",
         modelAutoDetect: "Detectee automatiquement. Les scans prennent plus de temps; si deux ecritures se melangent, choisis la langue.",
         autoDetect: "Detection automatique",
-        ownJobDone: "Ton job est termine :"
       }
     };
     const AUTO_LANGUAGE = {code: "auto", name: "auto"};
@@ -575,7 +573,8 @@ let languageData = null;
       if (uiLanguage) uiLanguage.value = currentUiLanguage;
       setText(".subtle", "subtitle");
       setText('label[for="uiLanguage"]', "uiLanguage");
-      setText('label[for="queue"]', "queue");
+      setText("#queueHeading", "queue");
+      setText("#historyHeading", "completedSection");
       setText('label[for="source"]', "source");
       setText('label[for="target"]', "target");
       setText('[data-input-tab="textarea"] .tab-label', "textField");
@@ -614,7 +613,6 @@ let languageData = null;
       }
       loadQueue().catch(() => {});
       loadHistory().catch(() => {});
-      renderOwnJobBanner();
     }
 
     function setupUiLanguagePicker() {
@@ -1083,14 +1081,14 @@ let languageData = null;
       updateCounter();
       setResult("");
       lastCompletedJob = null;
-      renderOwnJobBanner();
-      clearProgress();
+      renderHistory();
+      clearStatusRow();
     }
 
     async function loadTextFile() {
       const file = document.getElementById("textFile").files[0];
       if (!file) {
-        showProgress("failed", 0, t("selectFileFirst"));
+        setStatusRow("failed", t("selectFileFirst"));
         return;
       }
       const lowerName = file.name.toLowerCase();
@@ -1109,11 +1107,11 @@ let languageData = null;
           form.append("sheet_name", document.getElementById("sheetName").value);
         }
         const path = extractionPathForFile(lowerName);
-        showProgress("extracting", 0, t("extracting") + " " + lowerName.split(".").pop().toUpperCase() + "...");
+        setStatusRow("extracting", t("extracting") + " " + lowerName.split(".").pop().toUpperCase() + "...");
         const response = await fetch(path, {method: "POST", body: form});
         const text = await response.text();
         if (!response.ok) {
-          showProgress("failed", 0, errorTextFromResponse(text));
+          setStatusRow("failed", errorTextFromResponse(text));
           return;
         }
         document.getElementById("text").value = text;
@@ -1125,15 +1123,17 @@ let languageData = null;
       }
       updateCounter();
       setResult("");
-      clearProgress();
+      clearStatusRow();
     }
 
     document.getElementById("loadTextFile").addEventListener("click", loadTextFile);
     document.getElementById("clearInput").addEventListener("click", clearCurrentWork);
 
     function clearOwnJobOnNewFile() {
+      // Drops the green marking off the previous job's history row: a new file means the last
+      // result is no longer what the user is working on.
       lastCompletedJob = null;
-      renderOwnJobBanner();
+      renderHistory();
     }
     document.getElementById("textFile").addEventListener("change", clearOwnJobOnNewFile);
     document.getElementById("pdf").addEventListener("change", clearOwnJobOnNewFile);
@@ -1157,33 +1157,43 @@ let languageData = null;
       }[char]));
     }
 
-    function showProgress(status, percent, info, position, jobLabel) {
-      const progress = document.getElementById("progress");
-      const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+    // Work that has no job of its own yet - extracting a file, uploading, fetching a page - and
+    // every error message. Shown as the first row of the queue, in the shape of a job row, since
+    // that is where the eye already is once something is running.
+    let statusRow = null;
+
+    function setStatusRow(status, info) {
+      statusRow = {status, info};
+      if (status !== "failed") document.title = titleFor(status) + " - " + baseTitle;
+      openJobsPanel();
+      renderQueueRows();
+    }
+
+    function clearStatusRow() {
+      statusRow = null;
+      document.title = baseTitle;
+      renderQueueRows();
+    }
+
+    function titleFor(status, percent, position, label) {
       const titleStatus = status.charAt(0).toUpperCase() + status.slice(1);
       let prefix;
       if ((status === "queued" || status === "running") && position && position > 0) {
         prefix = "#" + position + " " + titleStatus;
-      } else if (status === "extracting") {
+      } else if (percent === undefined) {
         prefix = titleStatus;
       } else {
-        prefix = safePercent + "% " + titleStatus;
+        prefix = Math.max(0, Math.min(100, Number(percent) || 0)) + "% " + titleStatus;
       }
-      document.title = prefix + (jobLabel ? " - " + jobLabel : "") + " - " + baseTitle;
-      progress.className = "progress " + status;
-      progress.innerHTML =
-        '<div class="progress-top">' +
-          '<span class="progress-status">' + escapeHtml(status) + '</span>' +
-          '<span class="progress-info">' + escapeHtml(info) + '</span>' +
-        '</div>' +
-        '<div class="progress-track"><div class="progress-fill" style="width: ' + safePercent + '%"></div></div>';
+      return prefix + (label ? " - " + label : "");
     }
 
-    function clearProgress() {
-      const progress = document.getElementById("progress");
-      document.title = baseTitle;
-      progress.className = "progress";
-      progress.innerHTML = "";
+    // The tab title still follows the job being watched, which is the one thing a row in the
+    // list cannot do for a tab in the background.
+    function updateDocumentTitle(job) {
+      const position = job.position && job.position > 0 ? job.position : undefined;
+      document.title =
+        titleFor(job.status, job.percent || 0, position, job.label || job.kind) + " - " + baseTitle;
     }
 
     async function loadHealth() {
@@ -1258,7 +1268,7 @@ let languageData = null;
       const response = await fetch("jobs/" + jobId + "/" + action, {method: "POST"});
       if (!response.ok) {
         const text = await response.text();
-        showProgress("failed", 0, errorTextFromResponse(text));
+        setStatusRow("failed", errorTextFromResponse(text));
         return null;
       }
       const job = await response.json();
@@ -1276,70 +1286,17 @@ let languageData = null;
       button.addEventListener("click", async () => {
         const updated = await controlJob(job.id, action);
         if (updated && activeJobId === job.id) {
-          updateProgress(updated);
+          updateDocumentTitle(updated);
         }
       });
       return button;
-    }
-
-    function renderOwnJobBanner() {
-      const banner = document.getElementById("ownJobBanner");
-      const primaryActions = document.getElementById("primaryActions");
-      banner.innerHTML = "";
-      const historyItem = lastCompletedJob && lastCompletedJob.history_id
-        ? historyItems.find((item) => item.id === lastCompletedJob.history_id)
-        : null;
-      if (!historyItem) {
-        banner.classList.add("hidden");
-        primaryActions.classList.remove("hidden");
-        return;
-      }
-      banner.classList.remove("hidden");
-      primaryActions.classList.add("hidden");
-      const label = document.createElement("p");
-      label.className = "subtle";
-      label.textContent = t("ownJobDone") + " " + (lastCompletedJob.label || lastCompletedJob.kind) + " (" + t("history") + ")";
-      const row = buildHistoryRow(historyItem);
-      row.querySelector(".history-download").addEventListener("click", () => {
-        setTimeout(() => {
-          lastCompletedJob = null;
-          renderOwnJobBanner();
-        }, 0);
-      });
-      banner.appendChild(label);
-      banner.appendChild(row);
-    }
-
-    // How long a finished job stays in the queue, marked done, before it drops out of the list.
-    const DONE_ROW_MS = 6000;
-    const completedShownAt = new Map();
-    let queueLoaded = false;
-
-    function queueRing(job) {
-      const ring = document.createElement("div");
-      ring.className = "queue-ring";
-      const done = job.status === "complete";
-      const percent = done ? 100 : Math.max(0, Math.min(100, Number(job.percent) || 0));
-      // 2 * PI * r, with r = 16 in the 36x36 viewBox the circles are drawn in.
-      const circumference = 100.53;
-      let label;
-      if (done) label = "✓";
-      else if (job.status === "queued" && job.position) label = "#" + job.position;
-      else label = Math.round(percent);
-      ring.innerHTML =
-        '<svg viewBox="0 0 36 36" aria-hidden="true">' +
-          '<circle class="queue-ring-track" cx="18" cy="18" r="16"/>' +
-          '<circle class="queue-ring-fill" cx="18" cy="18" r="16" stroke-dasharray="' +
-            (percent / 100 * circumference).toFixed(2) + ' ' + circumference + '"/>' +
-        '</svg>' +
-        '<span class="queue-ring-label">' + escapeHtml(label) + '</span>';
-      return ring;
     }
 
     async function loadQueue() {
       const response = await fetch("jobs");
       if (!response.ok) return;
       const data = await response.json();
+      queueItems = data.items;
       let hasNewlyCompleted = false;
       const ownJobIds = getOwnJobIds();
       for (const job of data.items) {
@@ -1357,24 +1314,35 @@ let languageData = null;
       }
       queueLoaded = true;
       if (hasNewlyCompleted) loadHistory();
+      renderQueueRows();
+    }
+
+    function renderQueueRows() {
       const queue = document.getElementById("queue");
       queue.innerHTML = "";
-      const activeItems = data.items.filter((job) => !["complete", "failed", "cancelled"].includes(job.status));
-      const doneItems = data.items.filter(
+      queue.classList.remove("queue-empty-message");
+      const activeItems = queueItems.filter((job) => !["complete", "failed", "cancelled"].includes(job.status));
+      const doneItems = queueItems.filter(
         (job) => job.status === "complete" && Date.now() - (completedShownAt.get(job.id) || 0) < DONE_ROW_MS);
       for (const job of doneItems) {
         // Redraw once the last one's few seconds are up, rather than waiting for the next poll.
-        setTimeout(() => loadQueue().catch(() => {}),
+        setTimeout(() => renderQueueRows(),
                    DONE_ROW_MS - (Date.now() - completedShownAt.get(job.id)) + 100);
       }
       const visibleItems = activeItems.concat(doneItems);
       updateQueueControlButtons(activeItems);
+      // Only when work appears, not for as long as it lasts: reopening it on every poll would
+      // make the panel impossible to close while a job runs.
+      if (activeItems.length && !hadActiveJobs) openJobsPanel();
+      hadActiveJobs = activeItems.length > 0;
+      if (statusRow) queue.appendChild(statusRowElement());
       if (!visibleItems.length) {
-        queue.textContent = t("noQueuedJobs");
-        queue.classList.add("queue-empty-message");
+        if (!statusRow) {
+          queue.textContent = t("noQueuedJobs");
+          queue.classList.add("queue-empty-message");
+        }
         return;
       }
-      queue.classList.remove("queue-empty-message");
       for (const job of visibleItems) {
         const done = job.status === "complete";
         const row = document.createElement("div");
@@ -1399,7 +1367,13 @@ let languageData = null;
         const progressLabel = job.status === "queued" && job.position
           ? t("queuePosition", {position: job.position})
           : (job.percent || 0) + "%";
-        progress.textContent = progressLabel + " | " + (job.current || 0) + " / " + (job.total || 0) + " " + t("chunks") + " | " + (job.message || "");
+        const eta = job.status === "running" ? "ETA " + formatEta(job.eta_seconds) : "";
+        progress.textContent = [
+          progressLabel,
+          (job.current || 0) + " / " + (job.total || 0) + " " + t("chunks"),
+          eta,
+          job.message || "",
+        ].filter(Boolean).join(" | ");
         main.appendChild(title);
         main.appendChild(meta);
         main.appendChild(progress);
@@ -1419,24 +1393,6 @@ let languageData = null;
         });
         queue.appendChild(row);
       }
-    }
-
-    function updateProgress(job) {
-      const current = job.current || 0;
-      const total = job.total || 0;
-      const percent = job.percent || 0;
-      const position = job.position && job.position > 0 ? job.position : undefined;
-      const eta = job.status === "running" ? "ETA " + formatEta(job.eta_seconds) : "";
-      const progressLabel = job.status === "queued" && position
-        ? t("queuePosition", {position})
-        : percent + "%";
-      showProgress(
-        job.status,
-        percent,
-        progressLabel + " | " + current + " / " + total + " chunks | " + eta + " " + (job.message || ""),
-        position,
-        job.label || job.kind
-      );
     }
 
     const QUEUE_CONTROL_STATUSES = {
@@ -1462,25 +1418,27 @@ let languageData = null;
     }
 
     async function pollJob(jobId, token) {
+      // The job has a row of its own from here on; the status row was only standing in for it
+      // while it was being uploaded and queued.
+      statusRow = null;
       while (token === pollToken) {
         const response = await fetch("jobs/" + jobId);
         if (!response.ok) {
           const text = await response.text();
           if (token === pollToken) {
-            showProgress("failed", 0, errorTextFromResponse(text));
+            setStatusRow("failed", errorTextFromResponse(text));
             activeJobId = null;
           }
           return;
         }
         const job = await response.json();
         if (token !== pollToken) return;
-        updateProgress(job);
+        updateDocumentTitle(job);
         if (job.status === "complete") {
           setResult(job.result || "");
           lastCompletedJob = job;
           if (job.history_id && getOwnJobIds().has(job.id)) rememberOwnHistory(job.history_id);
-          renderOwnJobBanner();
-          loadHistory();
+              loadHistory();
           loadQueue();
           playNotificationSound();
           activeJobId = null;
@@ -1493,7 +1451,7 @@ let languageData = null;
           return;
         }
         if (job.status === "failed") {
-          showProgress("failed", job.percent || 0, job.error || t("jobFailed"));
+          setStatusRow("failed", job.error || t("jobFailed"));
           setResult("");
           loadQueue();
           playNotificationSound();
@@ -1520,8 +1478,7 @@ let languageData = null;
       }
       setResult("");
       lastCompletedJob = null;
-      renderOwnJobBanner();
-      showProgress("queued", 0, chunks > 1 ? t("startingChunks", {count: chunks}) : t("starting"));
+      setStatusRow("queued", chunks > 1 ? t("startingChunks", {count: chunks}) : t("starting"));
       let response;
       if (sourceFile) {
         const form = new FormData();
@@ -1545,7 +1502,7 @@ let languageData = null;
       }
       if (!response.ok) {
         const text = await response.text();
-        showProgress("failed", 0, errorTextFromResponse(text));
+        setStatusRow("failed", errorTextFromResponse(text));
         setResult("");
         return;
       }
@@ -1575,7 +1532,7 @@ let languageData = null;
     async function postUrlJob() {
       const url = document.getElementById("websiteUrl").value.trim();
       if (!/^https?:\/\/\S+$/i.test(url)) {
-        showProgress("failed", 0, t("websiteInvalid"));
+        setStatusRow("failed", t("websiteInvalid"));
         return;
       }
       const source = document.getElementById("source").value;
@@ -1591,12 +1548,11 @@ let languageData = null;
       form.append("target", target);
       setResult("");
       lastCompletedJob = null;
-      renderOwnJobBanner();
-      showProgress("extracting", 0, t("fetchingPage"));
+      setStatusRow("extracting", t("fetchingPage"));
       const response = await fetch("jobs/translate-url", {method: "POST", body: form});
       if (!response.ok) {
         const text = await response.text();
-        showProgress("failed", 0, errorTextFromResponse(text));
+        setStatusRow("failed", errorTextFromResponse(text));
         setResult("");
         return;
       }
@@ -1612,7 +1568,7 @@ let languageData = null;
     async function postPdfJob() {
       const file = document.getElementById("pdf").files[0];
       if (!file) {
-        showProgress("failed", 0, t("selectPdfFirst"));
+        setStatusRow("failed", t("selectPdfFirst"));
         return;
       }
       const source = document.getElementById("source").value;
@@ -1629,15 +1585,14 @@ let languageData = null;
       form.append("page_range", document.getElementById("pageRange").value);
       setResult("");
       lastCompletedJob = null;
-      renderOwnJobBanner();
-      showProgress("extracting", 0, t("uploadingPdf"));
+      setStatusRow("extracting", t("uploadingPdf"));
       // Always the layout-preserving job: it falls back to the plain/OCR pipeline server-side
       // for scanned PDFs. Plain output stays available afterwards via the TXT/Markdown/PDF/Doc
       // download buttons, which work from the stored result text regardless of which pipeline ran.
       const response = await fetch("jobs/translate-pdf-layout", {method: "POST", body: form});
       if (!response.ok) {
         const text = await response.text();
-        showProgress("failed", 0, errorTextFromResponse(text));
+        setStatusRow("failed", errorTextFromResponse(text));
         setResult("");
         return;
       }
@@ -1658,7 +1613,7 @@ let languageData = null;
       await Promise.all(eligible.map((job) => controlJob(job.id, action)));
       if (activeJobId) {
         const activeResponse = await fetch("jobs/" + activeJobId);
-        if (activeResponse.ok) updateProgress(await activeResponse.json());
+        if (activeResponse.ok) updateDocumentTitle(await activeResponse.json());
       }
     }
 
@@ -1696,7 +1651,6 @@ let languageData = null;
       const data = await response.json();
       historyItems = data.items || [];
       renderHistory();
-      renderOwnJobBanner();
     }
 
     function filteredHistoryItems() {
@@ -1716,6 +1670,10 @@ let languageData = null;
       } else if (getOwnHistoryIds().has(item.id)) {
         row.classList.add("history-row-own");
       }
+      // Same left column as the queue rows above, where a finished job carries the same tick.
+      const tick = document.createElement("span");
+      tick.className = "history-tick";
+      tick.textContent = "✓";
       const main = document.createElement("div");
       main.className = "history-main";
       const link = document.createElement("a");
@@ -1765,6 +1723,7 @@ let languageData = null;
       actions.className = "history-actions";
       actions.appendChild(format);
       actions.appendChild(download);
+      row.appendChild(tick);
       row.appendChild(main);
       row.appendChild(actions);
       return row;
@@ -1816,6 +1775,17 @@ let languageData = null;
       renderHistory();
     });
 
+    const JOBS_COLLAPSED_KEY = "linguinator_jobs_collapsed";
+
+    // Opened whenever there is something to see, never closed: with the progress bar gone this
+    // list is the only place a running job shows up, and a collapsed panel would hide it. Anyone
+    // who closes it while nothing is running keeps it closed.
+    function openJobsPanel() {
+      const body = document.getElementById("jobsBody");
+      if (!body || !body.classList.contains("hidden")) return;
+      setPanelCollapsed("jobsBody", "jobsCollapseIcon", JOBS_COLLAPSED_KEY, false);
+    }
+
     function setPanelCollapsed(bodyId, iconId, storageKey, collapsed) {
       const body = document.getElementById(bodyId);
       const icon = document.getElementById(iconId);
@@ -1830,14 +1800,13 @@ let languageData = null;
         setPanelCollapsed(bodyId, iconId, storageKey, !body.classList.contains("hidden"));
       });
       // Only an explicit "0" counts as "the user opened it": an absent key is a first visit,
-      // which for the queue and the history means collapsed.
+      // which for this panel means collapsed.
       const stored = localStorage.getItem(storageKey);
       const collapsed = stored === null ? collapsedByDefault : stored === "1";
       setPanelCollapsed(bodyId, iconId, storageKey, collapsed);
     }
 
-    setupPanelCollapse("historyCollapse", "historyBody", "historyCollapseIcon", "linguinator_history_collapsed", true);
-    setupPanelCollapse("queueCollapse", "queueBody", "queueCollapseIcon", "linguinator_queue_collapsed", true);
+    setupPanelCollapse("jobsCollapse", "jobsBody", "jobsCollapseIcon", JOBS_COLLAPSED_KEY, true);
 
     function setTheme(theme) {
       document.documentElement.dataset.theme = theme;
@@ -1857,10 +1826,10 @@ let languageData = null;
 
     setupUiLanguagePicker();
     loadLanguages().catch((error) => {
-      showProgress("failed", 0, error.toString());
+      setStatusRow("failed", error.toString());
     });
     loadHealth().catch((error) => {
-      showProgress("failed", 0, error.toString());
+      setStatusRow("failed", error.toString());
     });
     loadHistory().catch((error) => {
       document.getElementById("history").textContent = error.toString();

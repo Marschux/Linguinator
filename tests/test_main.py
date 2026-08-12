@@ -482,6 +482,11 @@ class MainTests(unittest.TestCase):
         self.assertIn('value="de">Deutsch', template)
         self.assertNotIn("previewToggle", template)
         self.assertNotIn("historyToggle", template)
+        # Queue and history are one panel, and the progress bar above the buttons is gone with
+        # it: a running job is shown by its own row's ring, nowhere else.
+        self.assertIn('id="jobsPanel"', template)
+        self.assertNotIn('id="progress"', template)
+        self.assertNotIn("ownJobBanner", template)
         self.assertNotIn('fetch("/', script)
         self.assertNotIn('href = "/history/', script)
         self.assertIn('fetch("jobs/translate-file"', script)
