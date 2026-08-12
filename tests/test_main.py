@@ -4,6 +4,7 @@ import os
 import shutil
 import socket
 import sys
+import tempfile
 import time
 import unicodedata
 import unittest
@@ -1425,6 +1426,21 @@ class MainTests(unittest.TestCase):
 
         overlay_mock.assert_called_once_with(b"source pdf", "text", "2-5")
         self.assertEqual(result, b"overlay pdf")
+
+    def test_history_original_export_is_built_once_and_reused(self):
+        # Rebuilding a layout PDF per download cost seconds before the button did anything
+        # (measured 2.8 s for 12 pages). The second call must come off the disk.
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(main, "HISTORY_DIR", Path(directory)):
+                with patch.object(main, "export_original_history_content",
+                                  return_value=b"rendered pdf") as export_mock:
+                    first = main.history_original_export("entry", "pdf", b"source", "text", {})
+                    second = main.history_original_export("entry", "pdf", b"source", "text", {})
+
+                export_mock.assert_called_once()
+                self.assertEqual(first, b"rendered pdf")
+                self.assertEqual(second, b"rendered pdf")
+                self.assertTrue(main.history_export_path("entry", "pdf").exists())
 
     def test_pdf_page_runs_maps_baselines_back_into_pdf_user_space(self):
         # MuPDF counts y downwards from the top of the page, the overlay is drawn in PDF user
