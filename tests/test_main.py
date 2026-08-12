@@ -1427,6 +1427,18 @@ class MainTests(unittest.TestCase):
         overlay_mock.assert_called_once_with(b"source pdf", "text", "2-5")
         self.assertEqual(result, b"overlay pdf")
 
+    def test_list_jobs_leaves_the_translated_text_out(self):
+        # The UI polls /jobs every few seconds and shows none of the result; carrying it along
+        # made the answer 136 KB on a machine with a few finished documents on it.
+        with patch.dict(main.JOBS, {"j1": {"id": "j1", "status": "complete", "queued_at": 1.0,
+                                           "result": "a whole translated document"}}, clear=True):
+            listed = main.list_jobs()
+            single = main.public_job(main.JOBS["j1"])
+
+        self.assertNotIn("result", listed[0])
+        # The single-job route still hands it back, which is where the UI reads it from.
+        self.assertEqual(single["result"], "a whole translated document")
+
     def test_history_original_export_is_built_once_and_reused(self):
         # Rebuilding a layout PDF per download cost seconds before the button did anything
         # (measured 2.8 s for 12 pages). The second call must come off the disk.

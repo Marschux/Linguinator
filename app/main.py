@@ -257,7 +257,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.10.12", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.10.13", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -1100,6 +1100,7 @@ def history_export_path(item_id: str, extension: str) -> Path:
     bytes, so it is produced once - by the job that created the entry, or by the first download of
     an older one - and served from disk afterwards.
     """
+    history_paths(item_id)  # rejects an id that would point outside the history directory
     safe_extension = file_extension("x." + extension)
     return HISTORY_DIR / f"{item_id}.export.{safe_extension}"
 
@@ -1290,11 +1291,18 @@ def queue_positions_by_job_id() -> Dict[str, int]:
 
 
 def list_jobs():
+    """The queue as the UI polls it, every few seconds, without the translated text.
+
+    A finished job keeps its whole result in memory for /jobs/{id} to hand back, and carrying that
+    through the listing made the answer 136 KB where the list shows none of it - three seconds
+    later, and again three seconds after that, for every open tab.
+    """
     with JOBS_LOCK:
         positions = queue_positions_by_job_id()
         jobs = [public_job(job) for job in sorted(JOBS.values(), key=job_sort_key)]
         for job in jobs:
             job["position"] = positions.get(job["id"])
+            job.pop("result", None)
         return jobs
 
 
@@ -4114,8 +4122,13 @@ def run_pdf_layout_translate_job(
             {"layout": "true", "page_range": page_range},
         )
         update_job(job_id, message="Rendering PDF")
-        history_original_export(history_id, "pdf", content, result,
-                                {"layout": "true", "page_range": page_range})
+        try:
+            history_original_export(history_id, "pdf", content, result,
+                                    {"layout": "true", "page_range": page_range})
+        except Exception:
+            # The translation is done and saved; only the head start on the download is lost, and
+            # the download builds it again. Failing the whole job over that would throw away work.
+            pass
         update_job(
             job_id,
             status="complete",

@@ -385,16 +385,6 @@
       padding: .7rem .8rem;
     }
 
-    .check-row {
-      align-items: center;
-      color: var(--muted);
-      display: flex;
-      gap: .55rem;
-      margin-top: .8rem;
-    }
-
-    .check-row input { accent-color: var(--accent); }
-    .check-row label { color: var(--muted); font-weight: 600; margin-bottom: 0; }
 
     button {
       background: var(--accent);

@@ -43,7 +43,7 @@ http://localhost:5051/
 3. For file inputs, select the file and click `Load File` if the tab uses the shared text input.
 4. Click `Translate Input`.
 5. Use `Pause`, `Resume`, or `Stop` for running jobs.
-6. Review the preview and the history below it.
+6. Follow the job in the list below, where it moves from the queue into the history when it finishes.
 7. Choose a download format and click `Download`.
 
 For large jobs, the browser tab title shows the current progress and job status.
@@ -85,7 +85,7 @@ is not a setting either: the GPU is used when there is one, the CPU otherwise.
 
 | Path in the container | Volume | Contents |
 | --- | --- | --- |
-| `/data/history` | `history` | Saved translations, retained source files, metadata. Cleaned up after `LINGUINATOR_HISTORY_DAYS`. |
+| `/data/history` | `history` | Saved translations, retained source files, prepared original-format downloads, metadata. Cleaned up after `LINGUINATOR_HISTORY_DAYS`. |
 | `/data/history/jobs` | `history` | Queue state and pending payloads, so jobs survive a restart. |
 | `/cache/huggingface` | `hf-cache` | Downloaded models. Several GB once a few language pairs have been used; nothing removes them automatically. |
 
