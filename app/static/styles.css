@@ -616,7 +616,7 @@
       cursor: pointer;
       display: grid;
       gap: .75rem;
-      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-columns: auto minmax(0, 1fr) auto;
       padding: .7rem .85rem;
     }
 
@@ -624,6 +624,53 @@
       background: rgba(47, 125, 246, .12);
       border-color: var(--accent);
     }
+
+    .queue-row.status-complete {
+      background: rgba(34, 197, 94, .12);
+      border-color: #22c55e;
+    }
+
+    .queue-row.status-complete .queue-title { color: var(--ok-text); }
+
+    .queue-ring {
+      display: grid;
+      height: 2.6rem;
+      place-items: center;
+      position: relative;
+      width: 2.6rem;
+    }
+
+    .queue-ring svg {
+      height: 100%;
+      /* From the top, clockwise, the way a clock reads. */
+      transform: rotate(-90deg);
+      width: 100%;
+    }
+
+    .queue-ring circle {
+      fill: none;
+      stroke-width: 3.5;
+    }
+
+    .queue-ring-track { stroke: rgba(var(--overlay-rgb), .12); }
+
+    .queue-ring-fill {
+      stroke: var(--accent);
+      stroke-linecap: round;
+      transition: stroke-dasharray .2s ease;
+    }
+
+    .queue-row.status-paused .queue-ring-fill { stroke: var(--warn); }
+    .queue-row.status-complete .queue-ring-fill { stroke: #22c55e; }
+
+    .queue-ring-label {
+      color: var(--text);
+      font-size: .72rem;
+      font-weight: 800;
+      position: absolute;
+    }
+
+    .queue-row.status-complete .queue-ring-label { color: var(--ok-text); }
 
     .history-row.history-row-own-current {
       background: rgba(34, 197, 94, .12);
@@ -831,9 +878,12 @@
       }
 
       .queue-row {
-        align-items: stretch;
-        grid-template-columns: 1fr;
+        align-items: center;
+        grid-template-columns: auto minmax(0, 1fr);
       }
+
+      /* Under the row rather than beside it, so the narrow column keeps its text width. */
+      .queue-row .queue-actions { grid-column: 1 / -1; }
 
       .queue-actions {
         display: grid;

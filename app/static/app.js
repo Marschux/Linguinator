@@ -56,6 +56,7 @@ let languageData = null;
         noHistoryMatch: "No history entries match this filter.",
         pageInfo: "Page {page} / {total}",
         queued: "Queued",
+        jobDone: "Done",
         queuePosition: "Queue position #{position}",
         watchJob: "Click to track this job in the progress bar and tab title.",
         started: "Started",
@@ -157,6 +158,7 @@ let languageData = null;
         noHistoryMatch: "Kein History-Eintrag passt zu diesem Filter.",
         pageInfo: "Seite {page} / {total}",
         queued: "Eingereiht",
+        jobDone: "Fertig",
         queuePosition: "Warteschlangenposition #{position}",
         watchJob: "Klicken, um diesen Job im Fortschrittsbalken und Tab-Titel zu verfolgen.",
         started: "Gestartet",
@@ -258,6 +260,7 @@ let languageData = null;
         noHistoryMatch: "Ningun elemento del historial coincide con este filtro.",
         pageInfo: "Pagina {page} / {total}",
         queued: "En cola",
+        jobDone: "Listo",
         queuePosition: "Posicion en cola #{position}",
         watchJob: "Haz clic para seguir este trabajo en la barra de progreso y el titulo de la pestana.",
         started: "Iniciado",
@@ -359,6 +362,7 @@ let languageData = null;
         noHistoryMatch: "Aucun element de l'historique ne correspond a ce filtre.",
         pageInfo: "Page {page} / {total}",
         queued: "En file",
+        jobDone: "Termine",
         queuePosition: "Position en file #{position}",
         watchJob: "Cliquer pour suivre ce job dans la barre de progression et le titre de l'onglet.",
         started: "Demarre",
@@ -1306,6 +1310,32 @@ let languageData = null;
       banner.appendChild(row);
     }
 
+    // How long a finished job stays in the queue, marked done, before it drops out of the list.
+    const DONE_ROW_MS = 6000;
+    const completedShownAt = new Map();
+    let queueLoaded = false;
+
+    function queueRing(job) {
+      const ring = document.createElement("div");
+      ring.className = "queue-ring";
+      const done = job.status === "complete";
+      const percent = done ? 100 : Math.max(0, Math.min(100, Number(job.percent) || 0));
+      // 2 * PI * r, with r = 16 in the 36x36 viewBox the circles are drawn in.
+      const circumference = 100.53;
+      let label;
+      if (done) label = "✓";
+      else if (job.status === "queued" && job.position) label = "#" + job.position;
+      else label = Math.round(percent);
+      ring.innerHTML =
+        '<svg viewBox="0 0 36 36" aria-hidden="true">' +
+          '<circle class="queue-ring-track" cx="18" cy="18" r="16"/>' +
+          '<circle class="queue-ring-fill" cx="18" cy="18" r="16" stroke-dasharray="' +
+            (percent / 100 * circumference).toFixed(2) + ' ' + circumference + '"/>' +
+        '</svg>' +
+        '<span class="queue-ring-label">' + escapeHtml(label) + '</span>';
+      return ring;
+    }
+
     async function loadQueue() {
       const response = await fetch("jobs");
       if (!response.ok) return;
@@ -1316,16 +1346,29 @@ let languageData = null;
         if (job.status === "complete" && !seenCompletedJobIds.has(job.id)) {
           seenCompletedJobIds.add(job.id);
           hasNewlyCompleted = true;
+          // Timed from when this browser first saw the job finish, not from the job's own
+          // finished_at: the two clocks need not agree. Not on the first load either, or every
+          // job completed while the tab was closed would be announced as freshly done.
+          if (queueLoaded) completedShownAt.set(job.id, Date.now());
           // Catches a job this browser started that finished after a reload, when pollJob is no
           // longer actively watching it.
           if (job.history_id && ownJobIds.has(job.id)) rememberOwnHistory(job.history_id);
         }
       }
+      queueLoaded = true;
       if (hasNewlyCompleted) loadHistory();
       const queue = document.getElementById("queue");
       queue.innerHTML = "";
-      const visibleItems = data.items.filter((job) => !["complete", "failed", "cancelled"].includes(job.status));
-      updateQueueControlButtons(visibleItems);
+      const activeItems = data.items.filter((job) => !["complete", "failed", "cancelled"].includes(job.status));
+      const doneItems = data.items.filter(
+        (job) => job.status === "complete" && Date.now() - (completedShownAt.get(job.id) || 0) < DONE_ROW_MS);
+      for (const job of doneItems) {
+        // Redraw once the last one's few seconds are up, rather than waiting for the next poll.
+        setTimeout(() => loadQueue().catch(() => {}),
+                   DONE_ROW_MS - (Date.now() - completedShownAt.get(job.id)) + 100);
+      }
+      const visibleItems = activeItems.concat(doneItems);
+      updateQueueControlButtons(activeItems);
       if (!visibleItems.length) {
         queue.textContent = t("noQueuedJobs");
         queue.classList.add("queue-empty-message");
@@ -1333,17 +1376,19 @@ let languageData = null;
       }
       queue.classList.remove("queue-empty-message");
       for (const job of visibleItems) {
+        const done = job.status === "complete";
         const row = document.createElement("div");
-        row.className = "queue-row";
+        row.className = "queue-row status-" + job.status;
         const main = document.createElement("div");
         const title = document.createElement("div");
         title.className = "queue-title";
         const typeBadge = document.createElement("span");
         typeBadge.className = "queue-type-badge";
         typeBadge.textContent = (job.source_extension || "txt").toUpperCase();
-        const position = job.position ? "#" + job.position + " " : "";
+        const position = job.position && !done ? "#" + job.position + " " : "";
         title.appendChild(typeBadge);
-        title.appendChild(document.createTextNode(position + (job.label || job.kind) + " - " + job.status));
+        title.appendChild(document.createTextNode(
+          position + (job.label || job.kind) + " - " + (done ? t("jobDone") : job.status)));
         const meta = document.createElement("div");
         meta.className = "queue-meta";
         const languages = [job.source, job.target].filter(Boolean).map(formatLanguageLabel).join(" -> ");
@@ -1355,14 +1400,17 @@ let languageData = null;
           ? t("queuePosition", {position: job.position})
           : (job.percent || 0) + "%";
         progress.textContent = progressLabel + " | " + (job.current || 0) + " / " + (job.total || 0) + " " + t("chunks") + " | " + (job.message || "");
-        const actions = document.createElement("div");
-        actions.className = "queue-actions";
-        actions.appendChild(queueActionButton(job, "cancel", t("skip"), ["queued", "running", "paused"]));
         main.appendChild(title);
         main.appendChild(meta);
         main.appendChild(progress);
+        row.appendChild(queueRing(job));
         row.appendChild(main);
-        row.appendChild(actions);
+        if (!done) {
+          const actions = document.createElement("div");
+          actions.className = "queue-actions";
+          actions.appendChild(queueActionButton(job, "cancel", t("skip"), ["queued", "running", "paused"]));
+          row.appendChild(actions);
+        }
         row.classList.toggle("watched", job.id === activeJobId);
         row.title = t("watchJob");
         row.addEventListener("click", (event) => {
