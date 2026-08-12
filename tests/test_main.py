@@ -1580,6 +1580,66 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual([len(paragraph["lines"]) for paragraph in paragraphs], [4, 1])
 
+    def test_paragraph_is_justified_only_where_the_original_was(self):
+        def paragraph(*edges):
+            return {"lines": [{"text": "x", "x": 60.0, "y": 700.0 - 14 * i, "right": edge, "size": 11.0}
+                              for i, edge in enumerate(edges)]}
+
+        # Flush to the eye: the last glyph of a line carries its own side bearing.
+        self.assertTrue(main.paragraph_is_justified(paragraph(551.1, 547.4, 551.1, 120.0)))
+        # Two lines that happen to end together say nothing.
+        self.assertFalse(main.paragraph_is_justified(paragraph(551.1, 120.0)))
+        # Ragged right.
+        self.assertFalse(main.paragraph_is_justified(paragraph(551.1, 498.2, 530.0, 120.0)))
+        # The last line is short by nature and is not counted.
+        self.assertTrue(main.paragraph_is_justified(paragraph(551.1, 551.1, 200.0)))
+
+    def test_reflow_paragraph_marks_a_justified_paragraph_for_the_writer(self):
+        def paragraph(*edges):
+            return {"lines": [{"text": "Some text of the original", "x": 60.0, "y": 700.0 - 14 * i,
+                               "right": edge, "size": 11.0} for i, edge in enumerate(edges)]}
+
+        text = "Eine Uebersetzung, die ueber mehrere Zeilen laeuft und dabei genug Woerter "
+        placed = main.reflow_paragraph(paragraph(400.0, 400.0, 400.0, 200.0), text * 2)
+
+        self.assertTrue(all(line["justify_to"] == 400.0 for line in placed[:-1]))
+        # The closing line of a paragraph is set ragged, as it is in any book.
+        self.assertNotIn("justify_to", placed[-1])
+        # A ragged original stays ragged.
+        ragged = main.reflow_paragraph(paragraph(400.0, 330.0, 380.0, 200.0), text * 2)
+        self.assertTrue(all("justify_to" not in line for line in ragged))
+
+    def test_a_justified_line_reaches_the_edge_and_stays_readable(self):
+        page = {
+            "width": 400, "height": 200, "margin": 20,
+            "source_page": "", "continuation": False, "footer": False,
+            "lines": [{"text": "Diese Zeile wird bis an die rechte Kante gestreckt und bleibt",
+                       "font": "F1", "size": 11,
+                       "line_height": 14, "x": 40, "y": 150, "justify_to": 362.8}],
+        }
+
+        pdf = main.create_pdf_from_pages([page])
+
+        spans = pdf_spans(pdf)
+        self.assertAlmostEqual(max(span["bbox"][2] for span in spans), 362.8, delta=1.5)
+        # Set word by word, so the text layer has to be checked, not assumed: a gap wide enough
+        # makes MuPDF return every word on a line of its own.
+        self.assertIn("Diese Zeile wird bis an die rechte Kante gestreckt und bleibt", pdf_text(pdf))
+
+    def test_a_line_needing_too_much_stretch_stays_ragged(self):
+        # Wider than PDF_JUSTIFY_MAX_SPACE would tear holes into the setting and, past about four
+        # times the normal gap, take the text layer apart with it.
+        page = {
+            "width": 400, "height": 200, "margin": 20,
+            "source_page": "", "continuation": False, "footer": False,
+            "lines": [{"text": "Drei kurze Woerter", "font": "F1", "size": 11,
+                       "line_height": 14, "x": 40, "y": 150, "justify_to": 360.0}],
+        }
+
+        spans = pdf_spans(main.create_pdf_from_pages([page]))
+
+        self.assertLess(max(span["bbox"][2] for span in spans), 300.0)
+
     def test_reflow_paragraph_keeps_the_first_line_indent(self):
         # Pages like this set their paragraphs without a blank line between them, so the indent
         # is the only thing showing where one ends.

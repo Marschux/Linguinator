@@ -94,6 +94,11 @@ PDF_LAYOUT_EDGE_MARGIN = 20.0
 # as part of it. Half an inch is the usual tab; a centred heading sits much further in than that
 # and has to stay a paragraph of its own.
 PDF_LAYOUT_MAX_INDENT = 40.0
+# How far a word gap may be stretched to justify a line, as a multiple of the font's own space.
+# Measured: read back, a line set word by word survives up to three times its normal gap and comes
+# apart at about 3.9, where MuPDF's extractor returns every word on a line of its own. Wider gaps
+# also tear holes into the setting, so a line that would need more stays ragged.
+PDF_JUSTIFY_MAX_SPACE = 3.0
 # A line opening with one of these is a list item of its own, however it is placed.
 PDF_LIST_MARKER = re.compile(r"^\s*(?:[-•‣▪●◦*]|\(?\d{1,3}[.)])\s")
 # How far a paragraph may be tightened purely to keep the original's line count. 0.9 because no
@@ -248,7 +253,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.8.3", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.9.0", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -879,7 +884,8 @@ def pdf_font_key(text: str, face: str) -> Tuple[bool, str, bool]:
 
 
 def draw_pdf_line(page, text: str, x: float, y: float, face: str,
-                  size: float, color: int, height: float, fonts: Dict) -> None:
+                  size: float, color: int, height: float,
+                  justify_to: Optional[float], fonts: Dict) -> None:
     """One line of text on a MuPDF page.
 
     `y` is a PDF baseline, counted up from the bottom of the page; MuPDF counts down from the
@@ -904,6 +910,21 @@ def draw_pdf_line(page, text: str, x: float, y: float, face: str,
             writer.append((cursor, height - y), part, font=font, fontsize=size,
                           right_to_left=rtl)
             cursor += font.text_length(part, fontsize=size) + space
+    elif justify_to and " " in text.strip():
+        # Justified: the words are placed one by one with the leftover width shared out between
+        # them. Only their spacing changes, never the line's own place on the page.
+        words = [word for word in text.split(" ") if word]
+        ink = sum(font.text_length(word, fontsize=size) for word in words)
+        gap = (justify_to - x - ink) / (len(words) - 1) if len(words) > 1 else 0.0
+        space = font.text_length(" ", fontsize=size)
+        if not space < gap <= PDF_JUSTIFY_MAX_SPACE * space:
+            # Already full, or so short that filling it would tear the line apart.
+            writer.append((x, height - y), text, font=font, fontsize=size)
+        else:
+            cursor = x
+            for word in words:
+                writer.append((cursor, height - y), word, font=font, fontsize=size)
+                cursor += font.text_length(word, fontsize=size) + gap
     else:
         writer.append((x, height - y), text, font=font, fontsize=size)
     writer.write_text(
@@ -938,9 +959,10 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
     characters this document actually uses (see subset_font) before it is handed to MuPDF.
     """
     document = pymupdf.open()
-    # (page index, text, x, y, face, size, color, page height). The index rather than the page:
+    # (page index, text, x, y, face, size, color, page height, edge to justify to). The index
+    # rather than the page:
     # adding a page invalidates the page objects handed out before it.
-    lines: List[Tuple[int, str, float, float, str, float, int, float]] = []
+    lines: List[Tuple[Any, ...]] = []
     for output_page_number, page_data in enumerate(pages, start=1):
         width = page_data.get("width", PDF_PAGE_WIDTH)
         height = page_data.get("height", PDF_PAGE_HEIGHT)
@@ -952,19 +974,20 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
             heading = "Page " + page_data["source_page"]
             if page_data["continuation"]:
                 heading += " continued"
-            lines.append((index, heading, margin, y, "F2", PDF_HEADING_FONT_SIZE, 0, height))
+            lines.append((index, heading, margin, y, "F2", PDF_HEADING_FONT_SIZE, 0, height, None))
             y -= 24
         for line in page_data["lines"]:
             if line["text"]:
                 lines.append((index, line["text"], line.get("x", margin), line.get("y", y),
-                              line["font"], line["size"], line.get("color", 0), height))
+                              line["font"], line["size"], line.get("color", 0), height,
+                              line.get("justify_to")))
             y -= line["line_height"]
         if page_data.get("footer", True):
             lines.append((index, f"{output_page_number}", width - margin, margin // 2,
-                          "F1", PDF_FOOTER_FONT_SIZE, 0, height))
+                          "F1", PDF_FOOTER_FONT_SIZE, 0, height, None))
 
     codepoints: Dict[Tuple[bool, str, bool], Set[int]] = {}
-    for _, text, _, _, face, _, _, _ in lines:
+    for _, text, _, _, face, _, _, _, _ in lines:
         codepoints.setdefault(pdf_font_key(text, face), set()).update(map(ord, text))
     fonts = {key: subset_font(*key, points) for key, points in codepoints.items()}
     for index, *line in lines:
@@ -2604,6 +2627,25 @@ def paragraph_base_size(paragraph: Dict[str, Any]) -> float:
     return Counter(line["size"] for line in paragraph["lines"]).most_common(1)[0][0]
 
 
+def paragraph_is_justified(paragraph: Dict[str, Any]) -> bool:
+    """Whether the original set this paragraph flush on both edges.
+
+    Three lines at least: two that happen to end together say nothing, a whole column of them is
+    the setting. The last line of a paragraph is short by nature and never counts.
+
+    Four points of play, because a flush edge is only flush to the eye - the last glyph of a line
+    carries its own side bearing, and a line ending in "s" stops a little short of one ending in a
+    full stop. Measured over the test documents, that is also where the count settles: of the 408
+    paragraphs in the book 277 pass at 2 points and 391 at 4, and widening to 6, 8 or 12 adds three
+    more in total, while the ragged documents stay at nought to two throughout.
+    """
+    lines = paragraph["lines"]
+    if len(lines) < 3:
+        return False
+    edges = [line["right"] for line in lines[:-1]]
+    return max(edges) - min(edges) <= 4.0
+
+
 def reflow_paragraph(
     paragraph: Dict[str, Any],
     text: str,
@@ -2691,6 +2733,10 @@ def reflow_paragraph(
     # A translation into Hebrew or Arabic hangs off the right edge of the column, the way the
     # column would have been set had the document been written in that language.
     rtl = is_rtl_text(text)
+    # Set flush on both edges where the original was, against the same edge the text was wrapped
+    # to. Not against the original's own right edge: paragraph_width_limit sits at or past it, and
+    # wrapping to the narrower one would cost lines and with them font size.
+    justify = paragraph_is_justified(paragraph) and not rtl
     placed = []
     for index, wrapped_line in enumerate(wrapped):
         # Translations longer than the original keep running below the last line: overflowing
@@ -2712,6 +2758,9 @@ def reflow_paragraph(
             "y": y,
             "color": color,
         })
+    if justify:
+        for line in placed[:-1]:
+            line["justify_to"] = right
     return placed
 
 
