@@ -569,11 +569,6 @@
       border-color: var(--accent);
     }
 
-    .queue-row.status-complete {
-      background: rgba(34, 197, 94, .12);
-      border-color: #22c55e;
-    }
-
     /* The running row is its own progress bar: filled up to --fill, set per row from the job's
        percentage. What the bar above the buttons used to do, where the job actually is. */
     .queue-row.status-running {
@@ -599,8 +594,6 @@
 
     .queue-row.status-queued .queue-title,
     .queue-row.status-queued .queue-ring-label { color: var(--warn); }
-
-    .queue-row.status-complete .queue-title { color: var(--ok-text); }
 
     .queue-ring {
       display: grid;
@@ -633,7 +626,6 @@
     .queue-row.status-running .queue-ring-fill { stroke: var(--running); }
     .queue-row.status-queued .queue-ring-fill,
     .queue-row.status-paused .queue-ring-fill { stroke: var(--warn); }
-    .queue-row.status-complete .queue-ring-fill { stroke: #22c55e; }
     .queue-row.status-failed .queue-ring-fill { stroke: #ef4444; }
 
     .queue-row.status-failed {
@@ -658,8 +650,6 @@
       font-weight: 800;
       position: absolute;
     }
-
-    .queue-row.status-complete .queue-ring-label { color: var(--ok-text); }
 
     .history-row.history-row-own-current {
       background: rgba(34, 197, 94, .12);

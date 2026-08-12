@@ -57,7 +57,6 @@ let languageData = null;
         noHistoryMatch: "No history entries match this filter.",
         pageInfo: "Page {page} / {total}",
         queued: "Queued",
-        jobDone: "Done",
         queuePosition: "Queue position #{position}",
         watchJob: "Click to follow this job in the tab title.",
         unwatchJob: "Click to stop following it; the tab title goes back to plain Linguinator.",
@@ -157,7 +156,6 @@ let languageData = null;
         noHistoryMatch: "Kein History-Eintrag passt zu diesem Filter.",
         pageInfo: "Seite {page} / {total}",
         queued: "Eingereiht",
-        jobDone: "Fertig",
         queuePosition: "Warteschlangenposition #{position}",
         watchJob: "Klicken, um diesen Job im Tab-Titel zu verfolgen.",
         unwatchJob: "Klicken, um die Verfolgung zu beenden; der Tab-Titel zeigt wieder nur Linguinator.",
@@ -257,7 +255,6 @@ let languageData = null;
         noHistoryMatch: "Ningun elemento del historial coincide con este filtro.",
         pageInfo: "Pagina {page} / {total}",
         queued: "En cola",
-        jobDone: "Listo",
         queuePosition: "Posicion en cola #{position}",
         watchJob: "Haz clic para seguir este trabajo en el titulo de la pestana.",
         unwatchJob: "Haz clic para dejar de seguirlo; el titulo vuelve a ser solo Linguinator.",
@@ -357,7 +354,6 @@ let languageData = null;
         noHistoryMatch: "Aucun element de l'historique ne correspond a ce filtre.",
         pageInfo: "Page {page} / {total}",
         queued: "En file",
-        jobDone: "Termine",
         queuePosition: "Position en file #{position}",
         watchJob: "Cliquer pour suivre ce job dans le titre de l'onglet.",
         unwatchJob: "Cliquer pour ne plus le suivre ; le titre revient a Linguinator seul.",
@@ -1255,27 +1251,20 @@ let languageData = null;
       return button;
     }
 
-    // How long a finished job stays in the queue, marked done, before it drops out of the list.
-    const DONE_ROW_MS = 6000;
-    const completedShownAt = new Map();
-    let queueLoaded = false;
-
     function queueRing(job) {
       const ring = document.createElement("div");
-      const done = job.status === "complete";
       const failed = job.status === "failed";
       // Nothing to count yet: the file is still being read or uploaded, so the ring turns
       // instead of filling.
       const spinning = job.status === "extracting";
       ring.className = "queue-ring" + (spinning ? " indeterminate" : "");
       // A quarter of the ring is what turns; a full or empty one would show no movement at all.
-      const percent = done || failed ? 100
+      const percent = failed ? 100
         : spinning ? 25 : Math.max(0, Math.min(100, Number(job.percent) || 0));
       // 2 * PI * r, with r = 16 in the 36x36 viewBox the circles are drawn in.
       const circumference = 100.53;
       let label;
-      if (done) label = "✓";
-      else if (failed) label = "!";
+      if (failed) label = "!";
       else if (spinning) label = "";
       else if (job.status === "queued" && job.position) label = "#" + job.position;
       else label = Math.round(percent);
@@ -1320,13 +1309,8 @@ let languageData = null;
         if (job.status === "complete" && !seenCompletedJobIds.has(job.id)) {
           seenCompletedJobIds.add(job.id);
           hasNewlyCompleted = true;
-          // Timed from when this browser first saw the job finish, not from the job's own
-          // finished_at: the two clocks need not agree. Not on the first load either, or every
-          // job completed while the tab was closed would be announced as freshly done.
-          if (queueLoaded) completedShownAt.set(job.id, Date.now());
         }
       }
-      queueLoaded = true;
       if (hasNewlyCompleted) loadHistory();
       renderQueueRows();
     }
@@ -1334,23 +1318,16 @@ let languageData = null;
     function renderQueueRows() {
       const queue = document.getElementById("queue");
       queue.innerHTML = "";
+      // A finished job leaves the queue at once: it is in the history right below, marked
+      // green there, and standing in both lists at the same time read as a duplicate.
       const activeItems = queueItems.filter((job) => !["complete", "failed", "cancelled"].includes(job.status));
-      const doneItems = queueItems.filter(
-        (job) => job.status === "complete" && Date.now() - (completedShownAt.get(job.id) || 0) < DONE_ROW_MS);
-      for (const job of doneItems) {
-        // Redraw once the last one's few seconds are up, rather than waiting for the next poll.
-        setTimeout(() => renderQueueRows(),
-                   DONE_ROW_MS - (Date.now() - completedShownAt.get(job.id)) + 100);
-      }
-      const visibleItems = activeItems.concat(doneItems);
       updateQueueControlButtons(activeItems);
       // Only when work appears, not for as long as it lasts: reopening it on every poll would
       // make the panel impossible to close while a job runs.
       if (activeItems.length && !hadActiveJobs) openJobsPanel();
       hadActiveJobs = activeItems.length > 0;
       if (statusRow) queue.appendChild(statusRowElement());
-      for (const job of visibleItems) {
-        const done = job.status === "complete";
+      for (const job of activeItems) {
         // A rule where the work stops and the waiting starts, but only if something stands
         // above it - a queue whose first row is already waiting has nothing to divide.
         if (job.status === "queued" && queue.lastElementChild
@@ -1368,9 +1345,9 @@ let languageData = null;
         title.className = "queue-title";
         const typeBadge = typeBadgeElement(job.source_extension);
         row.dataset.fileType = fileTypeKey(job.source_extension);
-        const position = job.position && !done ? "#" + job.position + " " : "";
+        const position = job.position ? "#" + job.position + " " : "";
         title.appendChild(document.createTextNode(
-          position + (job.label || job.kind) + " - " + (done ? t("jobDone") : job.status)));
+          position + (job.label || job.kind) + " - " + job.status));
         title.appendChild(typeBadge);
         const meta = document.createElement("div");
         meta.className = "queue-meta";
@@ -1394,20 +1371,15 @@ let languageData = null;
         main.appendChild(progress);
         row.appendChild(queueRing(job));
         row.appendChild(main);
-        if (!done) {
-          const actions = document.createElement("div");
-          actions.className = "queue-actions";
-          actions.appendChild(queueActionButton(job, "cancel", t("skip"), ["queued", "running", "paused"]));
-          row.appendChild(actions);
-        }
+        const actions = document.createElement("div");
+        actions.className = "queue-actions";
+        actions.appendChild(queueActionButton(job, "cancel", t("skip"), ["queued", "running", "paused"]));
+        row.appendChild(actions);
         row.classList.toggle("watched", job.id === activeJobId);
-        row.title = done ? t("unwatchJob") : t("watchJob");
+        row.title = t("watchJob");
         row.addEventListener("click", (event) => {
           if (event.target.closest(".queue-actions")) return;
-          // A finished job has nothing left to follow: clicking it drops the selection, and the
-          // tab title goes back to plain Linguinator.
-          if (done) unwatchJob();
-          else watchJob(job.id);
+          watchJob(job.id);
         });
         queue.appendChild(row);
       }
