@@ -2227,6 +2227,28 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(main.paragraph_width_limit(paragraph, [paragraph], 575.0, [cell]), 238.0)
 
+    def test_paragraph_width_limit_stops_at_the_cell_the_original_overran(self):
+        # The original's own text already runs past its cell into the next column
+        # (Systemrequirements, "Graphics card"). Keeping that width handed the whole table to the
+        # translation, which is longer still. The cell the line starts in wins over its own ink.
+        paragraph = {"lines": [{"text": "runs on", "x": 143.0, "y": 512.0, "right": 430.0, "size": 8.5}]}
+        cell = {"x": 140.0, "right": 362.0, "top": 525.0, "bottom": 490.0}
+
+        self.assertEqual(main.paragraph_width_limit(paragraph, [paragraph], 542.0, [cell]), 360.0)
+
+    def test_paragraph_width_limit_ignores_a_shape_beside_a_short_line(self):
+        # A paragraph opening with a one-word line has all sorts of things to the right of that
+        # line that say nothing about its width - taken as a wall, the whole paragraph was set
+        # one word per line (Systemrequirements, "or / Apple M1 SoC GPU ...").
+        paragraph = {"lines": [
+            {"text": "or", "x": 143.0, "y": 502.0, "right": 151.0, "size": 8.5},
+            {"text": "Apple M1 SoC GPU with 8 or more cores", "x": 143.0, "y": 492.0,
+             "right": 339.0, "size": 8.5},
+        ]}
+        rule = {"x": 151.5, "right": 160.0, "top": 505.0, "bottom": 500.0}
+
+        self.assertEqual(main.paragraph_width_limit(paragraph, [paragraph], 542.0, [rule]), 339.0)
+
     def test_paragraph_floor_stops_above_an_image_and_inside_a_box(self):
         paragraph = {"lines": [{"text": "text", "x": 50.0, "y": 700.0, "right": 300.0, "size": 10.0}]}
         image = {"x": 40.0, "right": 320.0, "top": 660.0, "bottom": 500.0}

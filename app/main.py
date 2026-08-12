@@ -257,7 +257,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.9.4", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.9.5", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -2689,8 +2689,16 @@ def paragraph_width_limit(
     embedded font runs wider than the document's, so measuring against the original's ink makes
     almost every paragraph wrap one line early. The limit is whatever stands to its right on the
     same baselines, or the document's own right margin.
+
+    A paragraph already running past that limit keeps its own width - a full-width heading in an
+    otherwise narrower setting, see document_right_margin, or text overlapping a neighbour on the
+    same baseline, which no measurement can tell from a column beside it. A box or an image is a
+    wall and beats even that: an original overrunning its own table cell (Systemrequirements,
+    "Graphics card") must not hand that overrun to the longer translation, which would then be
+    reflowed clear across the next column.
     """
     limit = right_margin
+    wall = None
     for line in paragraph["lines"]:
         for other in others:
             if other is paragraph:
@@ -2706,11 +2714,22 @@ def paragraph_width_limit(
             if (obstacle["bottom"] >= line["y"] + 0.8 * line["size"]
                     or obstacle["top"] <= line["y"]):
                 continue
-            if obstacle["x"] <= line["x"] and obstacle["right"] >= line["right"]:
-                limit = min(limit, obstacle["right"] - 2)
+            if (abs(obstacle["x"] - line["x"]) < 2
+                    and abs(obstacle["right"] - line["right"]) < 2):
+                # Drawn to the line's own measurements, so it is the line's own background and
+                # not a box around it. Taken as a wall it wraps the paragraph to its shortest
+                # line - one word per line, where that line was the word "or".
+                continue
+            if obstacle["x"] <= line["x"] < obstacle["right"]:
+                # The box the line starts in, whether it ends inside that box or runs out of it.
+                # Only this one counts as a wall: a shape merely standing to the right belongs to
+                # whatever is beside the line, and a short line has all sorts of things to its
+                # right that say nothing about the width the paragraph had.
+                wall = obstacle["right"] - 2 if wall is None else min(wall, obstacle["right"] - 2)
             elif obstacle["x"] > line["x"]:
                 limit = min(limit, obstacle["x"] - 2)
-    return max(limit, max(line["right"] for line in paragraph["lines"]))
+    limit = max(limit, max(line["right"] for line in paragraph["lines"]))
+    return limit if wall is None else min(limit, wall)
 
 
 def paragraph_base_size(paragraph: Dict[str, Any]) -> float:
