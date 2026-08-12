@@ -57,7 +57,12 @@ MAX_CHARS = 2000
 MAX_FILE_MB = int(env_value("LINGUINATOR_MAX_FILE_MB", "50"))
 MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
 MAX_ZIP_UNCOMPRESSED_BYTES = MAX_FILE_BYTES * 10
-HISTORY_DAYS = int(env_value("LINGUINATOR_HISTORY_DAYS", "7"))
+# In hours, because a day is a coarse setting for a workbench whose history is a convenience,
+# not an archive. LINGUINATOR_HISTORY_DAYS is still read where the new one is unset, so an
+# existing .env does not silently start meaning something else.
+HISTORY_HOURS = int(env_value("LINGUINATOR_HISTORY_HOURS", "")
+                    or int(env_value("LINGUINATOR_HISTORY_DAYS", "0") or 0) * 24
+                    or 24)
 # Fixed, because the compose volume is mounted here: a different path would write into the
 # container filesystem and be gone with the next restart.
 HISTORY_DIR = Path("/data/history")
@@ -257,7 +262,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.10.15", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.10.16", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -1080,7 +1085,7 @@ def cleanup_history():
     half-deleted entry from an earlier pass finally disappears.
     """
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
-    cutoff = time.time() - (HISTORY_DAYS * 86400)
+    cutoff = time.time() - (HISTORY_HOURS * 3600)
     expired = {path.name[:-len(".json")] for path in HISTORY_DIR.glob("*.json")
                if path.stat().st_mtime < cutoff}
     # ponytail: entries x files per pass, fine at the few hundred a retention window holds.
@@ -4361,7 +4366,7 @@ async def start_translate_pdf_layout_job(
 
 @app.get("/history")
 def list_history():
-    return {"retention_days": HISTORY_DAYS, "items": history_items()}
+    return {"retention_hours": HISTORY_HOURS, "items": history_items()}
 
 
 @app.get("/history/{item_id}")

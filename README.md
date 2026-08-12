@@ -65,7 +65,7 @@ The `.env` file is grouped by topic:
 | `LINGUINATOR_MAX_FILE_MB` | `50` | Maximum upload size in megabytes. Office archives are additionally capped at ten times that once unpacked. |
 | `LINGUINATOR_CPU_THREADS` | `0` | Torch, OMP and MKL thread count. `0` keeps the library defaults, which take every core; set a number when the container shares its host. |
 | `LINGUINATOR_MODEL_IDLE_SECONDS` | `600` | Seconds of idleness before the loaded model is dropped from memory. It reloads on the next job, which costs a few seconds. `0` keeps it loaded for good. |
-| `LINGUINATOR_HISTORY_DAYS` | `7` | Number of days to keep saved translation history, including retained source files. |
+| `LINGUINATOR_HISTORY_HOURS` | `24` | Hours to keep a saved translation, its retained source file and its prepared download. The older `LINGUINATOR_HISTORY_DAYS` still counts where this is unset. |
 | `LINGUINATOR_TIMEZONE` | `Europe/Berlin` | IANA timezone name used to display the completion time next to each history entry. Display only, stored times are UTC. |
 | `LINGUINATOR_TIME_FORMAT` | `24h` | `12h` or `24h`, the same for every UI language. Anything else is read as `24h`. |
 | `LINGUINATOR_UI_LANGUAGE` | `en` | UI language a fresh browser starts with: `en` (English), `de` (German), `es` (Spanish), `fr` (French). A browser switched by hand keeps its own choice. |
@@ -85,7 +85,7 @@ is not a setting either: the GPU is used when there is one, the CPU otherwise.
 
 | Path in the container | Volume | Contents |
 | --- | --- | --- |
-| `/data/history` | `history` | Saved translations, retained source files, prepared original-format downloads, metadata. Cleaned up after `LINGUINATOR_HISTORY_DAYS`. |
+| `/data/history` | `history` | Saved translations, retained source files, prepared original-format downloads, metadata. Cleaned up after `LINGUINATOR_HISTORY_HOURS`. |
 | `/data/history/jobs` | `history` | Queue state and pending payloads, so jobs survive a restart. |
 | `/cache/huggingface` | `hf-cache` | Downloaded models. Several GB once a few language pairs have been used; nothing removes them automatically. |
 

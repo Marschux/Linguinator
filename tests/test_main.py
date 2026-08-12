@@ -1443,7 +1443,7 @@ class MainTests(unittest.TestCase):
             kept = history / "2026-01-01-other.pdf-99999999.json"
             kept.write_text("{}", encoding="utf-8")
 
-            with patch.object(main, "HISTORY_DIR", history), patch.object(main, "HISTORY_DAYS", 7):
+            with patch.object(main, "HISTORY_DIR", history), patch.object(main, "HISTORY_HOURS", 24):
                 main.cleanup_history()
 
             self.assertFalse(export.exists())
@@ -2617,7 +2617,7 @@ class MainTests(unittest.TestCase):
             fresh_file = temp_dir / "fresh.md"
             old_file.write_text("old", encoding="utf-8")
             fresh_file.write_text("fresh", encoding="utf-8")
-            old_time = time.time() - (main.HISTORY_DAYS * 86400) - 60
+            old_time = time.time() - (main.HISTORY_HOURS * 3600) - 60
             os.utime(old_file, (old_time, old_time))
 
             with patch.object(main, "HISTORY_DIR", temp_dir):
