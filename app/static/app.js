@@ -1376,6 +1376,14 @@ let languageData = null;
       if (statusRow) queue.appendChild(statusRowElement());
       for (const job of visibleItems) {
         const done = job.status === "complete";
+        // A rule where the work stops and the waiting starts, but only if something stands
+        // above it - a queue whose first row is already waiting has nothing to divide.
+        if (job.status === "queued" && queue.lastElementChild
+            && !queue.lastElementChild.classList.contains("status-queued")) {
+          const divider = document.createElement("div");
+          divider.className = "queue-divider";
+          queue.appendChild(divider);
+        }
         const row = document.createElement("div");
         row.className = "queue-row status-" + job.status;
         const main = document.createElement("div");
