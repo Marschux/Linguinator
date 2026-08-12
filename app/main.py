@@ -257,7 +257,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.9.5", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.9.6", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -2824,7 +2824,10 @@ def reflow_paragraph(
         lowest = lines[-1]["y"] - overflow_leading(size) * (count - len(lines))
         # A line occupies roughly a quarter em below its baseline and nearly a full em above, so
         # the lowest overflow baseline has to clear the next paragraph's baseline by that much.
-        return lowest >= floor + 1.15 * size
+        # Against a box's lower edge only the descenders have to stay above it - keeping the full
+        # em there costs a roomy cell a line, and with it type size, for nothing.
+        clearance = 0.3 if floor == box_floor else 1.15
+        return lowest >= floor + clearance * size
 
     # Walled in: inside a box that has no room left for another line. A third of an em of
     # clearance, not the full 1.15 fits() keeps against a baseline - a box's lower edge is an

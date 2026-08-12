@@ -2258,6 +2258,24 @@ class MainTests(unittest.TestCase):
         # Sitting inside a box, the paragraph may grow down to that box's lower edge.
         self.assertEqual(main.paragraph_floor(paragraph, [paragraph], [box]), 680.0)
 
+    def test_reflow_paragraph_uses_the_full_height_of_a_roomy_box(self):
+        # A box's lower edge is an edge, not the baseline of a next paragraph: only the descenders
+        # of the last line have to stay above it. Demanding a full em there cost a cell with room
+        # to spare a line, and with it type size.
+        paragraph = {"lines": [
+            {"text": "one line", "x": 50.0, "y": 700.0, "right": 200.0, "size": 10.0},
+        ]}
+        text = "Eine Uebersetzung die zwei Zeilen braucht"
+        # A second line lands on 688, and the box ends at 685: room for its descenders, not for a
+        # whole line of clearance.
+        in_box = main.reflow_paragraph(paragraph, text, floor=685.0, box_floor=685.0)
+        below_it = main.reflow_paragraph(paragraph, text, floor=685.0)
+
+        self.assertEqual(len(in_box), 2)
+        self.assertGreaterEqual(in_box[0]["size"], 10.0 * main.PDF_LAYOUT_TIGHTEN_SCALE)
+        # The same floor as another paragraph's baseline keeps the full em, and pays for it.
+        self.assertLess(below_it[0]["size"], in_box[0]["size"])
+
     def test_reflow_paragraph_shrinks_harder_to_stay_inside_a_flat_cell(self):
         # A flat table cell leaves nothing below its baseline, so an extra line does not crowd
         # the next paragraph, it stands outside the table (Systemrequirements, "Minimum" column).
