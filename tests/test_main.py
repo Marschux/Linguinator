@@ -1730,7 +1730,8 @@ class MainTests(unittest.TestCase):
 
     def test_reflow_paragraph_spaces_overflow_lines_at_the_shrunken_size(self):
         # Overflow lines are set at the shrunken size, so spacing them at the original leading
-        # pushes them further down than they need to go - into the next paragraph.
+        # pushes them further down than they need to go - into the next paragraph. They follow
+        # the shrinking in proportion, keeping the paragraph's own line spacing.
         paragraph = {"lines": [
             {"text": "One", "x": 50.0, "y": 700.0, "right": 200.0, "size": 22.0},
             {"text": "two", "x": 50.0, "y": 660.0, "right": 200.0, "size": 22.0},
@@ -1739,10 +1740,27 @@ class MainTests(unittest.TestCase):
         placed = main.reflow_paragraph(paragraph, "Eine deutlich laengere Uebersetzung " * 4)
 
         self.assertGreater(len(placed), 2)
+        expected = 40.0 * placed[0]["size"] / 22.0
         overflow_steps = [a["y"] - b["y"] for a, b in zip(placed[1:], placed[2:])]
         for step in overflow_steps:
-            self.assertLessEqual(step, 1.2 * placed[0]["size"] + 0.01)
-            self.assertLess(step, 40.0)  # the original leading
+            self.assertAlmostEqual(step, expected, places=2)
+            self.assertLess(step, 40.0)  # never wider than the original leading
+
+    def test_reflow_paragraph_keeps_its_own_leading_on_an_unshrunk_overflow_line(self):
+        # A paragraph that did not have to shrink kept its leading everywhere except on the
+        # overflow line, which sat visibly tighter than the rest (Powerupall p. 6 "Hoffnung").
+        paragraph = {"lines": [
+            {"text": "One", "x": 50.0, "y": 700.0, "right": 400.0, "size": 11.0},
+            {"text": "two", "x": 50.0, "y": 674.0, "right": 400.0, "size": 11.0},
+        ]}
+
+        # scale=1.0 is the page-wide size render_pdf_layout_overlay settles on: full size, and
+        # the overflow line still has to keep the paragraph's own 26pt leading.
+        placed = main.reflow_paragraph(paragraph, "Wort " * 60, floor=100.0, scale=1.0)
+
+        self.assertGreater(len(placed), 2)
+        self.assertEqual(placed[0]["size"], 11.0)
+        self.assertAlmostEqual(placed[1]["y"] - placed[2]["y"], 26.0, places=2)
 
     def test_reflow_paragraph_does_not_shrink_when_the_overflow_has_room(self):
         # With nothing below it, a paragraph used to be shrunk to the floor purely for having
@@ -2192,6 +2210,41 @@ class MainTests(unittest.TestCase):
         overlapping = {"lines": [{"text": "x", "x": 60.0, "y": 700.0, "right": 70.0, "size": 10.0}]}
 
         self.assertEqual(main.paragraph_width_limit(wide, [wide, overlapping], 575.0), 400.0)
+
+    def test_paragraph_width_limit_stops_at_an_image(self):
+        # Text ran straight across the photographs of Stall-Kamera-System: an image is not text,
+        # so nothing in the reflow knew it was there.
+        paragraph = {"lines": [{"text": "caption", "x": 50.0, "y": 700.0, "right": 150.0, "size": 10.0}]}
+        image = {"x": 300.0, "right": 560.0, "top": 760.0, "bottom": 640.0}
+
+        self.assertEqual(main.paragraph_width_limit(paragraph, [paragraph], 575.0, [image]), 298.0)
+
+    def test_paragraph_width_limit_stays_inside_the_box_it_sits_in(self):
+        # A table cell with an empty neighbour let the translation run to the page margin,
+        # outside the box it belongs to (Systemanforderungen).
+        paragraph = {"lines": [{"text": "cell", "x": 70.0, "y": 700.0, "right": 120.0, "size": 10.0}]}
+        cell = {"x": 62.0, "right": 240.0, "top": 710.0, "bottom": 690.0}
+
+        self.assertEqual(main.paragraph_width_limit(paragraph, [paragraph], 575.0, [cell]), 238.0)
+
+    def test_paragraph_floor_stops_above_an_image_and_inside_a_box(self):
+        paragraph = {"lines": [{"text": "text", "x": 50.0, "y": 700.0, "right": 300.0, "size": 10.0}]}
+        image = {"x": 40.0, "right": 320.0, "top": 660.0, "bottom": 500.0}
+        box = {"x": 40.0, "right": 320.0, "top": 720.0, "bottom": 680.0}
+
+        self.assertEqual(main.paragraph_floor(paragraph, [paragraph], [image]), 660.0)
+        # Sitting inside a box, the paragraph may grow down to that box's lower edge.
+        self.assertEqual(main.paragraph_floor(paragraph, [paragraph], [box]), 680.0)
+
+    def test_paragraph_floor_ignores_a_shape_on_the_paragraphs_own_last_line(self):
+        # A shape belonging to the last line itself - a marker, a small icon - sits a fraction of
+        # an em below its baseline. Taken as a floor it would stop the paragraph growing at all.
+        # (A box that encloses the line is a different matter: a table cell has to stop it.)
+        paragraph = {"lines": [{"text": "text", "x": 50.0, "y": 700.0, "right": 300.0, "size": 10.0}]}
+        icon = {"x": 200.0, "right": 250.0, "top": 698.0, "bottom": 690.0}
+
+        self.assertEqual(main.paragraph_floor(paragraph, [paragraph], [icon]),
+                         main.PDF_LAYOUT_EDGE_MARGIN)
 
     def test_paragraph_floor_ignores_paragraphs_beside_the_column(self):
         target = {"lines": [{"text": "cell", "x": 50.0, "y": 700.0, "right": 150.0, "size": 10.0}]}

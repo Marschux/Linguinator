@@ -2343,6 +2343,33 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
 PDF_CELL_GAP = 2.0
 
 
+def pdf_page_obstacles(page) -> List[Dict[str, float]]:
+    """Everything on the page that is not text but still occupies room, in PDF user space.
+
+    The reflow only ever measured itself against other *text*, so a photograph and a table cell
+    did not exist as far as it was concerned: translations ran straight across the images of
+    Stall-Kamera-System and out of the boxes of Systemrequirements. Both are the same gap, and
+    both are closed by handing paragraph_floor and paragraph_width_limit the page's images and
+    filled shapes alongside its paragraphs.
+
+    Hairlines are left out. A table rule reserves no room worth having, and an underline sits a
+    fraction of an em below its own baseline - taken as a floor it would stop the paragraph it
+    belongs to from growing at all.
+    """
+    inverse = ~page.transformation_matrix
+    rects = [rect for image in page.get_images(full=True)
+             for rect in page.get_image_rects(image[0])]
+    rects += [drawing["rect"] for drawing in page.get_drawings()]
+    obstacles = []
+    for rect in rects:
+        mapped = pymupdf.Rect(rect) * inverse
+        if mapped.width < 2 or mapped.height < 2:
+            continue
+        obstacles.append({"x": mapped.x0, "right": mapped.x1,
+                          "top": mapped.y1, "bottom": mapped.y0})
+    return obstacles
+
+
 def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Merge runs that share a baseline into lines, keeping table cells apart.
 
@@ -2499,6 +2526,7 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
             "width": float(box.width),
             "height": float(box.height),
             "paragraphs": group_pdf_paragraphs(lines),
+            "obstacles": [] if rotated else pdf_page_obstacles(page),
         })
     if not any(page["paragraphs"] for page in pages):
         raise HTTPException(
@@ -2561,12 +2589,16 @@ def has_translatable_text(text: str) -> bool:
     return bool(re.search(r"[^\W\d_]{2,}", stripped))
 
 
-def paragraph_floor(paragraph: Dict[str, Any], others: List[Dict[str, Any]]) -> float:
+def paragraph_floor(paragraph: Dict[str, Any], others: List[Dict[str, Any]],
+                    obstacles: Optional[List[Dict[str, float]]] = None) -> float:
     """How far down the paragraph may grow: the highest baseline below it in an overlapping
     column, or the bottom of the page when nothing stands in its way.
 
     Paragraphs beside it (table cells on the same row, a caption in the next column) must not
     limit it, or one long cell shrinks the whole row to nothing.
+
+    An image or a filled shape below it stops it just as a paragraph does, and a box the
+    paragraph sits *inside* stops it at its own lower edge - see pdf_page_obstacles.
 
     Falling back to the page edge rather than "unknown" is what keeps font sizes even: a
     paragraph with nothing below it has the whole rest of the page to overflow into, and
@@ -2590,7 +2622,21 @@ def paragraph_floor(paragraph: Dict[str, Any], others: List[Dict[str, Any]]) -> 
         if min(line["x"] for line in other["lines"]) >= right:
             continue
         floor = other_top if floor is None else max(floor, other_top)
-    return PDF_LAYOUT_EDGE_MARGIN if floor is None else floor
+    size = max(line["size"] for line in paragraph["lines"])
+    for obstacle in obstacles or []:
+        if obstacle["right"] <= left or obstacle["x"] >= right:
+            continue
+        if obstacle["top"] < bottom - 0.5 * size:
+            # Standing below the paragraph: its top edge is the limit. Half an em of clearance
+            # keeps a shape that belongs to the last line itself - a highlight, a bullet icon -
+            # from reading as something the paragraph has to stay above.
+            floor = obstacle["top"] if floor is None else max(floor, obstacle["top"])
+        elif (obstacle["x"] <= left and obstacle["right"] >= right
+                and obstacle["bottom"] < bottom):
+            # The paragraph sits inside it: a table cell or a hint box. Growing past its lower
+            # edge is how the translated text ended up outside the boxes it belongs in.
+            floor = obstacle["bottom"] if floor is None else max(floor, obstacle["bottom"])
+    return PDF_LAYOUT_EDGE_MARGIN if floor is None else max(floor, PDF_LAYOUT_EDGE_MARGIN)
 
 
 def document_right_margin(pages: List[Dict[str, Any]]) -> float:
@@ -2612,7 +2658,8 @@ def document_right_margin(pages: List[Dict[str, Any]]) -> float:
 
 
 def paragraph_width_limit(
-    paragraph: Dict[str, Any], others: List[Dict[str, Any]], right_margin: float
+    paragraph: Dict[str, Any], others: List[Dict[str, Any]], right_margin: float,
+    obstacles: Optional[List[Dict[str, float]]] = None,
 ) -> float:
     """How far right the paragraph may actually run, in absolute page coordinates.
 
@@ -2632,6 +2679,16 @@ def paragraph_width_limit(
                     continue
                 if other_line["x"] > line["x"]:
                     limit = min(limit, other_line["x"] - 2)
+        # An image beside the line stops it just as a neighbouring column does; a box the line
+        # runs inside stops it at that box's own right edge, see pdf_page_obstacles.
+        for obstacle in obstacles or []:
+            if (obstacle["bottom"] >= line["y"] + 0.8 * line["size"]
+                    or obstacle["top"] <= line["y"]):
+                continue
+            if obstacle["x"] <= line["x"] and obstacle["right"] >= line["right"]:
+                limit = min(limit, obstacle["right"] - 2)
+            elif obstacle["x"] > line["x"]:
+                limit = min(limit, obstacle["x"] - 2)
     return max(limit, max(line["right"] for line in paragraph["lines"]))
 
 
@@ -2701,8 +2758,11 @@ def reflow_paragraph(
 
     def overflow_leading(size: float) -> float:
         # Overflow lines are set at the shrunken size, so spacing them at the original leading
-        # pushes them further down than they need to go, straight into the next paragraph.
-        return min(leading, 1.2 * size)
+        # pushes them further down than they need to go, straight into the next paragraph. In
+        # proportion to that shrinking, not against a flat 1.2: a paragraph that did not shrink
+        # at all kept its own leading everywhere except on its last line, which then sat visibly
+        # tighter than the rest of the paragraph (Powerupall p. 6 "Hoffnung", p. 13).
+        return leading * min(1.0, size / base_size)
 
     def fits(count: int, size: float) -> bool:
         if count <= len(lines):
@@ -2847,8 +2907,10 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
         for paragraph in page["paragraphs"]:
             if (index < len(translations) and translations[index].strip()
                     and has_translatable_text(paragraph["text"])):
-                floor = paragraph_floor(paragraph, page["paragraphs"])
-                width_limit = paragraph_width_limit(paragraph, page["paragraphs"], right_margin)
+                obstacles = page.get("obstacles") or []
+                floor = paragraph_floor(paragraph, page["paragraphs"], obstacles)
+                width_limit = paragraph_width_limit(
+                    paragraph, page["paragraphs"], right_margin, obstacles)
                 placed = reflow_paragraph(paragraph, translations[index], floor, width_limit)
                 if len(placed) > PDF_LAYOUT_MAX_LINE_GROWTH * len(paragraph["lines"]):
                     # Not a translation of this paragraph any more. Overflow is tolerated, but a
