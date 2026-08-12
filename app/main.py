@@ -94,6 +94,8 @@ PDF_LAYOUT_EDGE_MARGIN = 20.0
 # as part of it. Half an inch is the usual tab; a centred heading sits much further in than that
 # and has to stay a paragraph of its own.
 PDF_LAYOUT_MAX_INDENT = 40.0
+# A line opening with one of these is a list item of its own, however it is placed.
+PDF_LIST_MARKER = re.compile(r"^\s*(?:[-•‣▪●◦*]|\(?\d{1,3}[.)])\s")
 # How far a paragraph may be tightened purely to keep the original's line count. 0.9 because no
 # paragraph in the test documents needed more than that to absorb the substitute font's extra
 # width; past it, an extra line is the lesser evil.
@@ -2424,15 +2426,25 @@ def group_pdf_paragraphs(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         if current:
             previous = current["lines"][-1]
             spacing = previous["y"] - line["y"]
-            # A paragraph's first line is usually indented and the second one sets the real left
-            # edge, so measure against that once it exists. Without this the indented opening
-            # line was a paragraph of its own and went to the model without its own sentence.
-            left = current["lines"][1]["x"] if len(current["lines"]) > 1 else previous["x"]
-            aligned = (abs(left - line["x"]) <= 3
-                       or 0 < previous["x"] - line["x"] <= PDF_LAYOUT_MAX_INDENT)
+            # A paragraph's first line rarely sits where the rest of it does, and it is the second
+            # line that sets the real left edge: measured against that once it exists. Until then,
+            # a line further left continues an indented opening line, and a line further right
+            # continues a list item, whose marker hangs out to the left of its own text.
+            first = len(current["lines"]) == 1
+            left = previous["x"] if first else current["lines"][1]["x"]
+            aligned = (
+                abs(left - line["x"]) <= 3
+                or (first and 0 < previous["x"] - line["x"] <= PDF_LAYOUT_MAX_INDENT)
+                or (first and PDF_LIST_MARKER.match(previous["text"])
+                    and 0 < line["x"] - previous["x"] <= PDF_LAYOUT_MAX_INDENT)
+            )
             fits = (
                 0 < spacing <= max(1.8 * max(previous["size"], line["size"]), spacing_limit)
                 and aligned
+                # A marker opens an item, so it can only ever open a paragraph too. Consecutive
+                # one-line items are indistinguishable from a wrapped paragraph by geometry
+                # alone: same left edge, same leading, and a whole list came out as prose.
+                and not PDF_LIST_MARKER.match(line["text"])
                 and abs(previous["size"] - line["size"]) <= 0.2 * previous["size"]
             )
             if fits:

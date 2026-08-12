@@ -1593,6 +1593,26 @@ class MainTests(unittest.TestCase):
         self.assertEqual(placed[0]["x"], 100.0)
         self.assertTrue(all(line["x"] == 64.0 for line in placed[1:]))
 
+    def test_group_pdf_paragraphs_reads_a_numbered_list(self):
+        # A numbered list is set with the marker hanging out to the left of its own text, and
+        # consecutive one-line items look exactly like a wrapped paragraph by geometry alone:
+        # the whole list came out as one block of prose.
+        def line(text, x, y):
+            return {"text": text, "x": x, "y": y, "right": 500.0, "size": 11.0}
+
+        paragraphs = main.group_pdf_paragraphs([
+            line("1. Keep a regular sleep schedule. Go to sleep", 82.8, 212.1),
+            line("at the same time each morning.", 100.8, 199.2),
+            line("2. Avoid napping after 3 p.m.", 82.8, 186.3),
+            line("3. Avoid caffeine late in the day.", 82.8, 173.4),
+        ])
+
+        self.assertEqual([paragraph["text"] for paragraph in paragraphs], [
+            "1. Keep a regular sleep schedule. Go to sleep at the same time each morning.",
+            "2. Avoid napping after 3 p.m.",
+            "3. Avoid caffeine late in the day.",
+        ])
+
     def test_typical_line_spacing_takes_the_smallest_repeated_gap(self):
         # Not the average or the most common one: a page of short paragraphs has more gaps
         # between paragraphs than inside them, and those would then count as the leading.
