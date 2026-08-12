@@ -2236,6 +2236,37 @@ class MainTests(unittest.TestCase):
         # Sitting inside a box, the paragraph may grow down to that box's lower edge.
         self.assertEqual(main.paragraph_floor(paragraph, [paragraph], [box]), 680.0)
 
+    def test_reflow_paragraph_shrinks_harder_to_stay_inside_a_flat_cell(self):
+        # A flat table cell leaves nothing below its baseline, so an extra line does not crowd
+        # the next paragraph, it stands outside the table (Systemrequirements, "Minimum" column).
+        # There the translation is worth more type size than elsewhere.
+        line = {"text": "RAM", "x": 143.0, "y": 549.7, "right": 240.0, "size": 8.5}
+        paragraph = {"lines": [dict(line)]}
+        cell = 547.5
+        text = "Arbeitsspeicher mit reichlich Reserve"
+
+        boxed = main.reflow_paragraph(paragraph, text, floor=cell, width_limit=240.0,
+                                      box_floor=cell)
+        open_below = main.reflow_paragraph(paragraph, text, floor=cell, width_limit=240.0)
+
+        # Inside the cell: one line, down to whatever size that took.
+        self.assertEqual(len(boxed), 1)
+        self.assertLess(boxed[0]["size"], 8.5 * main.PDF_LAYOUT_MIN_SCALE)
+        self.assertGreaterEqual(boxed[0]["size"], 8.5 * main.PDF_LAYOUT_BOXED_MIN_SCALE)
+        # Same floor without a box around it: an overflowing line is the lesser evil, and the
+        # type stops at the ordinary minimum.
+        self.assertGreater(len(open_below), 1)
+        self.assertGreaterEqual(open_below[0]["size"], 8.5 * main.PDF_LAYOUT_MIN_SCALE)
+
+    def test_enclosing_box_bottom_ignores_a_box_the_paragraph_is_not_in(self):
+        paragraph = {"lines": [{"text": "cell", "x": 50.0, "y": 700.0, "right": 150.0, "size": 10.0}]}
+        cell = {"x": 40.0, "right": 160.0, "top": 712.0, "bottom": 697.0}
+        beside = {"x": 200.0, "right": 300.0, "top": 712.0, "bottom": 697.0}
+        below = {"x": 40.0, "right": 160.0, "top": 660.0, "bottom": 600.0}
+
+        self.assertEqual(main.enclosing_box_bottom(paragraph, [cell, beside, below]), 697.0)
+        self.assertIsNone(main.enclosing_box_bottom(paragraph, [beside, below]))
+
     def test_paragraph_floor_ignores_a_shape_on_the_paragraphs_own_last_line(self):
         # A shape belonging to the last line itself - a marker, a small icon - sits a fraction of
         # an em below its baseline. Taken as a floor it would stop the paragraph growing at all.

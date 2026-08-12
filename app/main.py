@@ -105,6 +105,10 @@ PDF_LIST_MARKER = re.compile(r"^\s*(?:[-•‣▪●◦*]|\(?\d{1,3}[.)])\s")
 # paragraph in the test documents needed more than that to absorb the substitute font's extra
 # width; past it, an extra line is the lesser evil.
 PDF_LAYOUT_TIGHTEN_SCALE = 0.9
+# The same, for a paragraph with no room below it for even one more line - a table cell being the
+# usual one. There the extra line does not land in a gap, it lands outside the box, so fitting the
+# original line count is worth more type size than elsewhere.
+PDF_LAYOUT_BOXED_MIN_SCALE = 0.6
 # A reflow taller than this multiple of the paragraph it replaces is not laid out at all; the
 # original stays instead. Overflowing by a line or two is normal (German runs longer, and the
 # substitute font wider), a block three times the height is the model having invented text, and
@@ -253,7 +257,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.9.0", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.9.4", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -2589,6 +2593,24 @@ def has_translatable_text(text: str) -> bool:
     return bool(re.search(r"[^\W\d_]{2,}", stripped))
 
 
+def enclosing_box_bottom(paragraph: Dict[str, Any],
+                         obstacles: Optional[List[Dict[str, float]]] = None) -> Optional[float]:
+    """The lower edge of the tightest shape the paragraph sits *inside*, or None.
+
+    A table cell or a hint box. Growing past that edge is how translated text ended up outside
+    the boxes it belongs to; unlike a paragraph below, this is a wall and not just a neighbour,
+    which is what reflow_paragraph needs to know to shrink harder rather than overflow.
+    """
+    left = min(line["x"] for line in paragraph["lines"])
+    right = max(line["right"] for line in paragraph["lines"])
+    bottom = min(line["y"] for line in paragraph["lines"])
+    size = max(line["size"] for line in paragraph["lines"])
+    bottoms = [obstacle["bottom"] for obstacle in obstacles or []
+               if obstacle["x"] <= left and obstacle["right"] >= right
+               and obstacle["bottom"] < bottom and obstacle["top"] >= bottom - 0.5 * size]
+    return max(bottoms) if bottoms else None
+
+
 def paragraph_floor(paragraph: Dict[str, Any], others: List[Dict[str, Any]],
                     obstacles: Optional[List[Dict[str, float]]] = None) -> float:
     """How far down the paragraph may grow: the highest baseline below it in an overlapping
@@ -2631,11 +2653,10 @@ def paragraph_floor(paragraph: Dict[str, Any], others: List[Dict[str, Any]],
             # keeps a shape that belongs to the last line itself - a highlight, a bullet icon -
             # from reading as something the paragraph has to stay above.
             floor = obstacle["top"] if floor is None else max(floor, obstacle["top"])
-        elif (obstacle["x"] <= left and obstacle["right"] >= right
-                and obstacle["bottom"] < bottom):
-            # The paragraph sits inside it: a table cell or a hint box. Growing past its lower
-            # edge is how the translated text ended up outside the boxes it belongs in.
-            floor = obstacle["bottom"] if floor is None else max(floor, obstacle["bottom"])
+    # A box the paragraph sits inside stops it at its own lower edge, see enclosing_box_bottom.
+    box = enclosing_box_bottom(paragraph, obstacles)
+    if box is not None:
+        floor = box if floor is None else max(floor, box)
     return PDF_LAYOUT_EDGE_MARGIN if floor is None else max(floor, PDF_LAYOUT_EDGE_MARGIN)
 
 
@@ -2727,6 +2748,7 @@ def reflow_paragraph(
     floor: Optional[float] = None,
     width_limit: Optional[float] = None,
     scale: Optional[float] = None,
+    box_floor: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """Lay the translation out in the column the paragraph's original lines occupied.
 
@@ -2740,6 +2762,10 @@ def reflow_paragraph(
     `scale` sets the font size outright, as a fraction of the paragraph's own base size, instead
     of looking for the largest one that fits. Its caller uses that to give every paragraph on a
     page the same size, see render_pdf_layout_overlay.
+
+    `box_floor` is the lower edge of the box the paragraph sits inside, where there is one (see
+    enclosing_box_bottom). A wall, not a neighbour: an extra line there does not crowd the next
+    paragraph, it stands outside the table cell, so it is worth shrinking harder to avoid.
     """
     lines = paragraph["lines"]
     left = min(line["x"] for line in lines)
@@ -2762,7 +2788,12 @@ def reflow_paragraph(
         # proportion to that shrinking, not against a flat 1.2: a paragraph that did not shrink
         # at all kept its own leading everywhere except on its last line, which then sat visibly
         # tighter than the rest of the paragraph (Powerupall p. 6 "Hoffnung", p. 13).
-        return leading * min(1.0, size / base_size)
+        spacing = leading * min(1.0, size / base_size)
+        if boxed:
+            # Nothing below to run into but the wall itself, so an overflow line is set as tight
+            # as it can be read: every point saved is a point less of it standing outside.
+            spacing = min(spacing, 1.05 * size)
+        return spacing
 
     def fits(count: int, size: float) -> bool:
         if count <= len(lines):
@@ -2775,6 +2806,13 @@ def reflow_paragraph(
         # A line occupies roughly a quarter em below its baseline and nearly a full em above, so
         # the lowest overflow baseline has to clear the next paragraph's baseline by that much.
         return lowest >= floor + 1.15 * size
+
+    # Walled in: inside a box that has no room left for another line. A third of an em of
+    # clearance, not the full 1.15 fits() keeps against a baseline - a box's lower edge is an
+    # edge, and only the descenders of the last line have to stay above it. A page-sized
+    # background rectangle encloses a paragraph too, and fails this test by a wide margin.
+    boxed = (box_floor is not None
+             and lines[-1]["y"] - leading < box_floor + 0.3 * base_size)
 
     # The original's own first-line indent, kept: the paragraphs of a page like this are set
     # without a blank line between them, so with the indent gone there is nothing left to show
@@ -2801,8 +2839,9 @@ def reflow_paragraph(
     # 13 of 21 paragraphs needed an extra line for *identical* text, and not one of them needed
     # more than 10% off to fit again. Tighten by up to that before accepting the extra line: a
     # slightly smaller line reads better than a paragraph that grew one.
-    while scale is None and len(wrapped) > len(lines) and size > base_size * PDF_LAYOUT_TIGHTEN_SCALE:
-        size = max(size * 0.98, base_size * PDF_LAYOUT_TIGHTEN_SCALE)
+    tighten_to = base_size * (PDF_LAYOUT_BOXED_MIN_SCALE if boxed else PDF_LAYOUT_TIGHTEN_SCALE)
+    while scale is None and len(wrapped) > len(lines) and size > tighten_to:
+        size = max(size * 0.98, tighten_to)
         wrapped = wrap(size)
     while scale is None and not fits(len(wrapped), size) and size > base_size * PDF_LAYOUT_MIN_SCALE:
         size = max(size * 0.95, base_size * PDF_LAYOUT_MIN_SCALE)
@@ -2900,7 +2939,7 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
     kept = list(translations)
     index = 0
     for page in pages:
-        # (paragraph, translation, floor, width limit, the lines it laid out)
+        # (paragraph, translation, floor, width limit, box floor, the lines it laid out)
         reflowed: List[Tuple[Any, ...]] = []
         # The smallest scale any paragraph of a given base size needed, see below.
         scales: Dict[float, float] = {}
@@ -2909,19 +2948,26 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
                     and has_translatable_text(paragraph["text"])):
                 obstacles = page.get("obstacles") or []
                 floor = paragraph_floor(paragraph, page["paragraphs"], obstacles)
+                box_floor = enclosing_box_bottom(paragraph, obstacles)
                 width_limit = paragraph_width_limit(
                     paragraph, page["paragraphs"], right_margin, obstacles)
-                placed = reflow_paragraph(paragraph, translations[index], floor, width_limit)
+                placed = reflow_paragraph(paragraph, translations[index], floor, width_limit,
+                                          box_floor=box_floor)
                 if len(placed) > PDF_LAYOUT_MAX_LINE_GROWTH * len(paragraph["lines"]):
                     # Not a translation of this paragraph any more. Overflow is tolerated, but a
                     # block several times its original height buries whatever sits below it, and
                     # the original is the better of the two things to be looking at.
                     kept[index] = ""
                 else:
-                    reflowed.append((paragraph, translations[index], floor, width_limit, placed))
+                    reflowed.append(
+                        (paragraph, translations[index], floor, width_limit, box_floor, placed))
                     base = paragraph_base_size(paragraph)
                     key = round(base, 1)
-                    scales[key] = min(scales.get(key, 1.0), placed[0]["size"] / base)
+                    # Clamped at the ordinary minimum: a paragraph that had to go below it is
+                    # walled in by its own box (see PDF_LAYOUT_BOXED_MIN_SCALE), and one cramped
+                    # table cell must not set the size of every paragraph on the page.
+                    scales[key] = min(scales.get(key, 1.0),
+                                      max(placed[0]["size"] / base, PDF_LAYOUT_MIN_SCALE))
             index += 1
 
         # Every paragraph the page sets in one size is redrawn in one size. Each shrinks itself
@@ -2929,12 +2975,13 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
         # at 1.0 in the same column - the most visible flaw in the finished document. Headings
         # keep their own scale, they are a size of their own to begin with.
         lines: List[Dict[str, Any]] = []
-        for paragraph, text, floor, width_limit, placed in reflowed:
+        for paragraph, text, floor, width_limit, box_floor, placed in reflowed:
             base = paragraph_base_size(paragraph)
             scale = scales[round(base, 1)]
             if placed[0]["size"] > base * scale:
                 # Only ever smaller than what this paragraph found on its own, so it still fits.
-                placed = reflow_paragraph(paragraph, text, floor, width_limit, scale)
+                placed = reflow_paragraph(paragraph, text, floor, width_limit, scale,
+                                          box_floor=box_floor)
             lines.extend(placed)
 
         overlay_pages.append({
