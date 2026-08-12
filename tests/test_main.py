@@ -1427,6 +1427,28 @@ class MainTests(unittest.TestCase):
         overlay_mock.assert_called_once_with(b"source pdf", "text", "2-5")
         self.assertEqual(result, b"overlay pdf")
 
+    def test_cleanup_history_takes_the_whole_entry_including_the_prepared_export(self):
+        # The export is written when someone downloads it, long after the rest of the entry. Aging
+        # each file on its own left the translated document behind once its entry was gone.
+        with tempfile.TemporaryDirectory() as directory:
+            history = Path(directory)
+            base = "2026-01-01-doc.pdf-abcd1234"
+            old = time.time() - 30 * 86400
+            for suffix in (".json", ".md", ".source.pdf"):
+                path = history / (base + suffix)
+                path.write_text("x", encoding="utf-8")
+                os.utime(path, (old, old))
+            export = history / (base + ".export.pdf")
+            export.write_text("freshly rendered", encoding="utf-8")
+            kept = history / "2026-01-01-other.pdf-99999999.json"
+            kept.write_text("{}", encoding="utf-8")
+
+            with patch.object(main, "HISTORY_DIR", history), patch.object(main, "HISTORY_DAYS", 7):
+                main.cleanup_history()
+
+            self.assertFalse(export.exists())
+            self.assertEqual([path.name for path in history.iterdir()], [kept.name])
+
     def test_cleanup_finished_jobs_keeps_the_ones_with_work_left(self):
         # Finished jobs were never dropped: 137 had collected on the test machine, kept in memory,
         # written out one file each and sent along with every poll.

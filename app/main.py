@@ -257,7 +257,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.10.14", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.10.15", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -1069,10 +1069,26 @@ def create_text_docx(text: str) -> bytes:
 
 
 def cleanup_history():
+    """Delete history entries past their retention time, whole.
+
+    Per entry, not per file: an entry is a metadata file plus the translation, the retained source
+    and, once someone downloads it, the prepared original-format export. That export is written
+    later than the rest, so going by each file's own age would have left the translated document
+    on disk after everything else about it was gone.
+
+    Files whose metadata is already missing are still dropped by their own age, which is how a
+    half-deleted entry from an earlier pass finally disappears.
+    """
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
     cutoff = time.time() - (HISTORY_DAYS * 86400)
-    for path in HISTORY_DIR.glob("*"):
-        if path.is_file() and path.stat().st_mtime < cutoff:
+    expired = {path.name[:-len(".json")] for path in HISTORY_DIR.glob("*.json")
+               if path.stat().st_mtime < cutoff}
+    # ponytail: entries x files per pass, fine at the few hundred a retention window holds.
+    for path in HISTORY_DIR.iterdir():
+        if not path.is_file():
+            continue
+        belongs_to_expired = any(path.name.startswith(base + ".") for base in expired)
+        if belongs_to_expired or path.stat().st_mtime < cutoff:
             path.unlink(missing_ok=True)
 
 
