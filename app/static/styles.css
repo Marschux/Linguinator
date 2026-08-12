@@ -438,29 +438,10 @@
     }
     .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
     .actions-right { justify-content: flex-end; }
+    .primary-actions { justify-content: space-between; }
     .section { margin-top: 1.4rem; }
     .hidden { display: none; }
     .invisible { visibility: hidden; }
-    /* The panel's own label on the left, the clear button at the right end of the same line. */
-    .panel-heading {
-      align-items: center;
-      display: flex;
-      gap: 1rem;
-      justify-content: space-between;
-      min-height: 2.4rem;
-    }
-
-    .panel-heading label { margin-bottom: 0; }
-
-    .clear-input {
-      flex: 0 0 auto;
-      font-size: 1rem;
-      line-height: 1;
-      min-height: 2.4rem;
-      padding: 0;
-      width: 2.8rem;
-    }
-
     .tabs {
       /* A grid, not a flex row: every tab keeps the same width, including the ones on a second
          line. Flex made the last line stretch its few items across the full width. */
