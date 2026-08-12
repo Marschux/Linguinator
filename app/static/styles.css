@@ -14,6 +14,7 @@
       --err-text: #fca5a5;
       --overlay-rgb: 255, 255, 255;
       --panel-rgb: 24, 28, 34;
+      --running: #a855f7;
       --bg-1: #101216;
       --bg-2: #151922;
       --bg-3: #11151a;
@@ -37,6 +38,7 @@
       --err-text: #b91c1c;
       --overlay-rgb: 15, 23, 32;
       --panel-rgb: 255, 255, 255;
+      --running: #7e22ce;
       --bg-1: #f5f7fb;
       --bg-2: #eef2f9;
       --bg-3: #eef1f6;
@@ -564,6 +566,14 @@
       border-color: #22c55e;
     }
 
+    .queue-row.status-running {
+      background: rgba(168, 85, 247, .12);
+      border-color: var(--running);
+    }
+
+    .queue-row.status-running .queue-title,
+    .queue-row.status-running .queue-ring-label { color: var(--running); }
+
     /* Waiting, not working: told apart from the running job at a glance. */
     .queue-row.status-queued {
       background: rgba(245, 197, 66, .12);
@@ -603,6 +613,7 @@
       transition: stroke-dasharray .2s ease;
     }
 
+    .queue-row.status-running .queue-ring-fill { stroke: var(--running); }
     .queue-row.status-queued .queue-ring-fill,
     .queue-row.status-paused .queue-ring-fill { stroke: var(--warn); }
     .queue-row.status-complete .queue-ring-fill { stroke: #22c55e; }
