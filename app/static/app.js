@@ -1386,6 +1386,10 @@ let languageData = null;
         }
         const row = document.createElement("div");
         row.className = "queue-row status-" + job.status;
+        // The row's own background is the progress bar: it fills up to here.
+        if (job.status === "running") {
+          row.style.setProperty("--fill", Math.max(0, Math.min(100, Number(job.percent) || 0)) + "%");
+        }
         const main = document.createElement("div");
         const title = document.createElement("div");
         title.className = "queue-title";

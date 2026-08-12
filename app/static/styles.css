@@ -566,8 +566,12 @@
       border-color: #22c55e;
     }
 
+    /* The running row is its own progress bar: filled up to --fill, set per row from the job's
+       percentage. What the bar above the buttons used to do, where the job actually is. */
     .queue-row.status-running {
-      background: rgba(168, 85, 247, .12);
+      background: linear-gradient(to right,
+        rgba(168, 85, 247, .32) var(--fill, 0%),
+        rgba(168, 85, 247, .09) var(--fill, 0%));
       border-color: var(--running);
     }
 
