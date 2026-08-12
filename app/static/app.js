@@ -61,7 +61,6 @@ let languageData = null;
         queuePosition: "Queue position #{position}",
         watchJob: "Click to follow this job in the tab title.",
         unwatchJob: "Click to stop following it; the tab title goes back to plain Linguinator.",
-        unmarkHistory: "Click to clear the marking on this entry.",
         started: "Started",
         chunks: "chunks",
         jobFailed: "Job failed.",
@@ -162,7 +161,6 @@ let languageData = null;
         queuePosition: "Warteschlangenposition #{position}",
         watchJob: "Klicken, um diesen Job im Tab-Titel zu verfolgen.",
         unwatchJob: "Klicken, um die Verfolgung zu beenden; der Tab-Titel zeigt wieder nur Linguinator.",
-        unmarkHistory: "Klicken, um die Markierung dieses Eintrags zu entfernen.",
         started: "Gestartet",
         chunks: "Chunks",
         jobFailed: "Job fehlgeschlagen.",
@@ -263,7 +261,6 @@ let languageData = null;
         queuePosition: "Posicion en cola #{position}",
         watchJob: "Haz clic para seguir este trabajo en el titulo de la pestana.",
         unwatchJob: "Haz clic para dejar de seguirlo; el titulo vuelve a ser solo Linguinator.",
-        unmarkHistory: "Haz clic para quitar la marca de esta entrada.",
         started: "Iniciado",
         chunks: "fragmentos",
         jobFailed: "El trabajo fallo.",
@@ -364,7 +361,6 @@ let languageData = null;
         queuePosition: "Position en file #{position}",
         watchJob: "Cliquer pour suivre ce job dans le titre de l'onglet.",
         unwatchJob: "Cliquer pour ne plus le suivre ; le titre revient a Linguinator seul.",
-        unmarkHistory: "Cliquer pour retirer la marque de cette entree.",
         started: "Demarre",
         chunks: "segments",
         jobFailed: "Le job a echoue.",
@@ -683,11 +679,6 @@ let languageData = null;
     function rememberOwnHistory(historyId) {
       const ids = getOwnHistoryIds();
       ids.add(historyId);
-      localStorage.setItem("linguinator_own_history", JSON.stringify([...ids]));
-    }
-    function forgetOwnHistory(historyId) {
-      const ids = getOwnHistoryIds();
-      ids.delete(historyId);
       localStorage.setItem("linguinator_own_history", JSON.stringify([...ids]));
     }
 
@@ -1801,18 +1792,6 @@ let languageData = null;
       row.appendChild(tick);
       row.appendChild(main);
       row.appendChild(actions);
-      // Clicking the row drops its marking, the same way clicking a finished queue row drops the
-      // selection: the colour says "you started this one", and once seen there is no use for it.
-      row.title = t("unmarkHistory");
-      row.addEventListener("click", (event) => {
-        if (event.target.closest(".history-actions") || event.target.closest("a")) return;
-        forgetOwnHistory(item.id);
-        if (lastCompletedJob && lastCompletedJob.history_id === item.id) {
-          lastCompletedJob = null;
-          unwatchJob();
-        }
-        renderHistory();
-      });
       return row;
     }
 
