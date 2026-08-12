@@ -2165,15 +2165,25 @@ class MainTests(unittest.TestCase):
         heading = {"lines": [{"text": "Heading", "x": 50.0, "y": 700.0, "right": 150.0, "size": 14.0}]}
         below = {"lines": [{"text": "body", "x": 50.0, "y": 680.0, "right": 500.0, "size": 11.0}]}
 
-        limit = main.paragraph_width_limit(heading, [heading, below], 595.0)
+        limit = main.paragraph_width_limit(heading, [heading, below], 575.0)
 
-        self.assertEqual(limit, 595.0 - main.PDF_LAYOUT_EDGE_MARGIN)
+        self.assertEqual(limit, 575.0)
 
     def test_paragraph_width_limit_stops_at_the_next_column(self):
         left = {"lines": [{"text": "cell", "x": 50.0, "y": 700.0, "right": 150.0, "size": 10.0}]}
         right = {"lines": [{"text": "other", "x": 300.0, "y": 700.0, "right": 400.0, "size": 10.0}]}
 
-        self.assertEqual(main.paragraph_width_limit(left, [left, right], 595.0), 298.0)
+        self.assertEqual(main.paragraph_width_limit(left, [left, right], 575.0), 298.0)
+
+    def test_document_right_margin_stays_inside_the_documents_own_text_edge(self):
+        # A page edge limit pushed every paragraph past the margin the original kept. The lone
+        # full-width rule must not hand its own edge to the rest of the page.
+        page = {"width": 595.0, "paragraphs": [
+            {"lines": [{"right": 540.0}] * 20},
+            {"lines": [{"right": 590.0}]},
+        ]}
+
+        self.assertEqual(main.document_right_margin([page]), 540.0)
 
     def test_paragraph_width_limit_never_reports_less_than_the_text_itself(self):
         # A paragraph overlapping something to its right must still get its own width, not a
@@ -2181,7 +2191,7 @@ class MainTests(unittest.TestCase):
         wide = {"lines": [{"text": "wide", "x": 50.0, "y": 700.0, "right": 400.0, "size": 10.0}]}
         overlapping = {"lines": [{"text": "x", "x": 60.0, "y": 700.0, "right": 70.0, "size": 10.0}]}
 
-        self.assertEqual(main.paragraph_width_limit(wide, [wide, overlapping], 595.0), 400.0)
+        self.assertEqual(main.paragraph_width_limit(wide, [wide, overlapping], 575.0), 400.0)
 
     def test_paragraph_floor_ignores_paragraphs_beside_the_column(self):
         target = {"lines": [{"text": "cell", "x": 50.0, "y": 700.0, "right": 150.0, "size": 10.0}]}
@@ -2268,7 +2278,8 @@ class MainTests(unittest.TestCase):
         # still extractable, so assert on presence rather than absence.
         pages_text = [page.extract_text() or "" for page in main.PdfReader(BytesIO(overlay)).pages]
         self.assertEqual(len(pages_text), 1)
-        self.assertIn("Second page translated", pages_text[0])
+        # Wrapping is against the document's own right margin, so the line may break anywhere.
+        self.assertIn("Second page translated", " ".join(pages_text[0].split()))
         self.assertNotIn("First page original", pages_text[0])
 
     def test_create_pdf_from_pages_embeds_a_serif_face_for_f3(self):

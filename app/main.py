@@ -2593,8 +2593,26 @@ def paragraph_floor(paragraph: Dict[str, Any], others: List[Dict[str, Any]]) -> 
     return PDF_LAYOUT_EDGE_MARGIN if floor is None else floor
 
 
+def document_right_margin(pages: List[Dict[str, Any]]) -> float:
+    """The right edge the document's own text stops at.
+
+    Wrapping against the page edge instead let every paragraph run 30 to 50 points past the margin
+    the original kept (measured: text ending at 542 on a 595pt page, reflowed to 575), which reads
+    as the whole page having slid rightwards - the most visible flaw in the finished documents.
+
+    The 95th percentile of the line ends, not the widest of them: one full-width header or rule
+    sits at the page edge in an otherwise normally set document, and taking the maximum would hand
+    its margin to every paragraph (Reddit_discussion.pdf: 538 at the 95th percentile, 596 widest).
+    A paragraph whose own text runs past this keeps its own width, see paragraph_width_limit.
+    """
+    edge = min(page["width"] for page in pages) - PDF_LAYOUT_EDGE_MARGIN
+    rights = sorted(line["right"] for page in pages
+                    for paragraph in page["paragraphs"] for line in paragraph["lines"])
+    return min(rights[int(0.95 * (len(rights) - 1))], edge) if rights else edge
+
+
 def paragraph_width_limit(
-    paragraph: Dict[str, Any], others: List[Dict[str, Any]], page_width: float
+    paragraph: Dict[str, Any], others: List[Dict[str, Any]], right_margin: float
 ) -> float:
     """How far right the paragraph may actually run, in absolute page coordinates.
 
@@ -2602,9 +2620,9 @@ def paragraph_width_limit(
     had available - a heading alone on its line usually has most of the page to its right. The
     embedded font runs wider than the document's, so measuring against the original's ink makes
     almost every paragraph wrap one line early. The limit is whatever stands to its right on the
-    same baselines, or the page edge.
+    same baselines, or the document's own right margin.
     """
-    limit = page_width - PDF_LAYOUT_EDGE_MARGIN
+    limit = right_margin
     for line in paragraph["lines"]:
         for other in others:
             if other is paragraph:
@@ -2816,6 +2834,7 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
     """Stamp the translated text onto the original pages, so images, icons and vector graphics
     survive untouched."""
     overlay_pages = []
+    right_margin = document_right_margin(pages)
     # Paragraphs whose reflow is rejected below have to keep their original text, which means the
     # redaction pass must not erase them either - it is driven off the same list.
     kept = list(translations)
@@ -2829,7 +2848,7 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
             if (index < len(translations) and translations[index].strip()
                     and has_translatable_text(paragraph["text"])):
                 floor = paragraph_floor(paragraph, page["paragraphs"])
-                width_limit = paragraph_width_limit(paragraph, page["paragraphs"], page["width"])
+                width_limit = paragraph_width_limit(paragraph, page["paragraphs"], right_margin)
                 placed = reflow_paragraph(paragraph, translations[index], floor, width_limit)
                 if len(placed) > PDF_LAYOUT_MAX_LINE_GROWTH * len(paragraph["lines"]):
                     # Not a translation of this paragraph any more. Overflow is tolerated, but a
