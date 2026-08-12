@@ -1316,6 +1316,12 @@ let languageData = null;
       return ring;
     }
 
+    function queueDivider() {
+      const divider = document.createElement("div");
+      divider.className = "queue-divider";
+      return divider;
+    }
+
     function statusRowElement() {
       const row = document.createElement("div");
       row.className = "queue-row status-" + statusRow.status;
@@ -1380,9 +1386,7 @@ let languageData = null;
         // above it - a queue whose first row is already waiting has nothing to divide.
         if (job.status === "queued" && queue.lastElementChild
             && !queue.lastElementChild.classList.contains("status-queued")) {
-          const divider = document.createElement("div");
-          divider.className = "queue-divider";
-          queue.appendChild(divider);
+          queue.appendChild(queueDivider());
         }
         const row = document.createElement("div");
         row.className = "queue-row status-" + job.status;
@@ -1436,6 +1440,9 @@ let languageData = null;
         });
         queue.appendChild(row);
       }
+      // And one where the queue ends and the finished translations begin, so the two groups stay
+      // apart even once nothing is waiting any more.
+      if (queue.lastElementChild && historyItems.length) queue.appendChild(queueDivider());
     }
 
     const QUEUE_CONTROL_STATUSES = {
