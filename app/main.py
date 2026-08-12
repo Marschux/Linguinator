@@ -257,7 +257,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.10.13", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.10.14", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -1290,6 +1290,32 @@ def queue_positions_by_job_id() -> Dict[str, int]:
     return positions
 
 
+# How long a finished job stays in the queue before it is dropped. Its translation is in the
+# history by then; what the job itself still answers for is the tab that was watching it, and an
+# hour is far longer than anyone waits for that.
+FINISHED_JOB_RETENTION_SECONDS = 3600
+
+
+def cleanup_finished_jobs():
+    """Drop jobs that ended long ago, from memory and from disk.
+
+    Nothing ever removed them: 137 of them had piled up on the test machine, all complete, held in
+    memory, written out as one file each, reloaded on every restart and sent over the wire with
+    every poll. Only the ones still queued or running have anything left to do.
+    """
+    cutoff = time.time() - FINISHED_JOB_RETENTION_SECONDS
+    with JOBS_LOCK:
+        stale = [job_id for job_id, job in JOBS.items()
+                 if job.get("status") in ("complete", "failed", "cancelled")
+                 # Falls back to when it was queued: a record without a finish time is not a
+                 # reason to keep it for ever, but it should not vanish the moment it appears.
+                 and (job.get("finished_at") or job.get("queued_at") or 0) < cutoff]
+        for job_id in stale:
+            JOBS.pop(job_id, None)
+            JOB_RUNNERS.pop(job_id, None)
+            job_json_path(job_id).unlink(missing_ok=True)
+
+
 def list_jobs():
     """The queue as the UI polls it, every few seconds, without the translated text.
 
@@ -1297,6 +1323,7 @@ def list_jobs():
     through the listing made the answer 136 KB where the list shows none of it - three seconds
     later, and again three seconds after that, for every open tab.
     """
+    cleanup_finished_jobs()
     with JOBS_LOCK:
         positions = queue_positions_by_job_id()
         jobs = [public_job(job) for job in sorted(JOBS.values(), key=job_sort_key)]

@@ -1427,11 +1427,29 @@ class MainTests(unittest.TestCase):
         overlay_mock.assert_called_once_with(b"source pdf", "text", "2-5")
         self.assertEqual(result, b"overlay pdf")
 
+    def test_cleanup_finished_jobs_keeps_the_ones_with_work_left(self):
+        # Finished jobs were never dropped: 137 had collected on the test machine, kept in memory,
+        # written out one file each and sent along with every poll.
+        old = time.time() - 2 * main.FINISHED_JOB_RETENTION_SECONDS
+        jobs = {
+            "done": {"id": "done", "status": "complete", "finished_at": old},
+            "fresh": {"id": "fresh", "status": "complete", "finished_at": time.time()},
+            "waiting": {"id": "waiting", "status": "queued", "finished_at": None},
+            "busy": {"id": "busy", "status": "running", "finished_at": None},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(main.JOBS, jobs, clear=True), patch.object(main, "JOBS_DIR", Path(directory)):
+                main.cleanup_finished_jobs()
+                remaining = set(main.JOBS)
+
+        self.assertEqual(remaining, {"fresh", "waiting", "busy"})
+
     def test_list_jobs_leaves_the_translated_text_out(self):
         # The UI polls /jobs every few seconds and shows none of the result; carrying it along
         # made the answer 136 KB on a machine with a few finished documents on it.
-        with patch.dict(main.JOBS, {"j1": {"id": "j1", "status": "complete", "queued_at": 1.0,
-                                           "result": "a whole translated document"}}, clear=True):
+        job = {"id": "j1", "status": "complete", "queued_at": time.time(),
+               "finished_at": time.time(), "result": "a whole translated document"}
+        with patch.dict(main.JOBS, {"j1": job}, clear=True):
             listed = main.list_jobs()
             single = main.public_job(main.JOBS["j1"])
 
