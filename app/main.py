@@ -2627,8 +2627,26 @@ def reflow_paragraph(
         # the lowest overflow baseline has to clear the next paragraph's baseline by that much.
         return lowest >= floor + 1.15 * size
 
+    # The original's own first-line indent, kept: the paragraphs of a page like this are set
+    # without a blank line between them, so with the indent gone there is nothing left to show
+    # where one ends. Right-to-left text hangs off the other edge and is left alone.
+    indent = lines[0]["x"] - left if len(lines) > 1 else 0.0
+    if not 0 < indent <= PDF_LAYOUT_MAX_INDENT or is_rtl_text(text):
+        indent = 0.0
+
+    def wrap(size: float) -> List[str]:
+        if not indent:
+            return wrap_text_to_width(text, width, size, bold, serif)
+        first = wrap_text_to_width(text, width - indent, size, bold, serif)[0]
+        # Only when the wrap really is the text with a break put in it, which is every script
+        # that separates words; CJK is wrapped character by character and joined differently.
+        if not text.startswith(first):
+            return wrap_text_to_width(text, width, size, bold, serif)
+        rest = text[len(first):].strip()
+        return [first] + (wrap_text_to_width(rest, width, size, bold, serif) if rest else [])
+
     size = base_size if scale is None else base_size * scale
-    wrapped = wrap_text_to_width(text, width, size, bold, serif)
+    wrapped = wrap(size)
     # The embedded substitute font runs wider than most fonts documents are set in, so text that
     # filled n lines in the original spills into n+1 here - measured across the test documents,
     # 13 of 21 paragraphs needed an extra line for *identical* text, and not one of them needed
@@ -2636,10 +2654,10 @@ def reflow_paragraph(
     # slightly smaller line reads better than a paragraph that grew one.
     while scale is None and len(wrapped) > len(lines) and size > base_size * PDF_LAYOUT_TIGHTEN_SCALE:
         size = max(size * 0.98, base_size * PDF_LAYOUT_TIGHTEN_SCALE)
-        wrapped = wrap_text_to_width(text, width, size, bold, serif)
+        wrapped = wrap(size)
     while scale is None and not fits(len(wrapped), size) and size > base_size * PDF_LAYOUT_MIN_SCALE:
         size = max(size * 0.95, base_size * PDF_LAYOUT_MIN_SCALE)
-        wrapped = wrap_text_to_width(text, width, size, bold, serif)
+        wrapped = wrap(size)
 
     # A translation into Hebrew or Arabic hangs off the right edge of the column, the way the
     # column would have been set had the document been written in that language.
@@ -2660,7 +2678,8 @@ def reflow_paragraph(
                      (False, True): "F3", (True, True): "F4"}[(bold, serif)],
             "size": size,
             "line_height": 0,
-            "x": right - pdf_measure_text(wrapped_line, size, bold, serif) if rtl else left,
+            "x": (right - pdf_measure_text(wrapped_line, size, bold, serif) if rtl
+                  else left + (indent if index == 0 else 0.0)),
             "y": y,
             "color": color,
         })

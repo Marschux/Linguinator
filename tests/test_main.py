@@ -1567,6 +1567,19 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual([len(paragraph["lines"]) for paragraph in paragraphs], [4, 1])
 
+    def test_reflow_paragraph_keeps_the_first_line_indent(self):
+        # Pages like this set their paragraphs without a blank line between them, so the indent
+        # is the only thing showing where one ends.
+        paragraph = {"lines": [
+            {"text": "An indented opening line of", "x": 100.0, "y": 700.0, "right": 300.0, "size": 11.0},
+            {"text": "a paragraph, then the body.", "x": 64.0, "y": 686.0, "right": 300.0, "size": 11.0},
+        ]}
+
+        placed = main.reflow_paragraph(paragraph, "Eine eingerueckte erste Zeile, dann der Rumpf.")
+
+        self.assertEqual(placed[0]["x"], 100.0)
+        self.assertTrue(all(line["x"] == 64.0 for line in placed[1:]))
+
     def test_typical_line_spacing_takes_the_smallest_repeated_gap(self):
         # Not the average or the most common one: a page of short paragraphs has more gaps
         # between paragraphs than inside them, and those would then count as the leading.
