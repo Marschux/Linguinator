@@ -53,7 +53,6 @@
           <option value="csv" disabled>CSV File</option>
           <option value="pdf">PDF</option>
         </select>
-        <button id="clearInput" class="secondary clear-input" type="button" title="Clear the current input and result." data-title-key="tipClear" aria-label="Clear">&#10005;</button>
       </div>
 
       <div class="row">
@@ -73,14 +72,14 @@
       <p id="modelQualityHint" class="subtle"></p>
 
       <div id="textareaPanel" class="tab-panel active">
-        <label for="text">Text Field</label>
+        <div class="panel-heading"><label for="text">Text Field</label></div>
         <textarea id="text" title="Enter text or load it from a file." data-title-key="tipTextarea">The default translation quality should be better.</textarea>
         <div id="counter" class="counter" title="Characters used, character limit, and estimated translation chunks." data-title-key="tipCounter">0 / 0</div>
       </div>
     </section>
 
     <section id="filePanel" class="section tab-panel workspace-section">
-      <label id="textFileLabel" for="textFile">TXT File</label>
+      <div class="panel-heading"><label id="textFileLabel" for="textFile">TXT File</label></div>
       <input id="textFile" type="file" accept=".txt,text/plain" title="Select the file to load." data-title-key="tipFilePick">
       <input id="sheetName" class="file-extra" type="text" placeholder="XLSX sheet name, optional" title="Optional XLSX sheet name. Leave empty to use the first sheet." data-title-key="tipSheetName">
       <input id="csvColumns" class="file-extra" type="text" placeholder="CSV/XLSX columns, e.g. title,description or A,B" title="Column names or letters to translate." data-title-key="tipCsvColumns">
@@ -90,17 +89,19 @@
     </section>
 
     <section id="websitePanel" class="section tab-panel workspace-section">
-      <label id="websiteUrlLabel" for="websiteUrl">Website</label>
+      <div class="panel-heading"><label id="websiteUrlLabel" for="websiteUrl">Website</label></div>
       <input id="websiteUrl" type="url" placeholder="https://..." disabled
              title="Address of the page to translate. Must be publicly reachable, without a login." data-title-key="tipWebsiteUrl">
       <p id="websiteHint" class="subtle"></p>
     </section>
 
     <section id="pdfPanel" class="section tab-panel workspace-section">
-      <label for="pdf">PDF</label>
+      <div class="panel-heading"><label for="pdf">PDF</label></div>
       <input id="pdf" type="file" accept="application/pdf" title="Select the PDF to translate." data-title-key="tipPdfPick">
       <input id="pageRange" type="text" placeholder="Pages, e.g. 1-3,5" title="Optional page range, e.g. 1-3,5. Leave empty to translate all pages." data-title-key="tipPageRange">
     </section>
+
+    <button id="clearInput" class="secondary clear-input" type="button" title="Clear the current input and result." data-title-key="tipClear" aria-label="Clear">&#10005;</button>
 
     <div id="primaryActions" class="actions actions-right primary-actions">
       <button id="translate" title="Start a new translation for the current input." data-title-key="tipTranslate">Translate Input</button>

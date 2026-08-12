@@ -441,23 +441,24 @@
     .section { margin-top: 1.4rem; }
     .hidden { display: none; }
     .invisible { visibility: hidden; }
-    /* The tabs and the clear button share one line, the button pinned to the right end of it. */
-    .tabs-row {
-      align-items: stretch;
+    /* The panel's own label on the left, the clear button at the right end of the same line. */
+    .panel-heading {
+      align-items: center;
       display: flex;
-      gap: .5rem;
+      gap: 1rem;
+      justify-content: space-between;
+      min-height: 2.4rem;
     }
 
-    .tabs-row .tabs,
-    .tabs-row .input-tab-select { flex: 1 1 auto; min-width: 0; }
+    .panel-heading label { margin-bottom: 0; }
 
     .clear-input {
       flex: 0 0 auto;
-      font-size: 1.1rem;
+      font-size: 1rem;
       line-height: 1;
-      min-height: 3.6rem;
+      min-height: 2.4rem;
       padding: 0;
-      width: 3.6rem;
+      width: 2.8rem;
     }
 
     .tabs {

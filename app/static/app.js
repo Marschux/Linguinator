@@ -1004,6 +1004,10 @@ let languageData = null;
       document.querySelectorAll(".tab-panel").forEach((panel) => {
         panel.classList.toggle("active", panel.id === config.panel);
       });
+      // One button, moved into whichever panel is showing: it belongs beside that panel's own
+      // heading, and eight copies of it would be eight things to keep in step.
+      const heading = document.querySelector("#" + config.panel + " .panel-heading");
+      if (heading) heading.appendChild(document.getElementById("clearInput"));
       if (config.panel === "filePanel") {
         const fileInput = document.getElementById("textFile");
         fileInput.accept = config.accept;
