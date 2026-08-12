@@ -526,6 +526,19 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(translated, "teilen. Wenn Sie")
 
+    def test_one_invented_sentence_does_not_take_the_paragraph_with_it(self):
+        # The model invents per model call, and a call is one sentence. Guarding only the joined
+        # paragraph threw away a good translation because one sentence in it had run off.
+        answers = iter(["Der erste Satz.",
+                        "Der Präsident. — Das Wort hat die Fraktion der Europäischen Volkspartei."])
+        tokenizer = FakeTokenizer()
+        tokenizer.batch_decode = lambda generated, skip_special_tokens: [next(answers)]
+
+        with patch.object(main, "load_model", return_value=(tokenizer, FakeModel(), "cpu", FakeTorch())):
+            translated = main.translate_one("The first sentence. Watch TV.", "eng_Latn", "deu_Latn")
+
+        self.assertEqual(translated, "Der erste Satz. Watch TV.")
+
     def test_translate_batch_maps_results_back_by_position_and_skips_empties(self):
         seen_texts = {}
 
@@ -1781,6 +1794,21 @@ class MainTests(unittest.TestCase):
         self.assertEqual(
             main.guard_hallucination("Building energy", "Aufbau der körperlichen Energie"),
             "Aufbau der körperlichen Energie",
+        )
+        # Measured pairs from the test document: a chapter heading that came back as Europarl
+        # boilerplate goes, the longest genuine growth on those pages stays.
+        self.assertEqual(
+            main.guard_hallucination("Chapter 1", "Kapitel 1 — ENTWICKLUNG UND ENTWICKLUNGEN"),
+            "Chapter 1",
+        )
+        self.assertEqual(main.guard_hallucination("My Story", "Meine Geschichte"), "Meine Geschichte")
+        self.assertEqual(
+            main.guard_hallucination(
+                "3. Watching television for 30 minutes",
+                "3. Der Präsident. — Das Wort hat die Fraktion der Europäischen Demokraten. "
+                "Fernsehen für 30 Minuten",
+            ),
+            "3. Watching television for 30 minutes",
         )
 
     def test_layout_overlay_leaves_wordless_fragments_untouched(self):

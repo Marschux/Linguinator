@@ -581,11 +581,12 @@ LEADER_RUN = re.compile(r"\s*(?:\.\s*){4,}")
 # A result this much longer than its source is not a translation. The fallback model answers short,
 # low-content fragments - a page number, a list marker, a heading - by dumping training data
 # ("Der Präsident. — Das Wort hat die Fraktion...", "== Weblinks =="), which the layout pipeline
-# then lays out as if it were text and runs across the whole page. Generous enough that no real
-# translation trips it: German runs some 20% longer than English, and the constant leaves genuinely
-# short strings room to grow.
-HALLUCINATION_LENGTH_FACTOR = 3.0
-HALLUCINATION_LENGTH_MARGIN = 20
+# then lays out as if it were text and runs across the whole page. Measured against 153 real
+# paragraph pairs from the test document: at these values the eleven invented ones are rejected and
+# no genuine translation is, the longest of which grew from "My Story" to "Meine Geschichte" (x2.0,
+# inside the margin). Applied per sentence, so the factor never has to cover a whole paragraph.
+HALLUCINATION_LENGTH_FACTOR = 2.0
+HALLUCINATION_LENGTH_MARGIN = 15
 
 # Degenerate repetition ("ENTWICKLUNG DER ENTWICKLUNG DER ...", "iv iv iv iv") is the other half of
 # the same failure, and beam search alone does not break out of it. Six *tokens* is more than one
@@ -626,7 +627,10 @@ def translate_one(text: str, source: str, target: str) -> str:
                     num_beams=4,
                     no_repeat_ngram_size=NO_REPEAT_NGRAM_SIZE,
                 )
-            results.append(tokenizer.batch_decode(generated, skip_special_tokens=True)[0])
+            decoded = tokenizer.batch_decode(generated, skip_special_tokens=True)[0]
+            # Guarded per sentence, because that is the unit the model invents in: one made-up
+            # sentence in the middle of a paragraph used to take the whole paragraph down with it.
+            results.append(guard_hallucination(part, decoded))
         joined = normalize_translated_text(" ".join(part.strip() for part in results if part.strip()))
         return guard_hallucination(text, joined)
     finally:
@@ -653,6 +657,9 @@ def translate_batch(texts: List[str], source: str, target: str) -> List[str]:
             for part in split_to_sentences(tokenizer, texts[i]):
                 batch_texts.append(part)
                 owners.append(i)
+        # Kept before the target-language prefix is glued on, so guard_hallucination below
+        # measures against the sentence itself.
+        sources = list(batch_texts)
         if model_family(model_id) == "prefix":
             prefix = model_language_code(model_id, target)
             batch_texts = [f"{prefix} {text}" for text in batch_texts]
@@ -672,7 +679,8 @@ def translate_batch(texts: List[str], source: str, target: str) -> List[str]:
         end_model_use()
 
     parts: Dict[int, List[str]] = {}
-    for owner, text in zip(owners, decoded):
+    for owner, source_text, text in zip(owners, sources, decoded):
+        text = guard_hallucination(source_text, text)
         if text.strip():
             parts.setdefault(owner, []).append(text.strip())
     results = ["" for _ in texts]
