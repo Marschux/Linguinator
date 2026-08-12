@@ -1811,6 +1811,16 @@ class MainTests(unittest.TestCase):
             "3. Watching television for 30 minutes",
         )
 
+    def test_guard_hallucination_rejects_wiki_markup_the_source_never_had(self):
+        # The author's name on the title page came back as the scaffolding of a Wikipedia article,
+        # and at the same length as its source the length check cannot see it.
+        self.assertEqual(
+            main.guard_hallucination("Russ Seigenberg, Ph.D.", "== Weblinks ==== Einzelnachweise =="),
+            "Russ Seigenberg, Ph.D.",
+        )
+        self.assertEqual(main.guard_hallucination("See [[Anchor]]", "Siehe [[Anker]]"), "Siehe [[Anker]]")
+        self.assertEqual(main.guard_hallucination("a == b", "a == b"), "a == b")
+
     def test_layout_overlay_leaves_wordless_fragments_untouched(self):
         # A fragment keeps its original: it must be neither redacted away nor redrawn, or the
         # page loses a character it could have kept.

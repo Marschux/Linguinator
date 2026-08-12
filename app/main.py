@@ -588,6 +588,13 @@ LEADER_RUN = re.compile(r"\s*(?:\.\s*){4,}")
 HALLUCINATION_LENGTH_FACTOR = 2.0
 HALLUCINATION_LENGTH_MARGIN = 15
 
+# The other tell, for the ones that come back the same length as their source and so pass the check
+# above: the model was trained on Wikipedia dumps and answers a standalone name or heading with the
+# scaffolding of an article rather than a translation. "Russ Seigenberg, Ph.D." on the title page
+# came back as "== Weblinks ==== Einzelnachweise ==" three times over. Section markers, links and
+# templates; no translation produces them unless the source carried them too, which is checked.
+HALLUCINATION_MARKUP = re.compile(r"==|\[\[|]]|\{\{|}}")
+
 # Degenerate repetition ("ENTWICKLUNG DER ENTWICKLUNG DER ...", "iv iv iv iv") is the other half of
 # the same failure, and beam search alone does not break out of it. Six *tokens* is more than one
 # period of such a loop but still well above anything a single sentence repeats on purpose.
@@ -601,6 +608,8 @@ def clean_source_text(text: str) -> str:
 def guard_hallucination(source: str, translated: str) -> str:
     """Keep the original wherever the model clearly invented rather than translated."""
     if len(translated) > HALLUCINATION_LENGTH_FACTOR * len(source) + HALLUCINATION_LENGTH_MARGIN:
+        return source
+    if HALLUCINATION_MARKUP.search(translated) and not HALLUCINATION_MARKUP.search(source):
         return source
     return translated
 
