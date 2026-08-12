@@ -1343,17 +1343,16 @@ let languageData = null;
         const main = document.createElement("div");
         const title = document.createElement("div");
         title.className = "queue-title";
-        const typeBadge = typeBadgeElement(job.source_extension);
         row.dataset.fileType = fileTypeKey(job.source_extension);
         const position = job.position ? "#" + job.position + " " : "";
         title.appendChild(document.createTextNode(
           position + (job.label || job.kind) + " - " + job.status));
-        title.appendChild(typeBadge);
         const meta = document.createElement("div");
         meta.className = "queue-meta";
+        meta.appendChild(typeBadgeElement(job.source_extension));
         const languages = [job.source, job.target].filter(Boolean).map(formatLanguageLabel).join(" -> ");
         const started = job.started_at ? t("started") + " " + formatJobTime(job.started_at) : t("queued") + " " + formatJobTime(job.queued_at);
-        meta.textContent = [languages, started].filter(Boolean).join(" | ");
+        meta.appendChild(document.createTextNode([languages, started].filter(Boolean).join(" | ")));
         const progress = document.createElement("div");
         progress.className = "queue-progress";
         const progressLabel = job.status === "queued" && job.position
@@ -1631,10 +1630,10 @@ let languageData = null;
       }
     }
 
-    function historyDisplayName(item) {
+    function historyTimestamp(item) {
       const date = formatHistoryDate(item.created_at);
       const time = formatHistoryTime(item.created_at);
-      return item.original_name + " — " + date + (time ? " " + time : "");
+      return date + (time ? " " + time : "");
     }
 
     function formatBytes(bytes) {
@@ -1694,12 +1693,17 @@ let languageData = null;
       const main = document.createElement("div");
       main.className = "history-main";
       const link = document.createElement("a");
-      link.textContent = historyDisplayName(item);
+      // The name on its own line; everything that describes it - type, languages, size, when -
+      // on the line below, so a long filename cannot push any of it out of sight.
+      link.textContent = item.original_name;
       const meta = document.createElement("div");
       meta.className = "history-meta";
+      meta.appendChild(typeBadgeElement(item.source_extension));
       // Names, not codes: "deu_Latn -> eng_Latn" is unreadable at a glance in a long list.
-      meta.textContent = formatLanguageLabel(item.source) + " -> " + formatLanguageLabel(item.target)
-        + " | " + formatBytes(item.size_bytes);
+      meta.appendChild(document.createTextNode(
+        formatLanguageLabel(item.source) + " -> " + formatLanguageLabel(item.target)
+        + " | " + formatBytes(item.size_bytes)
+        + " | " + historyTimestamp(item)));
       const format = document.createElement("select");
       format.className = "history-format";
       format.title = t("historyFormat");
@@ -1735,7 +1739,6 @@ let languageData = null;
       syncDownloadHref();
       format.addEventListener("change", syncDownloadHref);
       main.appendChild(link);
-      main.appendChild(typeBadgeElement(item.source_extension));
       main.appendChild(meta);
       const actions = document.createElement("div");
       actions.className = "history-actions";
