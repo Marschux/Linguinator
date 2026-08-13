@@ -112,8 +112,12 @@ PDF_LIST_MARKER = re.compile(r"^\s*(?:[-•‣▪●◦*]|\(?\d{1,3}[.)])\s")
 PDF_LAYOUT_TIGHTEN_SCALE = 0.9
 # The same, for a paragraph with no room below it for even one more line - a table cell being the
 # usual one. There the extra line does not land in a gap, it lands outside the box, so fitting the
-# original line count is worth more type size than elsewhere.
-PDF_LAYOUT_BOXED_MIN_SCALE = 0.6
+# original line count is worth more type size than elsewhere. As low as
+# PDF_LAYOUT_CROWDED_MIN_SCALE for the same reason it is: a line outside its cell is the same
+# fault as a line on top of the next paragraph. At 0.6 the header cell of Powerupall's research
+# table ("im Zusammenhang mit bestimmten anderen Faktoren") stopped one step short of fitting and
+# hung its last word under the table, through the rule below it.
+PDF_LAYOUT_BOXED_MIN_SCALE = 0.5
 # And for a paragraph that would otherwise be drawn on top of the one below it. Lower than either
 # of the above, because the alternative is not a cramped page but unreadable text: measured over
 # the Powerupall pages reported as colliding, the four paragraphs that still ran into their
