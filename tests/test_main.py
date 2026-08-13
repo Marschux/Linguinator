@@ -2066,6 +2066,40 @@ class MainTests(unittest.TestCase):
         self.assertNotIn("Hello world", text)
         self.assertIn(",", text)
 
+    def test_layout_overlay_sets_one_size_across_the_whole_document(self):
+        # A page whose translation fits at full size, followed by one that has to shrink. Settled
+        # per page, the two came back in different sizes, which shows as body text changing size
+        # from one page to the next (measured on Powerupall: 7.7 to 11.0 across its 92 text pages).
+        def page(number, text):
+            return {
+                "number": number, "width": 400.0, "height": 300.0,
+                "paragraphs": [{"text": text, "lines": [
+                    {"text": text, "x": 50.0, "y": 200.0, "right": 350.0, "size": 11.0},
+                ]}],
+            }
+
+        def source_page(text):
+            return {
+                "width": 400, "height": 300, "margin": 40,
+                "source_page": "", "continuation": False, "footer": False,
+                "lines": [{"text": text, "font": "F1", "size": 11, "line_height": 14,
+                           "x": 50, "y": 200}],
+            }
+
+        pages = [page(1, "Short one"), page(2, "The second line here")]
+        source = main.create_pdf_from_pages([source_page("Short one"),
+                                             source_page("The second line here")])
+
+        # The second translation is far longer than its original and forces a smaller size.
+        overlay = main.render_pdf_layout_overlay(
+            source, pages, ["Kurz", "Die zweite Zeile steht hier und ist erheblich länger als ihr "
+                                    "Original, sodass sie kleiner gesetzt werden muss"])
+
+        sizes = {round(span["size"], 1) for number in (0, 1)
+                 for span in pdf_spans(overlay, number) if span["text"].strip()}
+
+        self.assertEqual(len(sizes), 1, f"body text set in several sizes: {sorted(sizes)}")
+
     def test_layout_overlay_keeps_the_original_when_the_reflow_explodes(self):
         # The model answers a heading with several lines of invented text; laid out, that block
         # buries everything below it. The original heading is the better of the two to keep.
@@ -2364,6 +2398,32 @@ class MainTests(unittest.TestCase):
         rule = {"x": 151.5, "right": 160.0, "top": 505.0, "bottom": 500.0}
 
         self.assertEqual(main.paragraph_width_limit(paragraph, [paragraph], 542.0, [rule]), 339.0)
+
+    def test_group_pdf_paragraphs_splits_on_a_change_of_weight(self):
+        # Get_Started_With_Smallpdf sets its headings bold at the body size, so the size check
+        # alone kept them in the paragraph below, where they lost their own weight and alignment.
+        lines = [
+            {"text": "Digital Documents-All In One Place", "x": 289.0, "y": 694.0,
+             "right": 508.0, "size": 14.0, "bold": True},
+            {"text": "With the new Smallpdf experience, you can", "x": 289.0, "y": 670.0,
+             "right": 562.0, "size": 14.0, "bold": False},
+            {"text": "freely upload, organize, and share digital", "x": 289.0, "y": 650.0,
+             "right": 555.0, "size": 14.0, "bold": False},
+        ]
+        paragraphs = main.group_pdf_paragraphs(lines)
+
+        self.assertEqual([len(p["lines"]) for p in paragraphs], [1, 2])
+        self.assertEqual(paragraphs[0]["text"], "Digital Documents-All In One Place")
+
+        # A bold lead-in does not split a sentence: a line's weight is the face most of its own
+        # characters use, so the continuation lines stay with it.
+        run_on = [
+            {"text": "Note: this applies to every account", "x": 65.0, "y": 700.0,
+             "right": 400.0, "size": 11.0, "bold": False},
+            {"text": "created after the migration.", "x": 65.0, "y": 686.0, "right": 300.0,
+             "size": 11.0, "bold": False},
+        ]
+        self.assertEqual(len(main.group_pdf_paragraphs(run_on)), 1)
 
     def test_paragraph_center_finds_a_centred_heading(self):
         # Powerupall's text column runs 65..551. A centred heading sits within a couple of points

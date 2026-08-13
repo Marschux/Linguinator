@@ -278,7 +278,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.11.3", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.11.5", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -2612,6 +2612,13 @@ def group_pdf_paragraphs(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 # alone: same left edge, same leading, and a whole list came out as prose.
                 and not PDF_LIST_MARKER.match(line["text"])
                 and abs(previous["size"] - line["size"]) <= 0.2 * previous["size"]
+                # A change of weight ends a paragraph just as a change of size does. Not every
+                # document sets its headings larger: Get_Started_With_Smallpdf sets them bold at
+                # the body size, so they were swallowed by the paragraph below and lost both their
+                # own weight (paragraph_base_size and the bold vote go by majority) and their own
+                # alignment. Safe against a bold lead-in inside a sentence, because a line's own
+                # weight is already decided by which face most of its characters use.
+                and bool(previous.get("bold")) == bool(line.get("bold"))
             )
             if fits:
                 current["lines"].append(line)
@@ -3157,11 +3164,14 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
     # redaction pass must not erase them either - it is driven off the same list.
     kept = list(translations)
     index = 0
+    # (paragraph, translation, floor, width limit, box floor, centre, the lines it laid out),
+    # per page. Collected for the whole document before anything is drawn, because the size every
+    # paragraph ends up in is a decision about the document and not about its page, see below.
+    per_page: List[List[Tuple[Any, ...]]] = []
+    # The smallest scale any paragraph of a given base size needed, anywhere in the document.
+    scales: Dict[float, float] = {}
     for page in pages:
-        # (paragraph, translation, floor, width limit, box floor, centre, the lines it laid out)
         reflowed: List[Tuple[Any, ...]] = []
-        # The smallest scale any paragraph of a given base size needed, see below.
-        scales: Dict[float, float] = {}
         for paragraph in page["paragraphs"]:
             if (index < len(translations) and translations[index].strip()
                     and has_translatable_text(paragraph["text"])):
@@ -3185,15 +3195,23 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
                     key = round(base, 1)
                     # Clamped at the ordinary minimum: a paragraph that had to go below it is
                     # walled in by its own box (see PDF_LAYOUT_BOXED_MIN_SCALE), and one cramped
-                    # table cell must not set the size of every paragraph on the page.
+                    # table cell must not set the size of every paragraph in the document.
                     scales[key] = min(scales.get(key, 1.0),
                                       max(placed[0]["size"] / base, PDF_LAYOUT_MIN_SCALE))
             index += 1
+        per_page.append(reflowed)
 
-        # Every paragraph the page sets in one size is redrawn in one size. Each shrinks itself
-        # just enough to fit its own translation, which left body text at 0.7 next to body text
-        # at 1.0 in the same column - the most visible flaw in the finished document. Headings
-        # keep their own scale, they are a size of their own to begin with.
+    # Every paragraph the document sets in one size is redrawn in one size. Each shrinks itself
+    # just enough to fit its own translation, which left body text at 0.7 next to body text at 1.0
+    # - first in the same column, and once that was settled per page, still from one page to the
+    # next: measured over the 92 text pages of Powerupall, body text set at 11.0 throughout came
+    # back between 7.7 and 11.0, with a different size on facing pages. Headings keep their own
+    # scale, they are a size of their own to begin with.
+    #
+    # The smallest scale the document needs, not an average of them: it is the only one every
+    # paragraph still fits in, and anything larger buys its evenness by pushing the densest pages
+    # into overflow, which is the more visible fault of the two.
+    for page, reflowed in zip(pages, per_page):
         lines: List[Dict[str, Any]] = []
         for paragraph, text, floor, width_limit, box_floor, centre, placed in reflowed:
             base = paragraph_base_size(paragraph)
