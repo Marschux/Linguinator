@@ -3450,6 +3450,84 @@ def redact_translated_text(content: bytes, pages: List[Dict[str, Any]], translat
     return document.tobytes(garbage=3, deflate=True)
 
 
+def level_table_sizes(paragraphs: List[Dict[str, Any]], bases: List[float], targets: List[float],
+                      obstacles: List[Dict[str, float]]):
+    """Pull every paragraph of a table down to the smallest size any of them needs, in place.
+
+    Deliberately unlike the original: at the scale a document ends up in nobody can tell 11pt from
+    12pt any more, all that is left is the impression of several sizes in one table, and side by
+    side that shows (Powerupall page 50, "Kreative und energetische / Teilnahme an Elternschaft",
+    11.0 against 12.0, rendered 7.5 against 6.6; page 72 alternated 6.6 and 7.7 row by row).
+
+    Three relations put paragraphs into the same group, and only ever between paragraphs whose own
+    sizes are close - the same 20 % group_pdf_paragraphs takes for a change of size, so 11 against
+    12 is levelled and a 16pt header cell against 11pt body keeps its size:
+
+    - beside each other, which is what makes a row. Not "on one baseline": cells of a row start
+      within a line of each other rather than on the same line, those two 6pt apart.
+    - inside the same drawn cell, which is what makes a cell hold one size even where its text
+      falls into several paragraphs.
+    - the same left edge one above the other, which joins the rows of a table into the table. Only
+      between paragraphs that are cells to begin with, so ordinary body text is never caught.
+    """
+    count = len(paragraphs)
+    extent = [(min(line["x"] for line in item["lines"]),
+               max(line["right"] for line in item["lines"]),
+               min(line["y"] for line in item["lines"]),
+               max(line["y"] for line in item["lines"])) for item in paragraphs]
+    cell = [(enclosing_box_sides(item, obstacles), enclosing_box_bottom(item, obstacles))
+            for item in paragraphs]
+    group = list(range(count))
+
+    def root(index):
+        while group[index] != index:
+            group[index] = group[group[index]]
+            index = group[index]
+        return index
+
+    def join(one, other):
+        group[root(one)] = root(other)
+
+    def comparable(one, other):
+        return abs(bases[one] - bases[other]) <= 0.2 * max(bases[one], bases[other])
+
+    beside = [False] * count
+    for index in range(count):
+        left, right, bottom, top = extent[index]
+        for other in range(index + 1, count):
+            other_left, other_right, other_bottom, other_top = extent[other]
+            # Clear of each other horizontally and overlapping vertically, with a line of
+            # tolerance: paragraphs of one column always overlap horizontally and never pair up.
+            if (other_left > right or other_right < left) \
+                    and other_bottom - bases[index] <= top \
+                    and other_top + bases[index] >= bottom:
+                beside[index] = beside[other] = True
+                if comparable(index, other):
+                    join(index, other)
+            # The same cell, where the document draws one.
+            elif cell[index][0] is not None and cell[index] == cell[other] and comparable(index,
+                                                                                         other):
+                join(index, other)
+
+    for index in range(count):
+        for other in range(index + 1, count):
+            # One above the other in the same column of the table, which is what holds its rows
+            # together: the rows themselves never overlap vertically and cannot be joined by the
+            # test above.
+            if beside[index] and beside[other] and comparable(index, other) \
+                    and abs(extent[index][0] - extent[other][0]) <= 3 \
+                    and min(extent[index][2] - extent[other][3],
+                            extent[other][2] - extent[index][3]) <= 3 * bases[index]:
+                join(index, other)
+
+    smallest: Dict[int, float] = {}
+    for index in range(count):
+        key = root(index)
+        smallest[key] = min(smallest.get(key, targets[index]), targets[index])
+    for index in range(count):
+        targets[index] = smallest[root(index)]
+
+
 def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], translations: List[str]) -> bytes:
     """Stamp the translated text onto the original pages, so images, icons and vector graphics
     survive untouched."""
@@ -3533,31 +3611,8 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
                 scale = cramped.get(round(base, 1), placed[0]["size"] / base)
             # Never larger than what this paragraph found on its own, so it still fits.
             targets.append(min(placed[0]["size"], base * scale))
-        # Cells standing beside each other are set in one size, whatever the original did.
-        # Deliberately unlike the original: at the scale the document ends up in nobody can tell
-        # 11pt from 12pt any more, all that is left is the impression of two sizes in one row, and
-        # side by side that shows (Powerupall page 50, "Kreative und energetische / Teilnahme an
-        # Elternschaft", 11.0 against 12.0, rendered 7.5 against 6.6). Beside, not on one baseline:
-        # cells of a row start within a line of each other rather than on the same line, those two
-        # 6pt apart. Only between cells whose own sizes are close, using the same 20 %
-        # group_pdf_paragraphs takes for a change of size: 11 against 12 is 9 % and is levelled, a
-        # 16pt header cell against 11pt body is 45 % and keeps its size.
-        boxes = [(min(line["x"] for line in item[0]["lines"]),
-                  max(line["right"] for line in item[0]["lines"]),
-                  min(line["y"] for line in item[0]["lines"]),
-                  max(line["y"] for line in item[0]["lines"])) for item in reflowed]
-        for index, (left, right, bottom, top) in enumerate(boxes):
-            for other, (other_left, other_right, other_bottom, other_top) in enumerate(boxes):
-                # Beside: the two overlap vertically and stand clear of each other horizontally.
-                # Paragraphs of one column always overlap horizontally and never pair up.
-                # A line of tolerance on the vertical overlap: the 12pt cell of that row holds a
-                # single line and sits wholly above the first line of the 11pt cell beside it.
-                if (other_left > right or other_right < left) \
-                        and other_bottom - bases[index] <= top \
-                        and other_top + bases[index] >= bottom \
-                        and abs(bases[other] - bases[index]) <= 0.2 * max(bases[index],
-                                                                         bases[other]):
-                    targets[index] = min(targets[index], targets[other])
+        level_table_sizes([item[0] for item in reflowed], bases, targets,
+                          page.get("obstacles") or [])
 
         lines: List[Dict[str, Any]] = []
         for (paragraph, text, floor, width_limit, box_floor, centre, placed), base, target in zip(

@@ -2213,6 +2213,37 @@ class MainTests(unittest.TestCase):
         self.assertEqual(sizes["Linke"], sizes["Rechte"])
         self.assertNotEqual(sizes["Überschrift"], sizes["Linke"])
 
+    def test_level_table_sizes_pulls_a_whole_table_to_one_size(self):
+        # Powerupall page 72: cells beside each other were levelled, rows above each other were
+        # not, so the table alternated between two sizes row by row.
+        def cell(left, baseline, size=11.0):
+            return {"lines": [{"x": left, "y": baseline, "right": left + 100, "size": size}]}
+
+        paragraphs = [cell(50, 740, 16.0),                      # heading above the table
+                      cell(50, 700), cell(200, 700),            # first row
+                      cell(50, 680), cell(200, 680),            # second row
+                      cell(50, 400)]                            # body text further down
+        bases = [16.0, 11.0, 11.0, 11.0, 11.0, 11.0]
+        targets = [16.0, 8.0, 8.0, 6.0, 8.0, 9.0]
+
+        main.level_table_sizes(paragraphs, bases, targets, [])
+
+        self.assertEqual(targets[1:5], [6.0, 6.0, 6.0, 6.0])
+        self.assertEqual(targets[0], 16.0)   # a heading is a size of its own
+        self.assertEqual(targets[5], 9.0)    # body text is no part of the table
+
+    def test_level_table_sizes_holds_one_cell_to_one_size(self):
+        # A cell whose text falls into several paragraphs came back with the first one larger
+        # than the rest (Powerupall page 50, "Kreative und energetische …").
+        box = {"x": 40.0, "right": 180.0, "top": 720.0, "bottom": 660.0}
+        paragraphs = [{"lines": [{"x": 50.0, "y": 700.0, "right": 150.0, "size": 11.0}]},
+                      {"lines": [{"x": 50.0, "y": 685.0, "right": 150.0, "size": 11.0}]}]
+        targets = [9.0, 7.0]
+
+        main.level_table_sizes(paragraphs, [11.0, 11.0], targets, [box])
+
+        self.assertEqual(targets, [7.0, 7.0])
+
     def test_layout_overlay_keeps_the_original_when_the_reflow_explodes(self):
         # The model answers a heading with several lines of invented text; laid out, that block
         # buries everything below it. The original heading is the better of the two to keep.
