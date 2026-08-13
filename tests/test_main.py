@@ -1996,6 +1996,45 @@ class MainTests(unittest.TestCase):
         self.assertEqual(main.guard_hallucination("See [[Anchor]]", "Siehe [[Anker]]"), "Siehe [[Anker]]")
         self.assertEqual(main.guard_hallucination("a == b", "a == b"), "a == b")
 
+    def test_guard_hallucination_allows_cjk_to_expand(self):
+        # Han and kana carry a word in one or two characters, so a correct German translation is
+        # several times its source in length. Measured pairs (fallback model, guard off, ja/zh -> de):
+        # the guard used to discard all of these, which is why Hoshi_no_Kagi came back with its
+        # headings and quote still in Japanese.
+        for source, translated in (
+            ("星の鍵と幻影の森", "Der Schlüssel zu den Sternen und der Schattenwald."),
+            ("第六章：星の鍵の覚醒", "Kapitel 6: Das Auftauchen des Schlüssels der Sterne"),
+            ("「千年に一度、星々が地に墜ちる夜、運命の鍵が覚醒する。」",
+             '"Die Nacht, in der die Sterne einmal im Jahr auf die Erde fallen, '
+             'die Nacht, in der der Schlüssel des Schicksals erwacht."'),
+            ("系统要求", "Das System verlangt es."),
+            ("星之钥与幻影之森", "Der Sternschlüssel und der Schatten."),
+        ):
+            self.assertEqual(main.guard_hallucination(source, translated), translated)
+
+        # The extra room is not a free pass: a training-data dump off a CJK heading is still caught.
+        heading = "第六章：星の鍵の覚醒"
+        self.assertEqual(
+            main.guard_hallucination(
+                heading,
+                "3. Der Präsident. — Das Wort hat die Fraktion der Europäischen Demokraten zu "
+                "einer Frage der Geschäftsordnung. Ich erteile ihm das Wort.",
+            ),
+            heading,
+        )
+
+        # Hangul is deliberately not weighted: the fallback model answers Korean with Bible
+        # boilerplate, and the unweighted budget is what keeps it off the page.
+        korean = "세계가 아직 젊고 대기에 마법 입자가 가득했던 시대."
+        self.assertEqual(
+            main.guard_hallucination(
+                korean,
+                "Und es geschah, als der dritte Knabe diente, daß er auf dem Felde wohnte, "
+                "und er sprach zu ihm: Siehe, ich bin bei dir.",
+            ),
+            korean,
+        )
+
     def test_layout_overlay_leaves_wordless_fragments_untouched(self):
         # A fragment keeps its original: it must be neither redacted away nor redrawn, or the
         # page loses a character it could have kept.
@@ -2325,6 +2364,88 @@ class MainTests(unittest.TestCase):
         rule = {"x": 151.5, "right": 160.0, "top": 505.0, "bottom": 500.0}
 
         self.assertEqual(main.paragraph_width_limit(paragraph, [paragraph], 542.0, [rule]), 339.0)
+
+    def test_paragraph_center_finds_a_centred_heading(self):
+        # Powerupall's text column runs 65..551. A centred heading sits within a couple of points
+        # of its middle with matching room on both sides; reflow_paragraph used to set it flush
+        # left, which moved the title of every chapter page.
+        heading = {"lines": [{"text": "Chapter 1", "x": 265.0, "y": 700.0, "right": 347.0,
+                              "size": 16.0}]}
+        self.assertAlmostEqual(main.paragraph_center(heading, 65.0, 551.0), 306.0)
+
+        # Two lines of differing width around one axis, a centred epigraph.
+        quote = {"lines": [
+            {"text": "Happiness depends, as Nature shows,", "x": 190.0, "y": 700.0,
+             "right": 422.0, "size": 11.0},
+            {"text": "less on exterior things", "x": 232.0, "y": 686.0, "right": 380.0,
+             "size": 11.0},
+        ]}
+        self.assertAlmostEqual(main.paragraph_center(quote, 65.0, 551.0), 306.0)
+
+    def test_paragraph_center_leaves_flowed_and_indented_text_alone(self):
+        # Justified body text fills the column, so every line shares its centre. Without the
+        # clearance test that read as centred (Powerupall, "5. The goal is to slowly become...").
+        body = {"lines": [
+            {"text": "5. The goal is to slowly become more conditioned,", "x": 47.0, "y": 700.0,
+             "right": 550.0, "size": 11.0},
+            {"text": "and lung capacity. A well-conditioned body performs", "x": 65.0,
+             "y": 686.0, "right": 551.0, "size": 11.0},
+        ]}
+        self.assertIsNone(main.paragraph_center(body, 65.0, 551.0))
+
+        # An indented block is set against its own left edge, not around a centre.
+        indented = {"lines": [
+            {"text": "the first line of the quotation runs long", "x": 150.0, "y": 700.0,
+             "right": 540.0, "size": 11.0},
+            {"text": "and the second is shorter", "x": 150.0, "y": 686.0, "right": 300.0,
+             "size": 11.0},
+        ]}
+        self.assertIsNone(main.paragraph_center(indented, 65.0, 551.0))
+
+    def test_paragraph_center_measures_against_the_cell_a_paragraph_sits_in(self):
+        # Systemrequirements' "Minimum" column header is flush left in its own cell and only
+        # happens to land near the middle of the page.
+        header = {"lines": [{"text": "Minimum", "x": 234.0, "y": 700.0, "right": 270.0,
+                             "size": 8.5}]}
+        cell = {"x": 225.0, "right": 362.0, "top": 712.0, "bottom": 694.0}
+
+        self.assertIsNone(main.paragraph_center(header, 54.0, 453.0, [cell]))
+        # Without the cell, the page margins alone make it look centred.
+        self.assertIsNotNone(main.paragraph_center(header, 54.0, 453.0))
+
+        # A full-page background is not a column: measured against it, ordinary body text sits
+        # symmetrically and read as centred (Geschäftsbedingungen).
+        body = {"lines": [{"text": "Unsere Angebote haben eine Gültigkeitsdauer", "x": 71.0,
+                           "y": 700.0, "right": 527.0, "size": 11.0}]}
+        page_background = {"x": 0.0, "right": 594.0, "top": 800.0, "bottom": 0.0}
+
+        self.assertIsNone(main.paragraph_center(body, 71.0, 539.0, [page_background]))
+
+    def test_reflow_paragraph_sets_a_centred_paragraph_around_its_axis(self):
+        heading = {"lines": [{"text": "Chapter 1", "x": 265.0, "y": 700.0, "right": 347.0,
+                              "size": 16.0}]}
+        placed = main.reflow_paragraph(heading, "Kapitel 1", width_limit=551.0, centre=306.0)
+
+        self.assertEqual(len(placed), 1)
+        width = main.pdf_measure_text(placed[0]["text"], placed[0]["size"], False, False)
+        self.assertAlmostEqual(placed[0]["x"] + width / 2, 306.0, places=3)
+        # A centred paragraph is never also justified, that would undo the centring line by line.
+        self.assertNotIn("justify_to", placed[0])
+
+    def test_paragraph_width_limit_ignores_an_icon_it_cannot_fit_inside(self):
+        # Get_Started_With_Smallpdf draws 139 icons and decorations. One that merely started left
+        # of a line's own x claimed to be that line's box: a 42pt icon walled a 253pt paragraph in
+        # at 19pt, which reflowed to one word per line, blew past PDF_LAYOUT_MAX_LINE_GROWTH and
+        # left three of the four body paragraphs in English.
+        paragraph = {"lines": [
+            {"text": "Digital Documents-All In One Place", "x": 289.0, "y": 694.0,
+             "right": 508.0, "size": 14.0},
+            {"text": "With the new Smallpdf experience, you can", "x": 289.0, "y": 676.0,
+             "right": 562.0, "size": 14.0},
+        ]}
+        icon = {"x": 268.0, "right": 310.0, "top": 717.0, "bottom": 652.0}
+
+        self.assertEqual(main.paragraph_width_limit(paragraph, [paragraph], 560.0, [icon]), 562.0)
 
     def test_paragraph_floor_stops_above_an_image_and_inside_a_box(self):
         paragraph = {"lines": [{"text": "text", "x": 50.0, "y": 700.0, "right": 300.0, "size": 10.0}]}

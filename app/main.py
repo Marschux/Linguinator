@@ -119,6 +119,17 @@ PDF_LAYOUT_BOXED_MIN_SCALE = 0.6
 # substitute font wider), a block three times the height is the model having invented text, and
 # it lands on top of everything below it.
 PDF_LAYOUT_MAX_LINE_GROWTH = 3
+# How much of a paragraph's own width a shape has to span before paragraph_width_limit accepts it
+# as the box the paragraph sits in. Measured (Aug 2026) over both documents that depend on this:
+# the icons and decorations Get_Started_With_Smallpdf mistook for boxes span 0.07 to 0.38 of their
+# paragraph, the real table cells of Systemrequirements 0.74 (the "Any graphic card..." line, whose
+# original overruns its own cell) and upwards. The gap between those two is where this sits.
+PDF_LAYOUT_WALL_MIN_SPAN = 0.55
+# How far a line may sit off a centre and still count as set around it, as a fraction of the text
+# column's width. Measured (Aug 2026) on Powerupall, whose text column runs 65..551: every centred
+# heading and page number on it sits within 2pt of the column's centre (0.4 %), while the nearest
+# thing that must not be mistaken for one, a left-aligned list item, is 120pt off (25 %).
+PDF_LAYOUT_CENTRE_TOLERANCE = 0.03
 # Layout-PDF paragraphs are usually short, so translating one per model call wastes most of
 # each call on fixed beam-search overhead. Batched via the tensor's batch dimension (not string
 # concatenation), so paragraph boundaries stay exact; kept small to cap the extra padding memory
@@ -267,7 +278,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.10.17", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.11.3", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -609,6 +620,33 @@ LEADER_RUN = re.compile(r"\s*(?:\.\s*){4,}")
 HALLUCINATION_LENGTH_FACTOR = 2.0
 HALLUCINATION_LENGTH_MARGIN = 15
 
+# The factor above counts characters, which only compares like with like as long as source and
+# target write a word in roughly as many of them. Han and kana do not: they carry a whole word in
+# one or two characters, so a faithful German translation of Japanese is several times its source
+# in length and the factor threw it away. Hoshi_no_Kagi came back with every heading, the opening
+# quote and three paragraphs left in Japanese for exactly this reason - not text lost in
+# extraction, text the guard discarded after the model had translated it correctly.
+#
+# Measured (Aug 2026) against the fallback model, guard off, ja/zh -> de: genuine translations ran
+# x1.70 to x6.25 of their source ("星の鍵と幻影の森" -> "Der Schlüssel zu den Sternen und der
+# Schattenwald.", the tightest case at 8 characters in and 50 out). Weighting a Han or kana
+# character as 2.5 ordinary ones passes all of them and still catches the training-data dumps,
+# which run 100+ characters off a heading of ten.
+#
+# Hangul is deliberately *not* weighted. Measured the same way, ko -> de is not a translation
+# problem the guard should relax for: the model answers Korean with Bible boilerplate ("Und es
+# geschah, als der dritte Knabe diente...", x3.90, and one x34.30 degenerate loop). The guard is
+# what keeps those off the page, so Korean keeps the unweighted budget.
+CJK_LENGTH_WEIGHT = 2.5
+# Hiragana and katakana, then the two Han blocks that carry ordinary text.
+CJK_DENSE_CHARS = re.compile(r"[぀-ヿ㐀-䶿一-鿿]")
+
+
+def weighted_length(text: str) -> float:
+    """Length of `text` in units comparable across writing systems, see CJK_LENGTH_WEIGHT."""
+    dense = len(CJK_DENSE_CHARS.findall(text))
+    return len(text) + dense * (CJK_LENGTH_WEIGHT - 1)
+
 # The other tell, for the ones that come back the same length as their source and so pass the check
 # above: the model was trained on Wikipedia dumps and answers a standalone name or heading with the
 # scaffolding of an article rather than a translation. "Russ Seigenberg, Ph.D." on the title page
@@ -628,7 +666,7 @@ def clean_source_text(text: str) -> str:
 
 def guard_hallucination(source: str, translated: str) -> str:
     """Keep the original wherever the model clearly invented rather than translated."""
-    if len(translated) > HALLUCINATION_LENGTH_FACTOR * len(source) + HALLUCINATION_LENGTH_MARGIN:
+    if len(translated) > HALLUCINATION_LENGTH_FACTOR * weighted_length(source) + HALLUCINATION_LENGTH_MARGIN:
         return source
     if HALLUCINATION_MARKUP.search(translated) and not HALLUCINATION_MARKUP.search(source):
         return source
@@ -2752,6 +2790,73 @@ def document_right_margin(pages: List[Dict[str, Any]]) -> float:
     return min(rights[int(0.95 * (len(rights) - 1))], edge) if rights else edge
 
 
+def document_left_margin(pages: List[Dict[str, Any]]) -> float:
+    """The left edge the document's own text starts at, the mirror of document_right_margin."""
+    edge = PDF_LAYOUT_EDGE_MARGIN
+    lefts = sorted(line["x"] for page in pages
+                   for paragraph in page["paragraphs"] for line in paragraph["lines"])
+    return max(lefts[int(0.05 * (len(lefts) - 1))], edge) if lefts else edge
+
+
+def enclosing_box_sides(paragraph: Dict[str, Any],
+                        obstacles: Optional[List[Dict[str, float]]] = None
+                        ) -> Optional[Tuple[float, float]]:
+    """The left and right edges of the tightest shape the paragraph sits inside, or None.
+
+    The horizontal companion to enclosing_box_bottom, and selected the same way, so a paragraph
+    in a table cell can be measured against that cell rather than against the whole page.
+    """
+    left = min(line["x"] for line in paragraph["lines"])
+    right = max(line["right"] for line in paragraph["lines"])
+    bottom = min(line["y"] for line in paragraph["lines"])
+    top = max(line["y"] for line in paragraph["lines"])
+    boxes = [obstacle for obstacle in obstacles or []
+             if obstacle["x"] <= left and obstacle["right"] >= right
+             and obstacle["bottom"] <= bottom and obstacle["top"] >= top]
+    if not boxes:
+        return None
+    tightest = min(boxes, key=lambda obstacle: obstacle["right"] - obstacle["x"])
+    return tightest["x"], tightest["right"]
+
+
+def paragraph_center(paragraph: Dict[str, Any], left_margin: float, right_margin: float,
+                     obstacles: Optional[List[Dict[str, float]]] = None) -> Optional[float]:
+    """The centre a paragraph is set around, or None if it is set against its left edge.
+
+    reflow_paragraph placed every line at the paragraph's left edge, so a centred heading came
+    back flush left - by far the most frequent complaint about the finished documents, and the one
+    the reader notices first because the title of the page moves.
+
+    Every line has to stand clear of both margins by more than an ordinary indent and leave the
+    same room on each side. Both halves are needed. Without the balance test an indented block
+    counts as centred; without the clearance test so does ordinary flowed text, whose lines all
+    fill the column and therefore all share its centre - that is how two justified list items of
+    Powerupall ("5. The goal is to slowly become more conditioned...") first read as centred.
+
+    Measured against the box the paragraph sits in where there is one, not the page: the "Minimum"
+    column header of Systemrequirements is set against the left edge of its own cell and only
+    happens to land near the middle of the page, which read as centred until the cell was used.
+    """
+    lines = paragraph["lines"]
+    box = enclosing_box_sides(paragraph, obstacles)
+    # Only a box narrower than the text column says anything about alignment. A full-page
+    # background encloses every paragraph on the page, and measured against that the ordinary body
+    # text of Geschäftsbedingungen sits symmetrically and read as centred.
+    if box is not None and box[1] - box[0] < right_margin - left_margin:
+        left_margin, right_margin = box
+    tolerance = PDF_LAYOUT_CENTRE_TOLERANCE * max(right_margin - left_margin, 1.0)
+    centres = []
+    for line in lines:
+        left_gap = line["x"] - left_margin
+        right_gap = right_margin - line["right"]
+        if min(left_gap, right_gap) <= PDF_LAYOUT_MAX_INDENT:
+            return None
+        if abs(left_gap - right_gap) > tolerance:
+            return None
+        centres.append((line["x"] + line["right"]) / 2)
+    return sum(centres) / len(centres)
+
+
 def paragraph_width_limit(
     paragraph: Dict[str, Any], others: List[Dict[str, Any]], right_margin: float,
     obstacles: Optional[List[Dict[str, float]]] = None,
@@ -2802,8 +2907,17 @@ def paragraph_width_limit(
                 wall = obstacle["right"] - 2 if wall is None else min(wall, obstacle["right"] - 2)
             elif obstacle["x"] > line["x"]:
                 limit = min(limit, obstacle["x"] - 2)
-    limit = max(limit, max(line["right"] for line in paragraph["lines"]))
-    return limit if wall is None else min(limit, wall)
+    own_left = min(line["x"] for line in paragraph["lines"])
+    own_right = max(line["right"] for line in paragraph["lines"])
+    limit = max(limit, own_right)
+    # A shape only walls the paragraph in if it is big enough to have held it in the first place.
+    # Get_Started_With_Smallpdf draws 139 icons and decorations, and any of them that happened to
+    # start left of a line's own x claimed to be that line's box: a 42pt icon walled a 253pt
+    # paragraph in at 19pt of width, which reflowed to one word per line and then blew past
+    # PDF_LAYOUT_MAX_LINE_GROWTH, so three of the four body paragraphs kept their English.
+    if wall is not None and wall - own_left >= PDF_LAYOUT_WALL_MIN_SPAN * max(own_right - own_left, 1):
+        limit = min(limit, wall)
+    return limit
 
 
 def paragraph_base_size(paragraph: Dict[str, Any]) -> float:
@@ -2842,6 +2956,7 @@ def reflow_paragraph(
     width_limit: Optional[float] = None,
     scale: Optional[float] = None,
     box_floor: Optional[float] = None,
+    centre: Optional[float] = None,
 ) -> List[Dict[str, Any]]:
     """Lay the translation out in the column the paragraph's original lines occupied.
 
@@ -2859,6 +2974,9 @@ def reflow_paragraph(
     `box_floor` is the lower edge of the box the paragraph sits inside, where there is one (see
     enclosing_box_bottom). A wall, not a neighbour: an extra line there does not crowd the next
     paragraph, it stands outside the table cell, so it is worth shrinking harder to avoid.
+
+    `centre` is the axis a centred paragraph is set around, see paragraph_center. Passing None
+    sets the paragraph against its left edge, which is what everything else on a page wants.
     """
     lines = paragraph["lines"]
     left = min(line["x"] for line in lines)
@@ -2949,7 +3067,9 @@ def reflow_paragraph(
     # Set flush on both edges where the original was, against the same edge the text was wrapped
     # to. Not against the original's own right edge: paragraph_width_limit sits at or past it, and
     # wrapping to the narrower one would cost lines and with them font size.
-    justify = paragraph_is_justified(paragraph) and not rtl
+    # A centred paragraph is set around its axis instead, and never justified: stretching a centred
+    # heading to a flush right edge would undo the centring line by line.
+    justify = paragraph_is_justified(paragraph) and not rtl and centre is None
     placed = []
     for index, wrapped_line in enumerate(wrapped):
         # Translations longer than the original keep running below the last line: overflowing
@@ -2967,6 +3087,8 @@ def reflow_paragraph(
             "size": size,
             "line_height": 0,
             "x": (right - pdf_measure_text(wrapped_line, size, bold, serif) if rtl
+                  else centre - pdf_measure_text(wrapped_line, size, bold, serif) / 2
+                  if centre is not None
                   else left + (indent if index == 0 else 0.0)),
             "y": y,
             "color": color,
@@ -3030,12 +3152,13 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
     survive untouched."""
     overlay_pages = []
     right_margin = document_right_margin(pages)
+    left_margin = document_left_margin(pages)
     # Paragraphs whose reflow is rejected below have to keep their original text, which means the
     # redaction pass must not erase them either - it is driven off the same list.
     kept = list(translations)
     index = 0
     for page in pages:
-        # (paragraph, translation, floor, width limit, box floor, the lines it laid out)
+        # (paragraph, translation, floor, width limit, box floor, centre, the lines it laid out)
         reflowed: List[Tuple[Any, ...]] = []
         # The smallest scale any paragraph of a given base size needed, see below.
         scales: Dict[float, float] = {}
@@ -3047,16 +3170,17 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
                 box_floor = enclosing_box_bottom(paragraph, obstacles)
                 width_limit = paragraph_width_limit(
                     paragraph, page["paragraphs"], right_margin, obstacles)
+                centre = paragraph_center(paragraph, left_margin, right_margin, obstacles)
                 placed = reflow_paragraph(paragraph, translations[index], floor, width_limit,
-                                          box_floor=box_floor)
+                                          box_floor=box_floor, centre=centre)
                 if len(placed) > PDF_LAYOUT_MAX_LINE_GROWTH * len(paragraph["lines"]):
                     # Not a translation of this paragraph any more. Overflow is tolerated, but a
                     # block several times its original height buries whatever sits below it, and
                     # the original is the better of the two things to be looking at.
                     kept[index] = ""
                 else:
-                    reflowed.append(
-                        (paragraph, translations[index], floor, width_limit, box_floor, placed))
+                    reflowed.append((paragraph, translations[index], floor, width_limit,
+                                     box_floor, centre, placed))
                     base = paragraph_base_size(paragraph)
                     key = round(base, 1)
                     # Clamped at the ordinary minimum: a paragraph that had to go below it is
@@ -3071,13 +3195,13 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
         # at 1.0 in the same column - the most visible flaw in the finished document. Headings
         # keep their own scale, they are a size of their own to begin with.
         lines: List[Dict[str, Any]] = []
-        for paragraph, text, floor, width_limit, box_floor, placed in reflowed:
+        for paragraph, text, floor, width_limit, box_floor, centre, placed in reflowed:
             base = paragraph_base_size(paragraph)
             scale = scales[round(base, 1)]
             if placed[0]["size"] > base * scale:
                 # Only ever smaller than what this paragraph found on its own, so it still fits.
                 placed = reflow_paragraph(paragraph, text, floor, width_limit, scale,
-                                          box_floor=box_floor)
+                                          box_floor=box_floor, centre=centre)
             lines.extend(placed)
 
         overlay_pages.append({
