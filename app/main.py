@@ -2913,10 +2913,18 @@ def has_translatable_text(text: str) -> bool:
         return False
     if ROMAN_NUMERAL.fullmatch(stripped):
         return False
-    # One character is a whole word in a script that writes without spaces, so the two-letter bar
-    # is a Latin one: the closing line of Hoshi no Kagi is "— 完 —", "The End", and came back
-    # untranslated because 完 stands on its own.
-    if CJK_DENSE_CHARS.search(stripped):
+    # Two characters are a whole sentence in a script that writes without spaces, so the
+    # two-letter bar has to count those characters and not the letters of a word.
+    #
+    # A single one is left alone, though, the same way a single Latin letter is. It carries as
+    # little for the model to work from as "iv" does, and the fallback answers it with whatever
+    # it likes: the closing line of Hoshi no Kagi is "— 完 —", "The End", and came back as
+    # "wieso ist das alles?". Length cannot catch that afterwards - measured (Aug 2026) over 263
+    # short pairs from four documents, the invented answer ran at 3.1 times its source while the
+    # longest genuine one ran at 5.0 ("RAM" to "Arbeitsspeicher"), so any threshold that rejects
+    # the one throws away the other. All genuine Japanese headings measured are three characters
+    # or more and keep being translated.
+    if len(CJK_DENSE_CHARS.findall(stripped)) > 1:
         return True
     return bool(re.search(r"[^\W\d_]{2,}", stripped))
 

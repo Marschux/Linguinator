@@ -2016,9 +2016,13 @@ class MainTests(unittest.TestCase):
                 self.assertFalse(main.has_translatable_text(numeral))
         # Dot leaders are decoration, so a line that is only leaders has nothing to translate.
         self.assertFalse(main.has_translatable_text(". . . . . . . ."))
-        # One character is a whole word where the script writes without spaces: the closing line
-        # of Hoshi no Kagi is "— 完 —", "The End", and stayed Japanese in the translation.
-        for real in ("Ja", "Hello world", "2. Scope", "16 GB", "日本語", "— 完 —", "完",
+        # A lone character of a script that writes without spaces gives the model as little as a
+        # lone letter does: 完 ("The End", the closing line of Hoshi no Kagi) came back as "wieso
+        # ist das alles?". Two of them are a sentence and are translated.
+        for fragment in ("完", "— 完 —", "あ"):
+            with self.subTest(fragment=fragment):
+                self.assertFalse(main.has_translatable_text(fragment))
+        for real in ("Ja", "Hello world", "2. Scope", "16 GB", "日本語", "完了", "終わり",
                      "Mehr dazu auf https://example.com nachlesen",
                      "1. Gesichtspflege . . . . . . . . 12"):
             with self.subTest(text=real):
