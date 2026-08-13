@@ -660,11 +660,22 @@ PDF_LIGATURES = {"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi",
 # Only ever between letters of a word, because every one of these is a real capital in its own
 # right: Ō carries the macron of Latin and of romanised Japanese, both languages this translates.
 # A legitimate Ō opens a word or stands in capitals, so requiring a lowercase letter in front of it
-# separates the two cleanly. Lowercase mis-mappings are deliberately left alone - the one measured
-# here, ĩ for fb in "abruĩar", is an ordinary Vietnamese letter, and vi is a supported language.
+# separates the two cleanly.
 PDF_BROKEN_LIGATURES = {"Ɵ": "ti", "Ʃ": "tt", "Ō": "ft"}
 PDF_BROKEN_LIGATURE_RUN = re.compile(
     r"(?<=[a-zà-öø-ÿ])[" + "".join(PDF_BROKEN_LIGATURES) + r"]")
+
+# The lowercase half of the same damage: Stall-Kamera-System extracts "abrufbar" as "abruĩar".
+# Nothing in the word tells this apart from the real letter the way a capital does - ĩ is an
+# ordinary Vietnamese one - so it is only put back once the source language is known, and never
+# for a language that writes it. Only the one mapping that was actually measured: which glyph a
+# broken font points where is that font's own accident, and guessing further pairs would corrupt
+# words no document has been seen to carry.
+PDF_BROKEN_LOWERCASE_LIGATURES = {"ĩ": "fb"}
+PDF_BROKEN_LOWERCASE_RUN = re.compile(
+    r"(?<=[a-zà-öø-ÿ])[" + "".join(PDF_BROKEN_LOWERCASE_LIGATURES) + r"](?=[a-zà-öø-ÿ])")
+# Languages that write these letters themselves, in the internal code's language part.
+LIGATURE_NATIVE_LANGUAGES = {"vie"}
 
 
 def expand_pdf_ligatures(text: str) -> str:
@@ -673,6 +684,18 @@ def expand_pdf_ligatures(text: str) -> str:
         if ligature in text:
             text = text.replace(ligature, letters)
     return PDF_BROKEN_LIGATURE_RUN.sub(lambda hit: PDF_BROKEN_LIGATURES[hit.group()], text)
+
+
+def expand_lowercase_ligatures(text: str, source: str) -> str:
+    """Repair the lowercase mis-mapped ligatures, unless the source language writes them itself.
+
+    Runs after extraction rather than inside it: with the source set to auto-detect there is no
+    language to check against until the text has been read, see PDF_BROKEN_LOWERCASE_LIGATURES.
+    """
+    if source.split("_")[0] in LIGATURE_NATIVE_LANGUAGES:
+        return text
+    return PDF_BROKEN_LOWERCASE_RUN.sub(
+        lambda hit: PDF_BROKEN_LOWERCASE_LIGATURES[hit.group()], text)
 
 # A result this much longer than its source is not a translation. The fallback model answers short,
 # low-content fragments - a page number, a list marker, a heading - by dumping training data
@@ -4537,6 +4560,7 @@ def run_pdf_translate_job(
         if source == AUTO_SOURCE:
             source = detect_source_language(markdown)
             update_job(job_id, source=source)
+        markdown = expand_lowercase_ligatures(markdown, source)
         sections = pdf_sections(markdown)
         planned = [(page_number, split_long_text(page_text, MAX_CHARS)) for page_number, page_text in sections]
         total = sum(len(chunks) for _, chunks in planned)
@@ -4598,6 +4622,10 @@ def run_pdf_layout_translate_job(
         if source == AUTO_SOURCE:
             source = detect_source_language("\n\n".join(paragraphs))
             update_job(job_id, source=source)
+        # Now that the language is settled, see expand_lowercase_ligatures. Only the text handed
+        # to the model is repaired; placement runs off the lines' coordinates, and a paragraph
+        # count that stayed the same keeps the re-export lined up.
+        paragraphs = [expand_lowercase_ligatures(text, source) for text in paragraphs]
         # One paragraph per chunk: the overlay maps translations back to paragraphs by position,
         # and the model does not reliably keep paragraph breaks inside a single chunk. Several
         # chunks are still translated per model call (translate_chunks_batched), via the tensor's

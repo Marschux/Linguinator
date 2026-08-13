@@ -2575,6 +2575,14 @@ class MainTests(unittest.TestCase):
             self.assertLessEqual(
                 line["x"] + main.pdf_measure_text(line["text"], line["size"], False, False), 222.8)
 
+    def test_expand_lowercase_ligatures_leaves_vietnamese_alone(self):
+        # Stall-Kamera-System draws "abrufbar" with an fb ligature its font maps to ĩ, which is
+        # also an ordinary Vietnamese letter - so the repair waits until the source is known.
+        self.assertEqual(main.expand_lowercase_ligatures("abruĩar", "deu_Latn"), "abrufbar")
+        self.assertEqual(main.expand_lowercase_ligatures("abruĩar", "vie_Latn"), "abruĩar")
+        # Only inside a word: standing alone or at an edge it is a letter, not a ligature.
+        self.assertEqual(main.expand_lowercase_ligatures("ĩ und Mĩ", "deu_Latn"), "ĩ und Mĩ")
+
     def test_expand_pdf_ligatures_puts_the_letters_back(self):
         # Presentation forms, which the model has never seen and which reach the finished
         # document unchanged.
