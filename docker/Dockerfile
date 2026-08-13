@@ -7,8 +7,11 @@ WORKDIR /app
 
 # One tesseract package per CORE_LANGUAGES entry: without its traineddata a language cannot be
 # read at all, and OCR is supposed to cover what the UI offers.
+# fonts-dejavu-extra carries the italic and oblique cuts, which -core does not: without it a
+# paragraph the original set in italic is redrawn upright (font_file falls back to the upright
+# face rather than to base-14, so it loses the slant and not the glyphs).
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates poppler-utils tesseract-ocr fonts-dejavu-core fonts-noto-core fonts-noto-cjk \
+    && apt-get install -y --no-install-recommends ca-certificates poppler-utils tesseract-ocr fonts-dejavu-core fonts-dejavu-extra fonts-noto-core fonts-noto-cjk \
        tesseract-ocr-eng tesseract-ocr-deu tesseract-ocr-fra tesseract-ocr-spa tesseract-ocr-ita \
        tesseract-ocr-nld tesseract-ocr-por tesseract-ocr-pol tesseract-ocr-rus tesseract-ocr-ukr \
        tesseract-ocr-ces tesseract-ocr-swe tesseract-ocr-dan tesseract-ocr-fin tesseract-ocr-ell \

@@ -24,7 +24,7 @@ from functools import lru_cache
 from html.parser import HTMLParser
 from io import BytesIO, StringIO
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 from urllib.parse import urljoin, urlparse
 from xml.etree import ElementTree
 
@@ -158,8 +158,35 @@ PDF_SERIF_BOLD_CANDIDATES = (
     "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
     "C:/Windows/Fonts/timesbd.ttf",
 )
-# The four font resources a generated PDF declares, as (bold, serif).
-PDF_FONT_FACES = {"F1": (False, False), "F2": (True, False), "F3": (False, True), "F4": (True, True)}
+# Italic, for a paragraph the original set in it - a pulled quote, a caption, a book title on a
+# line of its own. Measured over the eight test documents: 111 lines are set wholly in italic
+# (Stall-Kamera-System 14 of 104, Powerupall 95 of 3504), and every one of them came back upright.
+# The DejaVu files here are in fonts-dejavu-extra, not the -core package: font_file falls back to
+# the upright face where they are missing, so a build without that package loses the slant rather
+# than the glyphs.
+PDF_FONT_ITALIC_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf",
+    "C:/Windows/Fonts/ariali.ttf",
+)
+PDF_FONT_BOLD_ITALIC_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-BoldOblique.ttf",
+    "C:/Windows/Fonts/arialbi.ttf",
+)
+PDF_SERIF_ITALIC_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Italic.ttf",
+    "C:/Windows/Fonts/timesi.ttf",
+)
+PDF_SERIF_BOLD_ITALIC_CANDIDATES = (
+    "/usr/share/fonts/truetype/dejavu/DejaVuSerif-BoldItalic.ttf",
+    "C:/Windows/Fonts/timesbi.ttf",
+)
+# The font resources a generated PDF declares, as (bold, serif, italic).
+PDF_FONT_FACES = {
+    "F1": (False, False, False), "F2": (True, False, False),
+    "F3": (False, True, False), "F4": (True, True, False),
+    "F5": (False, False, True), "F6": (True, False, True),
+    "F7": (False, True, True), "F8": (True, True, True),
+}
 # Serif families as they turn up in PDF font names. MuPDF's own "serifed" span flag comes from
 # the font descriptor, which plenty of sans fonts set wrongly (Roboto reports serifed), so the
 # name is the more reliable signal - anything calling itself "sans" wins over these markers.
@@ -283,7 +310,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.11.8", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.11.10", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -808,33 +835,42 @@ PDF_BASE_FONTS = {(False, False): "helv", (True, False): "hebo",
                   (False, True): "tiro", (True, True): "tibo"}
 
 
-@lru_cache(maxsize=8)
-def font_file(bold: bool = False, script: str = "", serif: bool = False) -> str:
+@lru_cache(maxsize=32)
+def font_file(bold: bool = False, script: str = "", serif: bool = False,
+              italic: bool = False) -> str:
     """The font file a face is drawn and measured with, or "" for the base-14 stand-in.
 
     A base-14 font can only show WinAnsi characters, so any non-Latin target language (Cyrillic,
     Greek, ...) would come out as garbage. `script` (from detect_pdf_script) picks a file that
     actually covers CJK/Arabic/Devanagari/Hebrew instead, where DejaVu Sans has no glyphs at all;
-    those fonts are used as-is for "bold" too since covering the script matters more than the
-    weight.
+    those fonts are used as-is for "bold" and for italic too, since covering the script matters
+    more than the weight or the slant.
+
+    An italic face falls back to the upright file rather than to the base-14 stand-in when no
+    italic file is installed: losing the slant costs a document its emphasis, while dropping to
+    base-14 would cost a Cyrillic or Greek one its glyphs.
     """
     if script and script in PDF_SCRIPT_FONT_CANDIDATES:
         candidates = PDF_SCRIPT_FONT_CANDIDATES[script]
+    elif serif and italic:
+        candidates = PDF_SERIF_BOLD_ITALIC_CANDIDATES if bold else PDF_SERIF_ITALIC_CANDIDATES
     elif serif:
         candidates = PDF_SERIF_BOLD_CANDIDATES if bold else PDF_SERIF_CANDIDATES
+    elif italic:
+        candidates = PDF_FONT_BOLD_ITALIC_CANDIDATES if bold else PDF_FONT_ITALIC_CANDIDATES
     else:
         candidates = PDF_FONT_BOLD_CANDIDATES if bold else PDF_FONT_CANDIDATES
     for path in candidates:
         if path and Path(path).exists():
             return path
-    return ""
+    return font_file(bold, script, serif) if italic else ""
 
 
-@lru_cache(maxsize=8)
-def script_font(bold: bool = False, script: str = "", serif: bool = False):
+@lru_cache(maxsize=32)
+def script_font(bold: bool = False, script: str = "", serif: bool = False, italic: bool = False):
     """The whole font as MuPDF sees it, for measuring. Cached because MuPDF parses the file again
     for every font object, and a document is measured line by line."""
-    path = font_file(bold, script, serif)
+    path = font_file(bold, script, serif, italic)
     if path:
         try:
             return pymupdf.Font(fontfile=path)
@@ -843,7 +879,7 @@ def script_font(bold: bool = False, script: str = "", serif: bool = False):
     return pymupdf.Font(PDF_BASE_FONTS[(bold, serif)])
 
 
-def subset_font(bold: bool, script: str, serif: bool, codepoints: Set[int]):
+def subset_font(bold: bool, script: str, serif: bool, italic: bool, codepoints: Set[int]):
     """The same font cut down to the characters the document actually draws.
 
     MuPDF embeds whatever font it is handed whole, and its own `subset_fonts` cannot cut the
@@ -851,7 +887,7 @@ def subset_font(bold: bool, script: str, serif: bool, codepoints: Set[int]):
     single page of Japanese weighing 13.7 MB. Subsetting before drawing works for every font
     format and brought that page to 6 KB.
     """
-    path = font_file(bold, script, serif)
+    path = font_file(bold, script, serif, italic)
     if path:
         try:
             import logging
@@ -870,11 +906,12 @@ def subset_font(bold: bool, script: str, serif: bool, codepoints: Set[int]):
             return pymupdf.Font(fontbuffer=buffer.getvalue())
         except Exception:
             pass
-    return script_font(bold, script, serif)
+    return script_font(bold, script, serif, italic)
 
 
-def pdf_measure_text(text: str, size: float, bold: bool = False, serif: bool = False) -> float:
-    return script_font(bold, detect_pdf_script(text), serif).text_length(text, fontsize=size)
+def pdf_measure_text(text: str, size: float, bold: bool = False, serif: bool = False,
+                     italic: bool = False) -> float:
+    return script_font(bold, detect_pdf_script(text), serif, italic).text_length(text, fontsize=size)
 
 
 def wrap_pdf_line(text: str, size: float = PDF_FONT_SIZE) -> List[str]:
@@ -938,10 +975,10 @@ def pdf_document_pages(text: str) -> List[Dict[str, Any]]:
     return document_pages or [{"source_page": "", "continuation": False, "lines": []}]
 
 
-def pdf_font_key(text: str, face: str) -> Tuple[bool, str, bool]:
-    """Which font one line is drawn with: (bold, script, serif)."""
-    bold, serif = PDF_FONT_FACES.get(face, (False, False))
-    return bold, detect_pdf_script(text), serif
+def pdf_font_key(text: str, face: str) -> Tuple[bool, str, bool, bool]:
+    """Which font one line is drawn with: (bold, script, serif, italic)."""
+    bold, serif, italic = PDF_FONT_FACES.get(face, (False, False, False))
+    return bold, detect_pdf_script(text), serif, italic
 
 
 def draw_pdf_line(page, text: str, x: float, y: float, face: str,
@@ -1047,7 +1084,7 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
             lines.append((index, f"{output_page_number}", width - margin, margin // 2,
                           "F1", PDF_FOOTER_FONT_SIZE, 0, height, None))
 
-    codepoints: Dict[Tuple[bool, str, bool], Set[int]] = {}
+    codepoints: Dict[Tuple[bool, str, bool, bool], Set[int]] = {}
     for _, text, _, _, face, _, _, _, _ in lines:
         codepoints.setdefault(pdf_font_key(text, face), set()).update(map(ord, text))
     fonts = {key: subset_font(*key, points) for key, points in codepoints.items()}
@@ -2289,6 +2326,7 @@ def extract_pdf_markdown_from_bytes(
 
 
 MUPDF_BOLD_FLAG = 1 << 4  # span flag bit 4, per PyMuPDF's text-extraction flag table
+MUPDF_ITALIC_FLAG = 1 << 1  # bit 1 of the same table
 
 # Hebrew, Arabic, Syriac, Thaana, NKo and the Arabic presentation forms. Devanagari (0900-097F)
 # is deliberately outside: it runs left to right.
@@ -2454,6 +2492,7 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
                     "size": span["size"],
                     "width": span["bbox"][2] - span["bbox"][0],
                     "bold": bool(span["flags"] & MUPDF_BOLD_FLAG),
+                    "italic": bool(span["flags"] & MUPDF_ITALIC_FLAG),
                     "serif": pdf_font_is_serif(span["font"]),
                     # sRGB packed into an int by MuPDF, 0 being black. Without it a title set in
                     # white on a dark cover image comes back drawn in the default black.
@@ -2540,6 +2579,7 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                     "size": run["size"],
                     "bold_chars": 0,
                     "serif_chars": 0,
+                    "italic_chars": 0,
                     "color_chars": Counter(),
                     "total_chars": 0,
                 }
@@ -2552,6 +2592,8 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 current["bold_chars"] += length
             if run.get("serif"):
                 current["serif_chars"] += length
+            if run.get("italic"):
+                current["italic_chars"] += length
             current["color_chars"][run.get("color", 0)] += length
         for cell in cells:
             cell["text"] = re.sub(r"\s+", " ", cell["text"]).strip()
@@ -2564,6 +2606,10 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             total = cell.pop("total_chars")
             cell["bold"] = cell.pop("bold_chars") * 2 > total
             cell["serif"] = cell.pop("serif_chars") * 2 > total
+            # A word or two of italic inside a sentence cannot survive translation - nobody knows
+            # which words of the answer correspond to it - so the line is italic only when most of
+            # it is, the same majority the weight is decided by.
+            cell["italic"] = cell.pop("italic_chars") * 2 > total
             colors = cell.pop("color_chars")
             cell["color"] = colors.most_common(1)[0][0] if colors else 0
         # A justified Hebrew line whose word spacing grows past PDF_CELL_GAP is cut into cells
@@ -2677,7 +2723,14 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
     return pages
 
 
-def wrap_text_to_width(text: str, width: float, size: float, bold: bool = False, serif: bool = False) -> List[str]:
+def wrap_text_to_width(text: str, width: Union[float, Sequence[float]], size: float,
+                       bold: bool = False, serif: bool = False,
+                       italic: bool = False) -> List[str]:
+    """Break `text` into lines. `width` is one measure, or one per line for a block that is not
+    a rectangle - a paragraph set around a picture, see paragraph_line_limits. The last entry
+    carries on for any line past the end of the list."""
+    widths = [float(width)] if isinstance(width, (int, float)) else [float(w) for w in width]
+
     # CJK text has no spaces between words, so any character is a valid break point; splitting
     # on whitespace there would treat the whole string as one unbreakable "word".
     cjk = detect_pdf_script(text) == "cjk"
@@ -2690,7 +2743,7 @@ def wrap_text_to_width(text: str, width: float, size: float, bold: bool = False,
         candidate = current + separator + unit if current else unit
         # Measured in the face the line will actually be drawn in: bold runs wider, so wrapping
         # it against regular metrics fits too much per line and overflows the column.
-        if current and pdf_measure_text(candidate, size, bold, serif) > width:
+        if current and pdf_measure_text(candidate, size, bold, serif, italic) > widths[min(len(lines), len(widths) - 1)]:
             lines.append(current)
             current = unit
         else:
@@ -2881,28 +2934,43 @@ def paragraph_center(paragraph: Dict[str, Any], left_margin: float, right_margin
     return sum(centres) / len(centres)
 
 
-def paragraph_width_limit(
+def paragraph_line_limits(
     paragraph: Dict[str, Any], others: List[Dict[str, Any]], right_margin: float,
     obstacles: Optional[List[Dict[str, float]]] = None,
-) -> float:
-    """How far right the paragraph may actually run, in absolute page coordinates.
+) -> List[float]:
+    """How far right each of the paragraph's lines may run, in absolute page coordinates.
 
-    Its own text ends where the *original* wording happened to end, which is not the width it
-    had available - a heading alone on its line usually has most of the page to its right. The
-    embedded font runs wider than the document's, so measuring against the original's ink makes
-    almost every paragraph wrap one line early. The limit is whatever stands to its right on the
-    same baselines, or the document's own right margin.
+    One limit per original line, because a paragraph is not always the rectangle a single width
+    would make of it. Its own text ends where the *original* wording happened to end, which is
+    not the width it had available - a heading alone on its line usually has most of the page to
+    its right. The embedded font runs wider than the document's, so measuring against the
+    original's ink makes almost every paragraph wrap one line early. The limit is whatever stands
+    to the right of that line, or the document's own right margin.
 
-    A paragraph already running past that limit keeps its own width - a full-width heading in an
+    A line already running past that limit keeps its own width - a full-width heading in an
     otherwise narrower setting, see document_right_margin, or text overlapping a neighbour on the
     same baseline, which no measurement can tell from a column beside it. A box or an image is a
     wall and beats even that: an original overrunning its own table cell (Systemrequirements,
     "Graphics card") must not hand that overrun to the longer translation, which would then be
     reflowed clear across the next column.
+
+    Per line rather than per paragraph because a picture rarely covers all of one. On page 1 of
+    Stall-Kamera-System the image to the right reaches only the upper seven lines of a nine-line
+    paragraph: those end at 215 and under, while the two lines below the image run on to 237. A
+    single width took the widest of them, handed it to the lines beside the picture as well, and
+    set them into it. The original was never rectangular there - it was set around the image.
     """
-    limit = right_margin
-    wall = None
+    own_left = min(item["x"] for item in paragraph["lines"])
+    own_right = max(item["right"] for item in paragraph["lines"])
+    # A shape only counts, as a wall or as something standing beside the paragraph, if it is big
+    # enough to have held or blocked it. Below this it is an icon, a rule or a piece of
+    # decoration that happens to sit near a line and says nothing about the room that line had.
+    substantial = PDF_LAYOUT_WALL_MIN_SPAN * max(own_right - own_left, 1)
+
+    limits = []
     for line in paragraph["lines"]:
+        limit = right_margin
+        wall = None
         for other in others:
             if other is paragraph:
                 continue
@@ -2929,19 +2997,36 @@ def paragraph_width_limit(
                 # whatever is beside the line, and a short line has all sorts of things to its
                 # right that say nothing about the width the paragraph had.
                 wall = obstacle["right"] - 2 if wall is None else min(wall, obstacle["right"] - 2)
-            elif obstacle["x"] > line["x"]:
+            elif obstacle["x"] > line["x"] and obstacle["top"] - obstacle["bottom"] >= line["size"]:
+                # Only a shape at least as tall as the line it is supposed to stop. Anything
+                # flatter is an ornament standing near the text, not something set beside it: the
+                # 5pt rule next to the word "or" on Systemrequirements would otherwise set that
+                # whole paragraph one word per line. Height, not width - a picture narrower than
+                # the paragraph still blocks it, which measuring against the paragraph's own width
+                # got wrong, and let the translation back into the images of Stall-Kamera-System.
                 limit = min(limit, obstacle["x"] - 2)
-    own_left = min(line["x"] for line in paragraph["lines"])
-    own_right = max(line["right"] for line in paragraph["lines"])
-    limit = max(limit, own_right)
-    # A shape only walls the paragraph in if it is big enough to have held it in the first place.
-    # Get_Started_With_Smallpdf draws 139 icons and decorations, and any of them that happened to
-    # start left of a line's own x claimed to be that line's box: a 42pt icon walled a 253pt
-    # paragraph in at 19pt of width, which reflowed to one word per line and then blew past
-    # PDF_LAYOUT_MAX_LINE_GROWTH, so three of the four body paragraphs kept their English.
-    if wall is not None and wall - own_left >= PDF_LAYOUT_WALL_MIN_SPAN * max(own_right - own_left, 1):
-        limit = min(limit, wall)
-    return limit
+        # This line's own ink, not the paragraph's widest: a line cannot be asked to wrap narrower
+        # than the original already set it, but the fact that some *other* line of the paragraph
+        # reaches further says nothing about the room this one had. Taking the whole paragraph's
+        # width here is what handed the lines beside the Stall-Kamera image the measure of the two
+        # lines below it.
+        limit = max(limit, line["right"])
+        # Get_Started_With_Smallpdf draws 139 icons and decorations, and any of them that happened
+        # to start left of a line's own x claimed to be that line's box: a 42pt icon walled a 253pt
+        # paragraph in at 19pt of width, which reflowed to one word per line and then blew past
+        # PDF_LAYOUT_MAX_LINE_GROWTH, so three of the four body paragraphs kept their English.
+        if wall is not None and wall - own_left >= substantial:
+            limit = min(limit, wall)
+        limits.append(limit)
+    return limits
+
+
+def paragraph_width_limit(
+    paragraph: Dict[str, Any], others: List[Dict[str, Any]], right_margin: float,
+    obstacles: Optional[List[Dict[str, float]]] = None,
+) -> float:
+    """The widest of paragraph_line_limits, for callers that want one number for the block."""
+    return max(paragraph_line_limits(paragraph, others, right_margin, obstacles))
 
 
 def paragraph_base_size(paragraph: Dict[str, Any]) -> float:
@@ -2977,7 +3062,7 @@ def reflow_paragraph(
     paragraph: Dict[str, Any],
     text: str,
     floor: Optional[float] = None,
-    width_limit: Optional[float] = None,
+    width_limit: Optional[Union[float, Sequence[float]]] = None,
     scale: Optional[float] = None,
     box_floor: Optional[float] = None,
     centre: Optional[float] = None,
@@ -3004,13 +3089,29 @@ def reflow_paragraph(
     """
     lines = paragraph["lines"]
     left = min(line["x"] for line in lines)
-    right = width_limit if width_limit is not None else max(line["right"] for line in lines)
-    width = max(right - left, 10.0)
+    # One right edge per line, so a paragraph the original set around a picture is set around it
+    # again, see paragraph_line_limits. A single number still works and applies to every line.
+    if width_limit is None:
+        rights = [max(line["right"] for line in lines)]
+    elif isinstance(width_limit, (int, float)):
+        rights = [float(width_limit)]
+    else:
+        rights = [float(edge) for edge in width_limit] or [max(line["right"] for line in lines)]
+
+    def right_at(index: int) -> float:
+        # Past the original's last line there is nothing left to measure against, so the overflow
+        # carries on at the last known edge. What stands *below* the paragraph is paragraph_floor's
+        # business, not this one's.
+        return rights[min(index, len(rights) - 1)]
+
+    right = max(rights)
+    widths = [max(edge - left, 10.0) for edge in rights]
     base_size = paragraph_base_size(paragraph)
     # Same reasoning as base_size: a paragraph is drawn in whichever face most of its lines use,
     # so a bold heading stays bold instead of flattening to regular body text.
     bold = sum(1 for line in lines if line.get("bold")) * 2 > len(lines)
     serif = sum(1 for line in lines if line.get("serif")) * 2 > len(lines)
+    italic = sum(1 for line in lines if line.get("italic")) * 2 > len(lines)
     color = Counter(line.get("color", 0) for line in lines).most_common(1)[0][0]
     if len(lines) > 1:
         leading = (lines[0]["y"] - lines[-1]["y"]) / (len(lines) - 1)
@@ -3063,14 +3164,16 @@ def reflow_paragraph(
 
     def wrap(size: float) -> List[str]:
         if not indent:
-            return wrap_text_to_width(text, width, size, bold, serif)
-        first = wrap_text_to_width(text, width - indent, size, bold, serif)[0]
+            return wrap_text_to_width(text, widths, size, bold, serif, italic)
+        first = wrap_text_to_width(text, widths[0] - indent, size, bold, serif, italic)[0]
         # Only when the wrap really is the text with a break put in it, which is every script
         # that separates words; CJK is wrapped character by character and joined differently.
         if not text.startswith(first):
-            return wrap_text_to_width(text, width, size, bold, serif)
+            return wrap_text_to_width(text, widths, size, bold, serif, italic)
         rest = text[len(first):].strip()
-        return [first] + (wrap_text_to_width(rest, width, size, bold, serif) if rest else [])
+        # The remainder starts on the second line, so it is measured against the second edge on.
+        return [first] + (wrap_text_to_width(rest, widths[1:] or widths, size, bold, serif, italic)
+                          if rest else [])
 
     size = base_size if scale is None else base_size * scale
     wrapped = wrap(size)
@@ -3116,20 +3219,21 @@ def reflow_paragraph(
         )
         placed.append({
             "text": wrapped_line,
-            "font": {(False, False): "F1", (True, False): "F2",
-                     (False, True): "F3", (True, True): "F4"}[(bold, serif)],
+            "font": {value: name for name, value in PDF_FONT_FACES.items()}[(bold, serif, italic)],
             "size": size,
             "line_height": 0,
-            "x": (right - pdf_measure_text(wrapped_line, size, bold, serif) if rtl
-                  else centre - pdf_measure_text(wrapped_line, size, bold, serif) / 2
+            "x": (right_at(index) - pdf_measure_text(wrapped_line, size, bold, serif, italic) if rtl
+                  else centre - pdf_measure_text(wrapped_line, size, bold, serif, italic) / 2
                   if centre is not None
                   else left + (indent if index == 0 else 0.0)),
             "y": y,
             "color": color,
         })
     if justify:
-        for line in placed[:-1]:
-            line["justify_to"] = right
+        for index, line in enumerate(placed[:-1]):
+            # Each line to its own edge: a paragraph set around a picture is flush against the
+            # picture where it passes it and against the margin below, not against one measure.
+            line["justify_to"] = right_at(index)
     return placed
 
 
@@ -3205,7 +3309,7 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
                 obstacles = page.get("obstacles") or []
                 floor = paragraph_floor(paragraph, page["paragraphs"], obstacles)
                 box_floor = enclosing_box_bottom(paragraph, obstacles)
-                width_limit = paragraph_width_limit(
+                width_limit = paragraph_line_limits(
                     paragraph, page["paragraphs"], right_margin, obstacles)
                 centre = paragraph_center(paragraph, left_margin, right_margin, obstacles)
                 placed = reflow_paragraph(paragraph, translations[index], floor, width_limit,

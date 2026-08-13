@@ -2397,7 +2397,66 @@ class MainTests(unittest.TestCase):
         ]}
         rule = {"x": 151.5, "right": 160.0, "top": 505.0, "bottom": 500.0}
 
-        self.assertEqual(main.paragraph_width_limit(paragraph, [paragraph], 542.0, [rule]), 339.0)
+        # 8.5pt of rule beside a 196pt paragraph narrows neither of its lines, so both keep the
+        # page's own margin. Nothing here is a real edge - the cell that bounds this paragraph in
+        # the document is a separate obstacle, see the test above.
+        self.assertEqual(main.paragraph_line_limits(paragraph, [paragraph], 542.0, [rule]),
+                         [542.0, 542.0])
+
+    def test_reflow_paragraph_keeps_an_italic_paragraph_italic(self):
+        # A pulled quote or a caption set wholly in italic came back upright: the reflow only ever
+        # voted on weight and serif. 111 lines across the eight test documents are set this way.
+        quote = {"lines": [
+            {"text": "The gods plant reason in mankind,", "x": 150.0, "y": 700.0, "right": 400.0,
+             "size": 11.0, "italic": True},
+            {"text": "of all good gifts the highest.", "x": 150.0, "y": 686.0, "right": 380.0,
+             "size": 11.0, "italic": True},
+        ]}
+        placed = main.reflow_paragraph(quote, "Die Goetter pflanzen Vernunft in die Menschheit.")
+        self.assertEqual(placed[0]["font"], "F5")
+        self.assertEqual(main.PDF_FONT_FACES["F5"], (False, False, True))
+
+        # A word or two of italic inside a sentence does not carry over: which words of the
+        # translation it would apply to is not knowable, so the line stays upright.
+        mixed = {"lines": [
+            {"text": "he wrote a book entitled Emotional Intelligence in 1995", "x": 65.0,
+             "y": 700.0, "right": 400.0, "size": 11.0, "italic": False},
+        ]}
+        self.assertEqual(main.reflow_paragraph(mixed, "Er schrieb 1995 ein Buch")[0]["font"], "F1")
+
+    def test_font_file_falls_back_to_upright_when_no_italic_is_installed(self):
+        # The image ships fonts-dejavu-core, which has no italic cut. Falling through to the
+        # base-14 stand-in there would cost a Cyrillic or Greek document its glyphs, so the
+        # upright file of the same family is used instead and only the slant is lost.
+        with patch.object(main, "PDF_FONT_ITALIC_CANDIDATES", ("/nonexistent/italic.ttf",)):
+            main.font_file.cache_clear()
+            self.assertEqual(main.font_file(False, "", False, True),
+                             main.font_file(False, "", False, False))
+        main.font_file.cache_clear()
+
+    def test_paragraph_line_limits_set_a_paragraph_around_a_picture(self):
+        # Stall-Kamera-System page 1: the image to the right reaches only the upper lines of the
+        # paragraph. Those end at 215 and under in the original, the lines below the image run on
+        # to 237, and one width for the block handed the widest of them to the lines beside the
+        # picture, setting them into it.
+        paragraph = {"lines": [
+            {"text": "beside the picture", "x": 106.0, "y": 355.6, "right": 214.2, "size": 9.0},
+            {"text": "still beside it", "x": 106.0, "y": 341.0, "right": 201.5, "size": 9.0},
+            {"text": "below it now, running wider", "x": 106.0, "y": 283.1, "right": 237.1,
+             "size": 9.0},
+        ]}
+        image = {"x": 227.3, "right": 397.0, "top": 428.6, "bottom": 301.9}
+
+        limits = main.paragraph_line_limits(paragraph, [paragraph], 540.0, [image])
+
+        self.assertEqual(limits[:2], [225.3, 225.3])  # stopped short of the image
+        self.assertEqual(limits[2], 540.0)  # clear of it, out to the margin
+
+        # And the reflow wraps each line to its own edge rather than to the widest of them.
+        placed = main.reflow_paragraph(paragraph, "Wort " * 40, width_limit=limits)
+        for line in placed[:2]:
+            self.assertLessEqual(
+                line["x"] + main.pdf_measure_text(line["text"], line["size"], False, False), 225.3)
 
     def test_group_pdf_paragraphs_splits_on_a_change_of_weight(self):
         # Get_Started_With_Smallpdf sets its headings bold at the body size, so the size check
