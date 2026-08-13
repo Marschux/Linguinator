@@ -1805,10 +1805,11 @@ class MainTests(unittest.TestCase):
         self.assertEqual(len(placed), 1)
         self.assertEqual(placed[0]["size"], 11.0)
 
-    def test_reflow_paragraph_spaces_overflow_lines_at_the_shrunken_size(self):
-        # Overflow lines are set at the shrunken size, so spacing them at the original leading
-        # pushes them further down than they need to go - into the next paragraph. They follow
-        # the shrinking in proportion, keeping the paragraph's own line spacing.
+    def test_reflow_paragraph_keeps_its_leading_on_a_shrunken_overflow_line(self):
+        # A shrunken paragraph still sets its first lines on the original's own baselines, so
+        # spacing the overflow lines in proportion to the shrinking left the last line at a
+        # different distance than every line above it: measured on Powerupall p. 8, a paragraph
+        # set at 0.77 ran at 15.0pt throughout and then closed at 11.6.
         paragraph = {"lines": [
             {"text": "One", "x": 50.0, "y": 700.0, "right": 200.0, "size": 22.0},
             {"text": "two", "x": 50.0, "y": 660.0, "right": 200.0, "size": 22.0},
@@ -1817,11 +1818,10 @@ class MainTests(unittest.TestCase):
         placed = main.reflow_paragraph(paragraph, "Eine deutlich laengere Uebersetzung " * 4)
 
         self.assertGreater(len(placed), 2)
-        expected = 40.0 * placed[0]["size"] / 22.0
+        self.assertLess(placed[0]["size"], 22.0)  # it did have to shrink
         overflow_steps = [a["y"] - b["y"] for a, b in zip(placed[1:], placed[2:])]
         for step in overflow_steps:
-            self.assertAlmostEqual(step, expected, places=2)
-            self.assertLess(step, 40.0)  # never wider than the original leading
+            self.assertAlmostEqual(step, 40.0, places=2)
 
     def test_reflow_paragraph_keeps_its_own_leading_on_an_unshrunk_overflow_line(self):
         # A paragraph that did not have to shrink kept its leading everywhere except on the

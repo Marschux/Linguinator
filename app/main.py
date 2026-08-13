@@ -283,7 +283,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.11.6", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.11.8", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -614,6 +614,10 @@ def split_to_token_limit(tokenizer, text: str) -> List[str]:
 # are dropped rather than put back afterwards: a leader is sized to the width the *original* line
 # had left over, which the translation no longer has.
 LEADER_RUN = re.compile(r"\s*(?:\.\s*){4,}")
+
+# A rule to write an answer on, drawn as a run of underscores. Its own cell wherever it sits, see
+# group_pdf_lines; four is well past anything a word carries and short of the shortest real one.
+FORM_RULE = re.compile(r"_{4,}")
 
 # A result this much longer than its source is not a translation. The fallback model answers short,
 # low-content fragments - a page number, a list marker, a heading - by dumping training data
@@ -2514,7 +2518,15 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             width = run.get("width") or pdf_measure_text(run["text"], run["size"])
             current = cells[-1] if cells else None
             gap = run["x"] - current["right"] if current else 0.0
-            if current and gap <= PDF_CELL_GAP * run["size"]:
+            # A rule to write an answer on is a field of the form, not the end of the sentence
+            # beside it. It is kept apart however close it sits, because the gap that normally
+            # tells cells apart is whatever the entry before it happened to leave: on the
+            # Powerupall answer sheet 27 of the 28 rules stood 44pt or more from their item and
+            # were kept, while item 13 has the longest wording on the page and left 9pt, so its
+            # rule was merged into the item, reflowed with the translation and moved.
+            if current and not FORM_RULE.fullmatch(run["text"].strip()) \
+                    and not FORM_RULE.fullmatch(current["text"].strip()) \
+                    and gap <= PDF_CELL_GAP * run["size"]:
                 separator = " " if gap > 0.2 * run["size"] and not current["text"].endswith(" ") else ""
                 current["text"] += separator + run["text"]
                 current["right"] = max(current["right"], run["x"] + width)
@@ -3006,12 +3018,14 @@ def reflow_paragraph(
         leading = 1.2 * base_size
 
     def overflow_leading(size: float) -> float:
-        # Overflow lines are set at the shrunken size, so spacing them at the original leading
-        # pushes them further down than they need to go, straight into the next paragraph. In
-        # proportion to that shrinking, not against a flat 1.2: a paragraph that did not shrink
-        # at all kept its own leading everywhere except on its last line, which then sat visibly
-        # tighter than the rest of the paragraph (Powerupall p. 6 "Hoffnung", p. 13).
-        spacing = leading * min(1.0, size / base_size)
+        # The paragraph's own leading, whatever size it ended up being set in. Its first lines
+        # keep the original's baselines, so anything else leaves the last line sitting at a
+        # different distance than every line above it: scaled in proportion to the shrinking, a
+        # paragraph set at 0.77 on Powerupall p. 8 ran at 15.0pt throughout and closed at 11.6.
+        # Spacing overflow lines this far down is what used to push them into the next paragraph,
+        # which is no longer the trade it was - a crowded paragraph now shrinks instead, see
+        # PDF_LAYOUT_CROWDED_MIN_SCALE.
+        spacing = leading
         if boxed:
             # Nothing below to run into but the wall itself, so an overflow line is set as tight
             # as it can be read: every point saved is a point less of it standing outside.
