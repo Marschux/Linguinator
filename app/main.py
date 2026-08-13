@@ -2479,7 +2479,7 @@ def visual_to_logical(text: str) -> str:
     return logical
 
 
-def pdf_page_runs(page) -> List[Dict[str, Any]]:
+def pdf_page_runs(page, rules: Optional[List[Dict[str, float]]] = None) -> List[Dict[str, Any]]:
     """Every text run on a PyMuPDF page, positioned in PDF user space.
 
     MuPDF hands over text already split into lines and spans, each with its baseline origin,
@@ -2540,20 +2540,70 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
                 # duplicate it is. Skipping it earlier left the second copy without a partner to
                 # match against, and it came through as text in its own right.
                 boxes.append(box)
-                runs.append({
-                    "text": text,
-                    "x": x,
-                    "y": y,
-                    "size": span["size"],
-                    "width": span["bbox"][2] - span["bbox"][0],
-                    "bold": bool(span["flags"] & MUPDF_BOLD_FLAG),
-                    "italic": bool(span["flags"] & MUPDF_ITALIC_FLAG),
-                    "serif": pdf_font_is_serif(span["font"]),
-                    # sRGB packed into an int by MuPDF, 0 being black. Without it a title set in
-                    # white on a dark cover image comes back drawn in the default black.
-                    "color": span.get("color", 0),
-                })
+                # A producer may paint two cells of a table row in a single run, with nothing
+                # but a few spaces between them ("Objekt   Mensch  -  " on MatterhornProtokoll,
+                # 0.59em apart, which is ordinary word spacing in justified text and cannot be
+                # told apart by width). The rule drawn between them can, so the run is cut where
+                # the page's own grid says the cell ends.
+                for part in split_run_at_rules(characters, y, inverse, rules):
+                    runs.append({
+                        # A span nobody cut keeps the origin and width MuPDF reported for it, so
+                        # this changes nothing for a document without a table grid.
+                        "text": part["text"],
+                        "x": part["x"] if part["split"] else x,
+                        "y": y,
+                        "size": span["size"],
+                        "width": (part["width"] if part["split"]
+                                  else span["bbox"][2] - span["bbox"][0]),
+                        "bold": bool(span["flags"] & MUPDF_BOLD_FLAG),
+                        "italic": bool(span["flags"] & MUPDF_ITALIC_FLAG),
+                        "serif": pdf_font_is_serif(span["font"]),
+                        # sRGB packed into an int by MuPDF, 0 being black. Without it a title set
+                        # in white on a dark cover image comes back drawn in the default black.
+                        "color": span.get("color", 0),
+                    })
     return runs
+
+
+def split_run_at_rules(characters: List[Dict[str, Any]], y: float, inverse,
+                       rules: Optional[List[Dict[str, float]]]) -> List[Dict[str, Any]]:
+    """Cut a span's characters into cells wherever a drawn column rule stands between them.
+
+    Returns one part for a span no rule crosses, which is every span of a document without a
+    table grid. `split` marks the parts of a span that really was cut, so the caller knows the
+    part's own left edge has to be used rather than the span's reported origin.
+    """
+    boxes = [pymupdf.Rect(item["bbox"]) * inverse for item in characters]
+    left, right = min(box.x0 for box in boxes), max(box.x1 for box in boxes)
+    crossing = sorted(rule["x"] for rule in rules or []
+                      if left + 1 < rule["x"] < right - 1 and rule["bottom"] <= y <= rule["top"])
+
+    parts, current = [], []
+    for item, box in zip(characters, boxes):
+        while crossing and box.x0 >= crossing[0]:
+            crossing.pop(0)
+            # Only where a space sits on the boundary. A cell whose text overhangs its own rule
+            # by a hair would otherwise be cut inside a word: the "Siehe" entries of
+            # MatterhornProtokoll start 5pt left of their column's line and came apart into "0"
+            # and "1-001".
+            if current and current[-1][0].isspace():
+                parts.append(current)
+                current = []
+        current.append((item["c"], box))
+    if current:
+        parts.append(current)
+
+    out = []
+    for part in parts:
+        text = "".join(character for character, _ in part)
+        if not text.strip():
+            continue
+        edges = [box for _, box in part]
+        out.append({"text": text, "x": min(box.x0 for box in edges),
+                    "width": max(box.x1 for box in edges) - min(box.x0 for box in edges),
+                    "split": len(parts) > 1})
+    return out or [{"text": "".join(item["c"] for item in characters), "x": left,
+                    "width": right - left, "split": False}]
 
 
 # Runs on one baseline further apart than this (in multiples of the run's own font size) belong
@@ -2568,6 +2618,10 @@ PDF_CELL_GAP = 2.0
 # Measured (Aug 2026) over the nine test documents: this catches all 132 cell boundaries of
 # MatterhornProtokoll, the five broken rows of page 72 and eight more real cells, and nothing else.
 PDF_COLUMN_MIN_RUNS = 3
+# How tall a vertical hairline has to be before pdf_page_rules reads it as a table's column rule.
+# Half a line: below that it is a tick, a bullet or a piece of an icon, and MatterhornProtokoll's
+# own row rules are 18.6pt tall.
+PDF_RULE_MIN_HEIGHT = 6.0
 
 
 def pdf_page_obstacles(page) -> List[Dict[str, float]]:
@@ -2597,6 +2651,40 @@ def pdf_page_obstacles(page) -> List[Dict[str, float]]:
     return obstacles
 
 
+def pdf_page_rules(page) -> List[Dict[str, float]]:
+    """The vertical hairlines of the page: the drawn grid of a table, in PDF user space.
+
+    pdf_page_obstacles drops these on purpose - a rule reserves no room a paragraph could use.
+    For telling cells apart they are the best signal there is, though, better than any gap: the
+    Index and Fehlerbedingung columns of MatterhornProtokoll stand 2pt apart and a producer even
+    paints both cells of a row in one text run ("Objekt   Mensch  -  "), while the line between
+    them is drawn, unambiguous and exactly where the boundary is.
+    """
+    inverse = ~page.transformation_matrix
+    rules = []
+    for drawing in page.get_drawings():
+        mapped = pymupdf.Rect(drawing["rect"]) * inverse
+        # Upright and thin: a horizontal hairline is an underline or a table's own row rule, and
+        # says nothing about where one cell ends and the next begins.
+        if mapped.width < 2 and mapped.height >= PDF_RULE_MIN_HEIGHT:
+            rules.append({"x": (mapped.x0 + mapped.x1) / 2,
+                          "bottom": mapped.y0, "top": mapped.y1})
+    return rules
+
+
+def rule_between(left_start: float, right_start: float, y: float,
+                 rules: Optional[List[Dict[str, float]]]) -> bool:
+    """Whether a drawn vertical rule stands between where two runs on one baseline begin.
+
+    Measured from where each run starts, not from the end of the first: a producer pads a cell
+    with trailing spaces, and MatterhornProtokoll's index cells run a point past their own rule
+    that way. A rule inside a cell does not exist - that is what makes it a cell boundary - so
+    taking the whole span from one run's start to the next costs nothing.
+    """
+    return any(left_start < rule["x"] < right_start and rule["bottom"] <= y <= rule["top"]
+               for rule in rules or [])
+
+
 def obstacle_between(gap_left: float, gap_right: float, y: float, size: float,
                      obstacles: Optional[List[Dict[str, float]]]) -> bool:
     """Whether a filled shape or image has an edge inside the gap between two runs.
@@ -2615,7 +2703,8 @@ def obstacle_between(gap_left: float, gap_right: float, y: float, size: float,
 
 
 def group_pdf_lines(runs: List[Dict[str, Any]],
-                    obstacles: Optional[List[Dict[str, float]]] = None) -> List[Dict[str, Any]]:
+                    obstacles: Optional[List[Dict[str, float]]] = None,
+                    rules: Optional[List[Dict[str, float]]] = None) -> List[Dict[str, Any]]:
     """Merge runs that share a baseline into lines, keeping table cells apart.
 
     Grouping by baseline is the one grouping PDFs make reliable, which is why the layout
@@ -2650,6 +2739,10 @@ def group_pdf_lines(runs: List[Dict[str, Any]],
             # Powerupall answer sheet 27 of the 28 rules stood 44pt or more from their item and
             # were kept, while item 13 has the longest wording on the page and left 9pt, so its
             # rule was merged into the item, reflowed with the translation and moved.
+            # A rule drawn between the two is the page's own grid saying where the cell ends, and
+            # beats every measurement of the gap: the Index and Fehlerbedingung columns of
+            # MatterhornProtokoll stand 2pt apart, far inside anything a gap rule would catch.
+            #
             # A run opening one of the page's columns starts a cell of its own, but only where it
             # is really set apart from what precedes it - half an em, more than a word space and
             # less than the narrowest cell gap measured - and only after a cell holding more than
@@ -2664,6 +2757,7 @@ def group_pdf_lines(runs: List[Dict[str, Any]],
                     and not FORM_RULE.fullmatch(current["text"].strip()) \
                     and not obstacle_between(current["right"], run["x"], run["y"], run["size"],
                                              obstacles) \
+                    and not rule_between(current["x"], run["x"], run["y"], rules) \
                     and gap <= PDF_CELL_GAP * run["size"]:
                 separator = " " if gap > 0.2 * run["size"] and not current["text"].endswith(" ") else ""
                 current["text"] += separator + run["text"]
@@ -2839,7 +2933,9 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
         # Rotated pages would need the whole overlay transformed; they keep their original text.
         rotated = page.rotation % 360 != 0
         obstacles = [] if rotated else pdf_page_obstacles(page)
-        lines = [] if rotated else group_pdf_lines(pdf_page_runs(page), obstacles)
+        rules = [] if rotated else pdf_page_rules(page)
+        lines = ([] if rotated
+                 else group_pdf_lines(pdf_page_runs(page, rules), obstacles, rules))
         pages.append({
             "number": index,
             "width": float(box.width),
@@ -3423,6 +3519,11 @@ def redact_translated_text(content: bytes, pages: List[Dict[str, Any]], translat
     for page_data in pages:
         page = document[page_data["number"] - 1]
         redacted = False
+        # Every line of the page, to keep a rectangle out of the cell beside it: the point of
+        # padding either side is to catch the glyph's own overhang, and in a table that point
+        # lands in the neighbouring cell. On page 13 of MatterhornProtokoll the "Software" cell
+        # ends 0.2pt before "21-001" begins, and the padded rectangle took the "2" with it.
+        neighbours = [line for other in page_data["paragraphs"] for line in other["lines"]]
         for paragraph in page_data["paragraphs"]:
             # A paragraph without a translation keeps its original text rather than being
             # erased with nothing put in its place - as does an untranslatable fragment, whose
@@ -3437,10 +3538,17 @@ def redact_translated_text(content: bytes, pages: List[Dict[str, Any]], translat
                     # cover the link underlines that sit there (measured at 0.23em), which have
                     # to go with the text they underline or they end up striking through an
                     # unrelated part of the translation.
+                    on_baseline = [other for other in neighbours
+                                   if other is not line
+                                   and abs(other["y"] - line["y"]) <= 0.3 * size]
+                    left = max([other["right"] for other in on_baseline
+                                if other["right"] <= line["x"]] + [line["x"] - 1])
+                    right = min([other["x"] for other in on_baseline
+                                 if other["x"] >= line["right"]] + [line["right"] + 1])
                     rectangle = pymupdf.Rect(
-                        line["x"] - 1,
+                        left,
                         line["y"] - 0.30 * size,
-                        line["right"] + 1,
+                        right,
                         line["y"] + 0.5 * size,
                     ) * page.transformation_matrix
                     page.add_redact_annot(rectangle, fill=False)

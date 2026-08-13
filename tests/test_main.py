@@ -76,7 +76,9 @@ def mupdf_span(text, x, y, size=11.0, bold=False, direction=(1.0, 0.0), font="He
     reorders.
     """
     width = 0.5 * size * len(text)
-    characters = [{"c": char, "origin": (x + 0.5 * size * index, y)}
+    characters = [{"c": char, "origin": (x + 0.5 * size * index, y),
+                   "bbox": (x + 0.5 * size * index, y - size,
+                            x + 0.5 * size * (index + 1), y + 0.2 * size)}
                   for index, char in enumerate(text)]
     if draw_order:
         remaining = list(characters)
@@ -1625,6 +1627,41 @@ class MainTests(unittest.TestCase):
         lines = main.group_pdf_lines(runs)
 
         self.assertEqual([line["text"] for line in lines], ["Ein kurzer Satz"])
+
+    def test_split_run_at_rules_cuts_a_run_the_grid_runs_through(self):
+        # MatterhornProtokoll paints two cells of a row in one text run, "Objekt   Mensch  -  ",
+        # 0.59em apart - ordinary word spacing in justified text, so no measurement of the gap
+        # can tell them apart. The rule drawn between them can.
+        def characters(text, x, size=11.0):
+            return [{"c": char, "bbox": (x + 6 * index, 0.0, x + 6 * (index + 1), size)}
+                    for index, char in enumerate(text)]
+
+        identity = pymupdf.Matrix(1, 0, 0, 1, 0, 0)
+        # The grid line falls into the spaces between the two cells.
+        grid = [{"x": 88.0, "bottom": 0.0, "top": 20.0}]
+        rules = [{"x": 100.0, "bottom": 0.0, "top": 20.0}]
+
+        parts = main.split_run_at_rules(characters("Objekt   Mensch", 40.0), 10.0, identity, grid)
+        self.assertEqual([part["text"].strip() for part in parts], ["Objekt", "Mensch"])
+        self.assertTrue(all(part["split"] for part in parts))
+
+        # A cell whose text overhangs its own rule keeps together: cut there, the "Siehe" column
+        # of that document came apart into "0" and "1-001".
+        parts = main.split_run_at_rules(characters("01-001", 97.0), 10.0, identity, rules)
+        self.assertEqual([part["text"] for part in parts], ["01-001"])
+
+        # And a page without a grid is left exactly as it was.
+        parts = main.split_run_at_rules(characters("Ein ganzer Satz", 40.0), 10.0, identity, [])
+        self.assertEqual([part["text"] for part in parts], ["Ein ganzer Satz"])
+        self.assertFalse(parts[0]["split"])
+
+    def test_rule_between_measures_from_where_the_runs_begin(self):
+        # A producer pads a cell with trailing spaces, so the first run reaches a point past its
+        # own rule. Measured from the end of that run, the rule would fall outside the gap.
+        rules = [{"x": 75.5, "bottom": 700.0, "top": 760.0}]
+        self.assertTrue(main.rule_between(36.0, 78.4, 751.2, rules))
+        self.assertFalse(main.rule_between(78.4, 120.0, 751.2, rules))
+        self.assertFalse(main.rule_between(36.0, 78.4, 690.0, rules))
 
     def test_group_pdf_lines_splits_cells_that_sit_close_together(self):
         # Powerupall page 72: a two-column table with no rule between the columns, whose cells
