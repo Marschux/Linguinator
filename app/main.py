@@ -2533,6 +2533,14 @@ def pdf_page_runs(page) -> List[Dict[str, Any]]:
 # to separate cells of a table row rather than to one sentence. Wide enough to leave tab stops
 # and justified word spacing inside a line alone.
 PDF_CELL_GAP = 2.0
+# How many runs (or, in page_column_walls, lines) of a page have to begin at the same x before
+# that x counts as a column a table is set in. A run starting on one opens a cell of its own
+# however close it sits to the run before it, and no line is reflowed past one.
+# The gap alone is not enough: the two columns of Powerupall's page 72 stand 0.68em apart, well
+# inside PDF_CELL_GAP, so every row of it was merged into one line and reflowed across the table.
+# Measured (Aug 2026) over the nine test documents: this catches all 132 cell boundaries of
+# MatterhornProtokoll, the five broken rows of page 72 and eight more real cells, and nothing else.
+PDF_COLUMN_MIN_RUNS = 3
 
 
 def pdf_page_obstacles(page) -> List[Dict[str, float]]:
@@ -2589,6 +2597,12 @@ def group_pdf_lines(runs: List[Dict[str, Any]],
     row into one line whose translation is then reflowed across the whole table width, printed
     over the neighbouring columns.
     """
+    # The x positions the page sets column after column at, see PDF_COLUMN_MIN_RUNS. Rounded to
+    # half a point, the same way baselines are: a column is drawn to the same coordinate every
+    # time, but it still arrives with the odd hundredth of a point of drift.
+    column_starts = Counter(round(run["x"] * 2) / 2 for run in runs)
+    columns = {x for x, count in column_starts.items() if count >= PDF_COLUMN_MIN_RUNS}
+
     baselines: List[List[Dict[str, Any]]] = []
     for run in sorted(runs, key=lambda item: -item["y"]):
         if baselines and abs(baselines[-1][0]["y"] - run["y"]) <= max(1.0, 0.3 * run["size"]):
@@ -2609,7 +2623,17 @@ def group_pdf_lines(runs: List[Dict[str, Any]],
             # Powerupall answer sheet 27 of the 28 rules stood 44pt or more from their item and
             # were kept, while item 13 has the longest wording on the page and left 9pt, so its
             # rule was merged into the item, reflowed with the translation and moved.
-            if current and not FORM_RULE.fullmatch(run["text"].strip()) \
+            # A run opening one of the page's columns starts a cell of its own, but only where it
+            # is really set apart from what precedes it - half an em, more than a word space and
+            # less than the narrowest cell gap measured - and only after a cell holding more than
+            # a list marker or a number, which hangs to the left of its own text and belongs with
+            # it. Without both, a comma mid-sentence that happened to fall on a column split a
+            # Powerupall paragraph in two.
+            column = (gap > 0.5 * run["size"]
+                      and round(run["x"] * 2) / 2 in columns
+                      and len(current["text"].strip()) > 3)
+            if current and not column \
+                    and not FORM_RULE.fullmatch(run["text"].strip()) \
                     and not FORM_RULE.fullmatch(current["text"].strip()) \
                     and not obstacle_between(current["right"], run["x"], run["y"], run["size"],
                                              obstacles) \
@@ -2743,6 +2767,36 @@ def group_pdf_paragraphs(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return paragraphs
 
 
+def page_column_walls(lines: List[Dict[str, Any]]) -> List[Tuple[float, float, float]]:
+    """The x positions a table on this page sets its columns at, each with the band it spans.
+
+    A cell whose neighbour happens to be empty on its own baselines has nothing beside it to
+    measure against, and paragraph_line_limits then hands it the document's right margin: the
+    long cell of MatterhornProtokoll's page 4 is 300pt wide and its translation was reflowed to
+    550, straight across the two columns to its right.
+
+    A column is an x that several lines start at and that hardly any line crosses - text set in
+    one column runs over its own first-line indent all the time, a table's grid is not crossed at
+    all. Crossings are counted inside the column's own band only, so the running footer of a
+    landscape table does not disqualify it.
+    """
+    walls = []
+    for x in sorted({line["x"] for line in lines}):
+        own = [line for line in lines if abs(line["x"] - x) <= 1.0]
+        if len(own) < PDF_COLUMN_MIN_RUNS:
+            continue
+        bottom, top = min(line["y"] for line in own), max(line["y"] for line in own)
+        crossings = sum(1 for line in lines
+                        if line["x"] < x - 1.0 and line["right"] > x + 1.0
+                        and bottom <= line["y"] <= top)
+        if crossings >= len(own):
+            continue
+        if walls and x - walls[-1][0] <= 1.0:
+            continue
+        walls.append((x, bottom, top))
+    return walls
+
+
 def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, Any]]:
     try:
         document = pymupdf.open(stream=content, filetype="pdf")
@@ -2765,6 +2819,7 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
             "height": float(box.height),
             "paragraphs": group_pdf_paragraphs(lines),
             "obstacles": obstacles,
+            "columns": page_column_walls(lines),
         })
     if not any(page["paragraphs"] for page in pages):
         raise HTTPException(
@@ -2989,6 +3044,7 @@ def paragraph_center(paragraph: Dict[str, Any], left_margin: float, right_margin
 def paragraph_line_limits(
     paragraph: Dict[str, Any], others: List[Dict[str, Any]], right_margin: float,
     obstacles: Optional[List[Dict[str, float]]] = None,
+    columns: Optional[Sequence[Tuple[float, float, float]]] = None,
 ) -> List[float]:
     """How far right each of the paragraph's lines may run, in absolute page coordinates.
 
@@ -3031,6 +3087,13 @@ def paragraph_line_limits(
                     continue
                 if other_line["x"] > line["x"]:
                     limit = min(limit, other_line["x"] - 2)
+        # The next column of the page's own table, where the cell beside this line is empty and
+        # there is no neighbouring text to measure against, see page_column_walls. Weaker evidence
+        # than a drawn box, so it never cuts below the line's own ink - that is what the max below
+        # leaves standing.
+        for column, band_bottom, band_top in columns or []:
+            if column > line["x"] + 1.0 and band_bottom <= line["y"] <= band_top:
+                limit = min(limit, column - 2)
         # An image beside the line stops it just as a neighbouring column does; a box the line
         # runs inside stops it at that box's own right edge, see pdf_page_obstacles.
         for obstacle in obstacles or []:
@@ -3054,10 +3117,14 @@ def paragraph_line_limits(
                 # insets its text by 10.5pt, and the translation filling it to within 2pt of the
                 # frame read as text pressed against the right side of a box that has room on the
                 # left.
-                # Capped, because a centred heading or a deeply indented block inside the box
-                # would otherwise mirror its whole inset and lose room it may need for a longer
-                # translation - the heading on that same page 76 stands 112pt in.
-                inset = min(max(2.0, own_left - obstacle["x"]), PDF_LAYOUT_MAX_INDENT)
+                # Only where the paragraph really sits against this box's left edge. Past an
+                # ordinary indent the two have nothing to do with each other: the "32 GB unified
+                # memory" cell of Systemrequirements is also enclosed by the background of its
+                # whole table row, which starts 307pt further left, and mirroring that (capped at
+                # PDF_LAYOUT_MAX_INDENT) took 40pt off the cell's right edge - enough to wrap a
+                # one-line cell into three and push them out under the row.
+                gap = own_left - obstacle["x"]
+                inset = gap if 2.0 <= gap <= PDF_LAYOUT_MAX_INDENT else 2.0
                 edge = obstacle["right"] - inset
                 wall = edge if wall is None else min(wall, edge)
             elif obstacle["x"] > line["x"] and obstacle["top"] - obstacle["bottom"] >= line["size"]:
@@ -3377,7 +3444,8 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
                 floor = paragraph_floor(paragraph, page["paragraphs"], obstacles)
                 box_floor = enclosing_box_bottom(paragraph, obstacles)
                 width_limit = paragraph_line_limits(
-                    paragraph, page["paragraphs"], right_margin, obstacles)
+                    paragraph, page["paragraphs"], right_margin, obstacles,
+                    page.get("columns"))
                 centre = paragraph_center(paragraph, left_margin, right_margin, obstacles)
                 placed = reflow_paragraph(paragraph, translations[index], floor, width_limit,
                                           box_floor=box_floor, centre=centre)
@@ -3422,15 +3490,45 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
     # the ordinary paragraphs around them keep it. Per page and not per document, because one
     # cramped table must not take the size of every cramped paragraph in the book with it.
     for page, reflowed, cramped in zip(pages, per_page, cramped_pages):
-        lines: List[Dict[str, Any]] = []
-        for paragraph, text, floor, width_limit, box_floor, centre, placed in reflowed:
-            base = paragraph_base_size(paragraph)
+        bases = [paragraph_base_size(item[0]) for item in reflowed]
+        targets = []
+        for (paragraph, _, _, _, _, _, placed), base in zip(reflowed, bases):
             scale = scales[round(base, 1)]
             if placed[0]["size"] < base * scale:
                 scale = cramped.get(round(base, 1), placed[0]["size"] / base)
-            if placed[0]["size"] > base * scale:
-                # Only ever smaller than what this paragraph found on its own, so it still fits.
-                placed = reflow_paragraph(paragraph, text, floor, width_limit, scale,
+            # Never larger than what this paragraph found on its own, so it still fits.
+            targets.append(min(placed[0]["size"], base * scale))
+        # Cells standing beside each other are set in one size, whatever the original did.
+        # Deliberately unlike the original: at the scale the document ends up in nobody can tell
+        # 11pt from 12pt any more, all that is left is the impression of two sizes in one row, and
+        # side by side that shows (Powerupall page 50, "Kreative und energetische / Teilnahme an
+        # Elternschaft", 11.0 against 12.0, rendered 7.5 against 6.6). Beside, not on one baseline:
+        # cells of a row start within a line of each other rather than on the same line, those two
+        # 6pt apart. Only between cells whose own sizes are close, using the same 20 %
+        # group_pdf_paragraphs takes for a change of size: 11 against 12 is 9 % and is levelled, a
+        # 16pt header cell against 11pt body is 45 % and keeps its size.
+        boxes = [(min(line["x"] for line in item[0]["lines"]),
+                  max(line["right"] for line in item[0]["lines"]),
+                  min(line["y"] for line in item[0]["lines"]),
+                  max(line["y"] for line in item[0]["lines"])) for item in reflowed]
+        for index, (left, right, bottom, top) in enumerate(boxes):
+            for other, (other_left, other_right, other_bottom, other_top) in enumerate(boxes):
+                # Beside: the two overlap vertically and stand clear of each other horizontally.
+                # Paragraphs of one column always overlap horizontally and never pair up.
+                # A line of tolerance on the vertical overlap: the 12pt cell of that row holds a
+                # single line and sits wholly above the first line of the 11pt cell beside it.
+                if (other_left > right or other_right < left) \
+                        and other_bottom - bases[index] <= top \
+                        and other_top + bases[index] >= bottom \
+                        and abs(bases[other] - bases[index]) <= 0.2 * max(bases[index],
+                                                                         bases[other]):
+                    targets[index] = min(targets[index], targets[other])
+
+        lines: List[Dict[str, Any]] = []
+        for (paragraph, text, floor, width_limit, box_floor, centre, placed), base, target in zip(
+                reflowed, bases, targets):
+            if placed[0]["size"] > target:
+                placed = reflow_paragraph(paragraph, text, floor, width_limit, target / base,
                                           box_floor=box_floor, centre=centre)
             lines.extend(placed)
 

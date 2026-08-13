@@ -1626,6 +1626,80 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual([line["text"] for line in lines], ["Ein kurzer Satz"])
 
+    def test_group_pdf_lines_splits_cells_that_sit_close_together(self):
+        # Powerupall page 72: a two-column table with no rule between the columns, whose cells
+        # stand 7.5pt apart at 11pt - well inside PDF_CELL_GAP. Every row was merged into one
+        # line and reflowed across the table. The right column starting at the same x on row
+        # after row is what tells the cells apart, see PDF_COLUMN_MIN_RUNS.
+        runs = []
+        for index, baseline in enumerate((700.0, 685.0, 670.0)):
+            runs.append({"text": f"Frage {index}", "x": 95.4, "y": baseline,
+                         "size": 11.0, "width": 208.6})
+            runs.append({"text": f"Antwort {index}", "x": 311.5, "y": baseline,
+                         "size": 11.0, "width": 200.0})
+
+        lines = main.group_pdf_lines(runs)
+
+        self.assertEqual([line["x"] for line in lines],
+                         [95.4, 311.5, 95.4, 311.5, 95.4, 311.5])
+
+    def test_group_pdf_lines_keeps_a_list_marker_with_its_text(self):
+        # The mirror case: a marker hangs to the left of its own text, and its indent repeats
+        # down the list just as a column does. Splitting there would leave every marker as a
+        # paragraph of its own.
+        runs = []
+        for index, baseline in enumerate((700.0, 685.0, 670.0)):
+            runs.append({"text": f"{index}.", "x": 84.8, "y": baseline,
+                         "size": 11.0, "width": 12.0})
+            runs.append({"text": "Punkt", "x": 100.8, "y": baseline,
+                         "size": 11.0, "width": 30.0})
+
+        lines = main.group_pdf_lines(runs)
+
+        self.assertEqual([line["text"] for line in lines],
+                         ["0. Punkt", "1. Punkt", "2. Punkt"])
+
+    def test_paragraph_line_limits_stop_at_the_next_column_of_the_table(self):
+        # MatterhornProtokoll page 4: a tall cell whose neighbours are empty on all but its first
+        # baseline. With nothing beside those lines to measure against they were handed the
+        # document's right margin, and a 300pt cell was reflowed to 550pt across two columns.
+        cell = {"lines": [{"x": 82.0, "y": 579.0 - 12.6 * step, "right": 330.0, "size": 11.0}
+                          for step in range(4)]}
+        neighbour = {"lines": [{"x": 343.7, "y": 579.0, "right": 399.3, "size": 11.0}]}
+        columns = main.page_column_walls(cell["lines"] + neighbour["lines"] + [
+            {"x": 343.7, "y": 560.0, "right": 399.3, "size": 11.0},
+            {"x": 343.7, "y": 540.0, "right": 399.3, "size": 11.0},
+        ])
+
+        limits = main.paragraph_line_limits(cell, [cell, neighbour], 553.3, [], columns)
+
+        self.assertEqual([round(limit, 1) for limit in limits], [341.7] * 4)
+
+    def test_page_column_walls_ignore_a_first_line_indent(self):
+        # The mirror case: body text starts at its indent often enough to look like a column,
+        # but its own lines run straight across that indent, which a table's grid never is.
+        lines = [{"x": 100.8, "y": 700.0, "right": 550.0, "size": 11.0}]
+        lines += [{"x": 64.8, "y": 700.0 - 15.0 * step, "right": 550.0, "size": 11.0}
+                  for step in range(1, 6)]
+        lines += [{"x": 100.8, "y": 610.0 - 15.0 * step, "right": 550.0, "size": 11.0}
+                  for step in range(2)]
+
+        self.assertEqual([round(x, 1) for x, _, _ in main.page_column_walls(lines)], [64.8])
+
+    def test_paragraph_line_limits_ignore_the_inset_of_a_box_far_to_the_left(self):
+        # Systemrequirements: the "32 GB unified memory" cell is enclosed both by its own cell
+        # and by the background of the whole table row, which starts 300pt further left. Mirroring
+        # that distance as an inset (capped at PDF_LAYOUT_MAX_INDENT) took 40pt off the cell's
+        # right edge, wrapped a one-line cell into three and pushed them out under the row.
+        paragraph = {"lines": [{"x": 369.0, "y": 492.1, "right": 452.6, "size": 8.5}]}
+        row = {"x": 61.5, "right": 458.4, "top": 532.5, "bottom": 490.0}
+        cell = {"x": 365.2, "right": 458.4, "top": 532.5, "bottom": 490.0}
+
+        limits = main.paragraph_line_limits(paragraph, [paragraph], 452.5, [row, cell])
+
+        # The cell's own inset (3.8pt) still applies, the row's 307pt does not.
+        self.assertAlmostEqual(limits[0], 452.6, places=1)
+
     def test_group_pdf_paragraphs_splits_on_gaps_and_indentation(self):
         lines = [
             {"text": "One", "x": 50.0, "y": 700.0, "right": 100.0, "size": 11.0},
@@ -2099,6 +2173,43 @@ class MainTests(unittest.TestCase):
                  for span in pdf_spans(overlay, number) if span["text"].strip()}
 
         self.assertEqual(len(sizes), 1, f"body text set in several sizes: {sorted(sizes)}")
+
+    def test_layout_overlay_sets_the_cells_of_a_row_in_one_size(self):
+        # Powerupall page 50: two cells of one row set 11.0 against 12.0, which at the scale the
+        # book ends up in reads as two sizes in one row rather than as a size difference. The
+        # heading above keeps its own size, being far enough off to be meant.
+        pages = [{
+            "number": 1, "width": 400.0, "height": 300.0,
+            "paragraphs": [
+                {"text": "Heading", "lines": [
+                    {"text": "Heading", "x": 50.0, "y": 260.0, "right": 150.0, "size": 16.0},
+                ]},
+                {"text": "Left cell", "lines": [
+                    {"text": "Left cell", "x": 50.0, "y": 200.0, "right": 150.0, "size": 12.0},
+                ]},
+                {"text": "Right cell", "lines": [
+                    {"text": "Right cell", "x": 200.0, "y": 194.0, "right": 300.0, "size": 11.0},
+                ]},
+            ],
+        }]
+        source = main.create_pdf_from_pages([{
+            "width": 400, "height": 300, "margin": 40,
+            "source_page": "", "continuation": False, "footer": False,
+            "lines": [{"text": text, "font": "F1", "size": size, "line_height": 14,
+                       "x": x, "y": y}
+                      for text, x, y, size in (("Heading", 50, 260, 16),
+                                               ("Left cell", 50, 200, 12),
+                                               ("Right cell", 200, 194, 11))],
+        }])
+
+        overlay = main.render_pdf_layout_overlay(
+            source, pages, ["Überschrift", "Linke Zelle", "Rechte Zelle"])
+
+        sizes = {span["text"].split()[0]: round(span["size"], 1)
+                 for span in pdf_spans(overlay, 0) if span["text"].strip()}
+
+        self.assertEqual(sizes["Linke"], sizes["Rechte"])
+        self.assertNotEqual(sizes["Überschrift"], sizes["Linke"])
 
     def test_layout_overlay_keeps_the_original_when_the_reflow_explodes(self):
         # The model answers a heading with several lines of invented text; laid out, that block
