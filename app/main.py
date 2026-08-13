@@ -310,7 +310,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.11.10", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.11.14", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -645,6 +645,34 @@ LEADER_RUN = re.compile(r"\s*(?:\.\s*){4,}")
 # A rule to write an answer on, drawn as a run of underscores. Its own cell wherever it sits, see
 # group_pdf_lines; four is well past anything a word carries and short of the shortest real one.
 FORM_RULE = re.compile(r"_{4,}")
+
+# The presentation forms of the Latin ligatures. A PDF that draws "Anschaffung" with an ff ligature
+# extracts as "Anschaﬀung", which the model has never seen and which reaches the finished document
+# unchanged. Expanding them is what NFKC would do, applied on its own so the rest of the text keeps
+# its own normalisation.
+PDF_LIGATURES = {"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi",
+                 "ﬄ": "ffl", "ﬅ": "st", "ﬆ": "st"}
+
+# The same ligatures again, from producers whose ToUnicode table points them at Latin Extended-B
+# instead: Stall-Kamera-System extracts "PosiƟon", "FestplaƩe", "SoŌware", and its translation then
+# carried the mojibake through ("läuŌ" came back as "läuÅ").
+#
+# Only ever between letters of a word, because every one of these is a real capital in its own
+# right: Ō carries the macron of Latin and of romanised Japanese, both languages this translates.
+# A legitimate Ō opens a word or stands in capitals, so requiring a lowercase letter in front of it
+# separates the two cleanly. Lowercase mis-mappings are deliberately left alone - the one measured
+# here, ĩ for fb in "abruĩar", is an ordinary Vietnamese letter, and vi is a supported language.
+PDF_BROKEN_LIGATURES = {"Ɵ": "ti", "Ʃ": "tt", "Ō": "ft"}
+PDF_BROKEN_LIGATURE_RUN = re.compile(
+    r"(?<=[a-zà-öø-ÿ])[" + "".join(PDF_BROKEN_LIGATURES) + r"]")
+
+
+def expand_pdf_ligatures(text: str) -> str:
+    """Put ligature glyphs back into the letters they stand for, see PDF_LIGATURES."""
+    for ligature, letters in PDF_LIGATURES.items():
+        if ligature in text:
+            text = text.replace(ligature, letters)
+    return PDF_BROKEN_LIGATURE_RUN.sub(lambda hit: PDF_BROKEN_LIGATURES[hit.group()], text)
 
 # A result this much longer than its source is not a translation. The fallback model answers short,
 # low-content fragments - a page number, a list marker, a heading - by dumping training data
@@ -2534,7 +2562,25 @@ def pdf_page_obstacles(page) -> List[Dict[str, float]]:
     return obstacles
 
 
-def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def obstacle_between(gap_left: float, gap_right: float, y: float, size: float,
+                     obstacles: Optional[List[Dict[str, float]]]) -> bool:
+    """Whether a filled shape or image has an edge inside the gap between two runs.
+
+    A panel edge separates what stands on either side of it as surely as a wide gap does, and
+    more reliably: on page 86 of Powerupall a caption sitting on its own tinted panel came within
+    21.4pt of the body line beside it, just inside the 22pt PDF_CELL_GAP, so the two merged into
+    one line. That line then reached across the panel, and the translation was drawn over it.
+    """
+    for obstacle in obstacles or []:
+        if obstacle["bottom"] >= y + 0.8 * size or obstacle["top"] <= y:
+            continue
+        if gap_left < obstacle["x"] < gap_right or gap_left < obstacle["right"] < gap_right:
+            return True
+    return False
+
+
+def group_pdf_lines(runs: List[Dict[str, Any]],
+                    obstacles: Optional[List[Dict[str, float]]] = None) -> List[Dict[str, Any]]:
     """Merge runs that share a baseline into lines, keeping table cells apart.
 
     Grouping by baseline is the one grouping PDFs make reliable, which is why the layout
@@ -2565,6 +2611,8 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             # rule was merged into the item, reflowed with the translation and moved.
             if current and not FORM_RULE.fullmatch(run["text"].strip()) \
                     and not FORM_RULE.fullmatch(current["text"].strip()) \
+                    and not obstacle_between(current["right"], run["x"], run["y"], run["size"],
+                                             obstacles) \
                     and gap <= PDF_CELL_GAP * run["size"]:
                 separator = " " if gap > 0.2 * run["size"] and not current["text"].endswith(" ") else ""
                 current["text"] += separator + run["text"]
@@ -2596,7 +2644,10 @@ def group_pdf_lines(runs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 current["italic_chars"] += length
             current["color_chars"][run.get("color", 0)] += length
         for cell in cells:
-            cell["text"] = re.sub(r"\s+", " ", cell["text"]).strip()
+            # Expanded here rather than per run: a producer often draws the ligature from its own
+            # font, so it arrives as a span of its own and the letter before it - which is what
+            # tells a mis-mapped ligature from a real capital - sits in the previous one.
+            cell["text"] = expand_pdf_ligatures(re.sub(r"\s+", " ", cell["text"]).strip())
             # The single point where reading order is restored: the cell has just been put
             # together from left to right, out of runs that stand in page order, so this is the
             # only place the whole visual line exists. Doing it per run instead would reverse
@@ -2651,8 +2702,7 @@ def group_pdf_paragraphs(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     spacing_limit = 1.25 * typical_line_spacing(lines)
     paragraphs: List[Dict[str, Any]] = []
     for line in lines:
-        current = paragraphs[-1] if paragraphs else None
-        if current:
+        for current in paragraphs[-1:]:
             previous = current["lines"][-1]
             spacing = previous["y"] - line["y"]
             # A paragraph's first line rarely sits where the rest of it does, and it is the second
@@ -2685,8 +2735,9 @@ def group_pdf_paragraphs(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             )
             if fits:
                 current["lines"].append(line)
-                continue
-        paragraphs.append({"lines": [line]})
+                break
+        else:
+            paragraphs.append({"lines": [line]})
     for paragraph in paragraphs:
         paragraph["text"] = " ".join(line["text"] for line in paragraph["lines"])
     return paragraphs
@@ -2706,13 +2757,14 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
         box = page.mediabox
         # Rotated pages would need the whole overlay transformed; they keep their original text.
         rotated = page.rotation % 360 != 0
-        lines = [] if rotated else group_pdf_lines(pdf_page_runs(page))
+        obstacles = [] if rotated else pdf_page_obstacles(page)
+        lines = [] if rotated else group_pdf_lines(pdf_page_runs(page), obstacles)
         pages.append({
             "number": index,
             "width": float(box.width),
             "height": float(box.height),
             "paragraphs": group_pdf_paragraphs(lines),
-            "obstacles": [] if rotated else pdf_page_obstacles(page),
+            "obstacles": obstacles,
         })
     if not any(page["paragraphs"] for page in pages):
         raise HTTPException(
@@ -2996,7 +3048,18 @@ def paragraph_line_limits(
                 # Only this one counts as a wall: a shape merely standing to the right belongs to
                 # whatever is beside the line, and a short line has all sorts of things to its
                 # right that say nothing about the width the paragraph had.
-                wall = obstacle["right"] - 2 if wall is None else min(wall, obstacle["right"] - 2)
+                #
+                # Stopped the same distance from the box's right edge as the paragraph starts from
+                # its left one, rather than at a flat two points: the box on page 76 of Powerupall
+                # insets its text by 10.5pt, and the translation filling it to within 2pt of the
+                # frame read as text pressed against the right side of a box that has room on the
+                # left.
+                # Capped, because a centred heading or a deeply indented block inside the box
+                # would otherwise mirror its whole inset and lose room it may need for a longer
+                # translation - the heading on that same page 76 stands 112pt in.
+                inset = min(max(2.0, own_left - obstacle["x"]), PDF_LAYOUT_MAX_INDENT)
+                edge = obstacle["right"] - inset
+                wall = edge if wall is None else min(wall, edge)
             elif obstacle["x"] > line["x"] and obstacle["top"] - obstacle["bottom"] >= line["size"]:
                 # Only a shape at least as tall as the line it is supposed to stop. Anything
                 # flatter is an ornament standing near the text, not something set beside it: the
@@ -3301,6 +3364,10 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
     per_page: List[List[Tuple[Any, ...]]] = []
     # The smallest scale any paragraph of a given base size needed, anywhere in the document.
     scales: Dict[float, float] = {}
+    # The same for the paragraphs that had to shrink past PDF_LAYOUT_MIN_SCALE to clear what sits
+    # below them, kept per page rather than per document, see the second pass.
+    cramped: Dict[float, float] = {}
+    cramped_pages: List[Dict[float, float]] = []
     for page in pages:
         reflowed: List[Tuple[Any, ...]] = []
         for paragraph in page["paragraphs"]:
@@ -3329,8 +3396,14 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
                     # table cell must not set the size of every paragraph in the document.
                     scales[key] = min(scales.get(key, 1.0),
                                       max(placed[0]["size"] / base, PDF_LAYOUT_MIN_SCALE))
+                    # And, separately, the smallest scale the paragraphs that had to go below that
+                    # minimum needed on this page, see the second pass.
+                    if placed[0]["size"] < base * PDF_LAYOUT_MIN_SCALE:
+                        cramped[key] = min(cramped.get(key, 1.0), placed[0]["size"] / base)
             index += 1
         per_page.append(reflowed)
+        cramped_pages.append(cramped)
+        cramped = {}
 
     # Every paragraph the document sets in one size is redrawn in one size. Each shrinks itself
     # just enough to fit its own translation, which left body text at 0.7 next to body text at 1.0
@@ -3342,11 +3415,19 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
     # The smallest scale the document needs, not an average of them: it is the only one every
     # paragraph still fits in, and anything larger buys its evenness by pushing the densest pages
     # into overflow, which is the more visible fault of the two.
-    for page, reflowed in zip(pages, per_page):
+    # A paragraph too cramped for even that scale shrinks further on its own (see
+    # PDF_LAYOUT_CROWDED_MIN_SCALE), and side by side those came out at six different sizes across
+    # one row of the research table on page 50 of Powerupall. They are levelled with each other per
+    # page: the ones that had to go below the document's scale all take the smallest of them, while
+    # the ordinary paragraphs around them keep it. Per page and not per document, because one
+    # cramped table must not take the size of every cramped paragraph in the book with it.
+    for page, reflowed, cramped in zip(pages, per_page, cramped_pages):
         lines: List[Dict[str, Any]] = []
         for paragraph, text, floor, width_limit, box_floor, centre, placed in reflowed:
             base = paragraph_base_size(paragraph)
             scale = scales[round(base, 1)]
+            if placed[0]["size"] < base * scale:
+                scale = cramped.get(round(base, 1), placed[0]["size"] / base)
             if placed[0]["size"] > base * scale:
                 # Only ever smaller than what this paragraph found on its own, so it still fits.
                 placed = reflow_paragraph(paragraph, text, floor, width_limit, scale,

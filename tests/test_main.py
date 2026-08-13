@@ -2375,7 +2375,9 @@ class MainTests(unittest.TestCase):
         paragraph = {"lines": [{"text": "cell", "x": 70.0, "y": 700.0, "right": 120.0, "size": 10.0}]}
         cell = {"x": 62.0, "right": 240.0, "top": 710.0, "bottom": 690.0}
 
-        self.assertEqual(main.paragraph_width_limit(paragraph, [paragraph], 575.0, [cell]), 238.0)
+        # The text is inset 8pt from the left of its box, so it stops 8pt short of the right of
+        # it: filling to within 2pt read as text pressed against one side of a padded box.
+        self.assertEqual(main.paragraph_width_limit(paragraph, [paragraph], 575.0, [cell]), 232.0)
 
     def test_paragraph_width_limit_stops_at_the_cell_the_original_overran(self):
         # The original's own text already runs past its cell into the next column
@@ -2384,7 +2386,8 @@ class MainTests(unittest.TestCase):
         paragraph = {"lines": [{"text": "runs on", "x": 143.0, "y": 512.0, "right": 430.0, "size": 8.5}]}
         cell = {"x": 140.0, "right": 362.0, "top": 525.0, "bottom": 490.0}
 
-        self.assertEqual(main.paragraph_width_limit(paragraph, [paragraph], 542.0, [cell]), 360.0)
+        # 3pt in from the left of the cell, so 3pt short of its right edge.
+        self.assertEqual(main.paragraph_width_limit(paragraph, [paragraph], 542.0, [cell]), 359.0)
 
     def test_paragraph_width_limit_ignores_a_shape_beside_a_short_line(self):
         # A paragraph opening with a one-word line has all sorts of things to the right of that
@@ -2457,6 +2460,45 @@ class MainTests(unittest.TestCase):
         for line in placed[:2]:
             self.assertLessEqual(
                 line["x"] + main.pdf_measure_text(line["text"], line["size"], False, False), 225.3)
+
+    def test_expand_pdf_ligatures_puts_the_letters_back(self):
+        # Presentation forms, which the model has never seen and which reach the finished
+        # document unchanged.
+        self.assertEqual(main.expand_pdf_ligatures("Anschaﬀung"), "Anschaffung")
+        self.assertEqual(main.expand_pdf_ligatures("Traﬃc"), "Traffic")
+
+        # The same ligatures from a producer whose ToUnicode points them at Latin Extended-B
+        # (Stall-Kamera-System). "läuŌ" reached the translation and came back as "läuÅ".
+        self.assertEqual(main.expand_pdf_ligatures("läuŌ"), "läuft")
+        self.assertEqual(main.expand_pdf_ligatures("PosiƟon"), "Position")
+        self.assertEqual(main.expand_pdf_ligatures("FestplaƩe"), "Festplatte")
+
+        # Every one of those is a real capital elsewhere: Ō carries the macron of Latin and of
+        # romanised Japanese, both of which this translates. Only a lowercase letter in front of
+        # it makes it a ligature, so a word opening with one is left alone.
+        self.assertEqual(main.expand_pdf_ligatures("Ōsaka"), "Ōsaka")
+        self.assertEqual(main.expand_pdf_ligatures("ŌTIUM"), "ŌTIUM")
+        # Lowercase mis-mappings are left alone: ĩ is an ordinary Vietnamese letter.
+        self.assertEqual(main.expand_pdf_ligatures("nghĩ"), "nghĩ")
+
+    def test_group_pdf_lines_keeps_a_caption_off_its_neighbours_line(self):
+        # Powerupall page 86: a caption on its own tinted panel came within 21.4pt of the body
+        # line beside it, just inside PDF_CELL_GAP, so the two merged into one line. That line
+        # then reached across the panel and the translation was drawn over it.
+        runs = [
+            {"text": "often use labels such as", "x": 64.8, "y": 221.3, "width": 327.7,
+             "size": 11.0},
+            {"text": "to", "x": 400.0, "y": 221.3, "width": 13.7, "size": 11.0},
+            {"text": "No one is stupid!", "x": 435.1, "y": 221.3, "width": 96.7, "size": 11.0},
+        ]
+        panel = [{"x": 419.6, "right": 547.2, "top": 244.1, "bottom": 103.9}]
+
+        # 21.4pt of gap alone keeps them together, which is what went wrong.
+        self.assertEqual(len(main.group_pdf_lines([dict(r) for r in runs])), 1)
+        # The panel edge between them separates them regardless of the gap.
+        lines = main.group_pdf_lines([dict(r) for r in runs], panel)
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(lines[1]["text"], "No one is stupid!")
 
     def test_group_pdf_paragraphs_splits_on_a_change_of_weight(self):
         # Get_Started_With_Smallpdf sets its headings bold at the body size, so the size check
