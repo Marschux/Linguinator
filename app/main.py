@@ -114,6 +114,11 @@ PDF_LAYOUT_TIGHTEN_SCALE = 0.9
 # usual one. There the extra line does not land in a gap, it lands outside the box, so fitting the
 # original line count is worth more type size than elsewhere.
 PDF_LAYOUT_BOXED_MIN_SCALE = 0.6
+# And for a paragraph that would otherwise be drawn on top of the one below it. Lower than either
+# of the above, because the alternative is not a cramped page but unreadable text: measured over
+# the Powerupall pages reported as colliding, the four paragraphs that still ran into their
+# neighbour at the ordinary minimum needed 0.54 to 0.64 to clear it.
+PDF_LAYOUT_CROWDED_MIN_SCALE = 0.5
 # A reflow taller than this multiple of the paragraph it replaces is not laid out at all; the
 # original stays instead. Overflowing by a line or two is normal (German runs longer, and the
 # substitute font wider), a block three times the height is the model having invented text, and
@@ -278,7 +283,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.11.5", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.11.6", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -3064,8 +3069,16 @@ def reflow_paragraph(
     while scale is None and len(wrapped) > len(lines) and size > tighten_to:
         size = max(size * 0.98, tighten_to)
         wrapped = wrap(size)
-    while scale is None and not fits(len(wrapped), size) and size > base_size * PDF_LAYOUT_MIN_SCALE:
-        size = max(size * 0.95, base_size * PDF_LAYOUT_MIN_SCALE)
+    # A paragraph with a neighbour directly below it may shrink past the ordinary minimum rather
+    # than run into it. Overlapping text cannot be read at all, small text only reads small, so
+    # the trade is worth making - but only for the paragraph that needs it, which is why the
+    # document-wide scale in render_pdf_layout_overlay stays clamped at the ordinary minimum.
+    # Measured (Aug 2026) on the Powerupall pages reported as colliding: four paragraphs across
+    # pages 15, 50 and 92 still ran into the next one at 0.70 and needed 0.54 to 0.64.
+    lowest = base_size * (PDF_LAYOUT_MIN_SCALE if floor is None or boxed
+                          else PDF_LAYOUT_CROWDED_MIN_SCALE)
+    while scale is None and not fits(len(wrapped), size) and size > lowest:
+        size = max(size * 0.95, lowest)
         wrapped = wrap(size)
 
     # A translation into Hebrew or Arabic hangs off the right edge of the column, the way the

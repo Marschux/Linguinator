@@ -2551,10 +2551,12 @@ class MainTests(unittest.TestCase):
         self.assertEqual(len(boxed), 1)
         self.assertLess(boxed[0]["size"], 8.5 * main.PDF_LAYOUT_MIN_SCALE)
         self.assertGreaterEqual(boxed[0]["size"], 8.5 * main.PDF_LAYOUT_BOXED_MIN_SCALE)
-        # Same floor without a box around it: an overflowing line is the lesser evil, and the
-        # type stops at the ordinary minimum.
-        self.assertGreater(len(open_below), 1)
-        self.assertGreaterEqual(open_below[0]["size"], 8.5 * main.PDF_LAYOUT_MIN_SCALE)
+        # The same floor with a paragraph below rather than a cell edge also stays on one line,
+        # and pays more type size for it: clearing another baseline takes a full em where clearing
+        # an edge takes only the descenders.
+        self.assertEqual(len(open_below), 1)
+        self.assertLess(open_below[0]["size"], boxed[0]["size"])
+        self.assertGreaterEqual(open_below[0]["size"], 8.5 * main.PDF_LAYOUT_CROWDED_MIN_SCALE)
 
     def test_enclosing_box_bottom_ignores_a_box_the_paragraph_is_not_in(self):
         paragraph = {"lines": [{"text": "cell", "x": 50.0, "y": 700.0, "right": 150.0, "size": 10.0}]}
