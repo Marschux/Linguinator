@@ -2016,7 +2016,9 @@ class MainTests(unittest.TestCase):
                 self.assertFalse(main.has_translatable_text(numeral))
         # Dot leaders are decoration, so a line that is only leaders has nothing to translate.
         self.assertFalse(main.has_translatable_text(". . . . . . . ."))
-        for real in ("Ja", "Hello world", "2. Scope", "16 GB", "日本語",
+        # One character is a whole word where the script writes without spaces: the closing line
+        # of Hoshi no Kagi is "— 完 —", "The End", and stayed Japanese in the translation.
+        for real in ("Ja", "Hello world", "2. Scope", "16 GB", "日本語", "— 完 —", "完",
                      "Mehr dazu auf https://example.com nachlesen",
                      "1. Gesichtspflege . . . . . . . . 12"):
             with self.subTest(text=real):
@@ -2478,7 +2480,8 @@ class MainTests(unittest.TestCase):
         paragraph = {"lines": [{"text": "caption", "x": 50.0, "y": 700.0, "right": 150.0, "size": 10.0}]}
         image = {"x": 300.0, "right": 560.0, "top": 760.0, "bottom": 640.0}
 
-        self.assertEqual(main.paragraph_width_limit(paragraph, [paragraph], 575.0, [image]), 298.0)
+        # Half an em short of the image, so the text keeps a visible gap to it.
+        self.assertEqual(main.paragraph_width_limit(paragraph, [paragraph], 575.0, [image]), 295.0)
 
     def test_paragraph_width_limit_stays_inside_the_box_it_sits_in(self):
         # A table cell with an empty neighbour let the translation run to the page margin,
@@ -2563,14 +2566,14 @@ class MainTests(unittest.TestCase):
 
         limits = main.paragraph_line_limits(paragraph, [paragraph], 540.0, [image])
 
-        self.assertEqual(limits[:2], [225.3, 225.3])  # stopped short of the image
+        self.assertEqual(limits[:2], [222.8, 222.8])  # stopped half an em short of the image
         self.assertEqual(limits[2], 540.0)  # clear of it, out to the margin
 
         # And the reflow wraps each line to its own edge rather than to the widest of them.
         placed = main.reflow_paragraph(paragraph, "Wort " * 40, width_limit=limits)
         for line in placed[:2]:
             self.assertLessEqual(
-                line["x"] + main.pdf_measure_text(line["text"], line["size"], False, False), 225.3)
+                line["x"] + main.pdf_measure_text(line["text"], line["size"], False, False), 222.8)
 
     def test_expand_pdf_ligatures_puts_the_letters_back(self):
         # Presentation forms, which the model has never seen and which reach the finished

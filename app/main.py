@@ -2886,6 +2886,11 @@ def has_translatable_text(text: str) -> bool:
         return False
     if ROMAN_NUMERAL.fullmatch(stripped):
         return False
+    # One character is a whole word in a script that writes without spaces, so the two-letter bar
+    # is a Latin one: the closing line of Hoshi no Kagi is "— 完 —", "The End", and came back
+    # untranslated because 完 stands on its own.
+    if CJK_DENSE_CHARS.search(stripped):
+        return True
     return bool(re.search(r"[^\W\d_]{2,}", stripped))
 
 
@@ -3134,7 +3139,10 @@ def paragraph_line_limits(
                 # whole paragraph one word per line. Height, not width - a picture narrower than
                 # the paragraph still blocks it, which measuring against the paragraph's own width
                 # got wrong, and let the translation back into the images of Stall-Kamera-System.
-                limit = min(limit, obstacle["x"] - 2)
+                # Half an em of air, not the two points a neighbouring line is given: text set
+                # beside a picture keeps a visible gap to its frame, and at two points the body
+                # text of Powerupall page 86 read as pressed against the picture beside it.
+                limit = min(limit, obstacle["x"] - max(2.0, 0.5 * line["size"]))
         # This line's own ink, not the paragraph's widest: a line cannot be asked to wrap narrower
         # than the original already set it, but the fact that some *other* line of the paragraph
         # reaches further says nothing about the room this one had. Taking the whole paragraph's
