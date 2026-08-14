@@ -3566,8 +3566,15 @@ def reflow_paragraph(
     # document-wide scale in render_pdf_layout_overlay stays clamped at the ordinary minimum.
     # Measured (Aug 2026) on the Powerupall pages reported as colliding: four paragraphs across
     # pages 15, 50 and 92 still ran into the next one at 0.70 and needed 0.54 to 0.64.
-    lowest = base_size * (PDF_LAYOUT_MIN_SCALE if floor is None or boxed
-                          else PDF_LAYOUT_CROWDED_MIN_SCALE)
+    #
+    # Not for a CJK source, though: a German translation of Japanese or Chinese routinely needs
+    # several times the line count the dense source packed into the same width, and shrinking
+    # *that* down to 0.5 to avoid overflow reads as a typo, not a translation - Hoshi no Kagi came
+    # back with two paragraphs at 0.51 next to the rest of the page at 0.73. There the trade runs
+    # the other way: overflowing a couple of lines past the neighbour below is the smaller fault.
+    source_text = " ".join(line["text"] for line in lines)
+    crowds = floor is not None and not boxed and detect_pdf_script(source_text) != "cjk"
+    lowest = base_size * (PDF_LAYOUT_CROWDED_MIN_SCALE if crowds else PDF_LAYOUT_MIN_SCALE)
     while scale is None and not fits(len(wrapped), size) and size > lowest:
         size = max(size * 0.95, lowest)
         wrapped = wrap(size)
