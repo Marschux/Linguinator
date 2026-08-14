@@ -16,8 +16,8 @@ RUN apt-get update \
        tesseract-ocr-nld tesseract-ocr-por tesseract-ocr-pol tesseract-ocr-rus tesseract-ocr-ukr \
        tesseract-ocr-swe tesseract-ocr-dan tesseract-ocr-fin tesseract-ocr-ell \
        tesseract-ocr-hun tesseract-ocr-bul \
-       tesseract-ocr-chi-sim tesseract-ocr-chi-tra tesseract-ocr-jpn tesseract-ocr-hin \
-       tesseract-ocr-vie tesseract-ocr-ind tesseract-ocr-tur tesseract-ocr-lat \
+       tesseract-ocr-chi-sim tesseract-ocr-chi-tra tesseract-ocr-jpn \
+       tesseract-ocr-vie tesseract-ocr-tur tesseract-ocr-lat \
     && rm -rf /var/lib/apt/lists/*
 
 COPY docker/requirements.txt .

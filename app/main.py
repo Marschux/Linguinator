@@ -263,7 +263,7 @@ CORE_LANGUAGES = {
     "sv": "swe_Latn", "da": "dan_Latn", "fi": "fin_Latn", "el": "ell_Grek",
     "hu": "hun_Latn", "bg": "bul_Cyrl",
     "zh": "zho_Hans", "ja": "jpn_Jpan",
-    "hi": "hin_Deva", "vi": "vie_Latn", "id": "ind_Latn", "tr": "tur_Latn",
+    "vi": "vie_Latn", "tr": "tur_Latn",
     # No dedicated pair model exists for Latin, and langdetect cannot name it, so auto-detect will
     # read a Latin source as Italian or Romanian - it has to be set by hand. The fallback answers
     # in Latin (>>lat<< is in its vocabulary, checked) but reaches for the vocabulary of its bible
@@ -317,7 +317,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.11.22", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.11.23", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
