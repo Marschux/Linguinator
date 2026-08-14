@@ -4847,6 +4847,37 @@ def pdf_sections(markdown: str):
     return sections
 
 
+def merge_cross_page_sentences(sections: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+    """Move a page's trailing incomplete sentence onto the next page's text.
+
+    Pages are joined with a hard break regardless of where a sentence actually ends, so a
+    sentence that runs across a page boundary in the source PDF is cut into two fragments -
+    each translated on its own, neither a complete sentence. Measured on a real OCR page: the
+    tail end of one such fragment came back as an invented sentence, the other as a plausible
+    translation rejected by guard_hallucination for running slightly long, because neither half
+    read as the sentence it actually was. Carrying the trailing fragment forward before chunking
+    keeps the sentence whole for translation; the page marker it ends up under shifts by one
+    sentence, no worse than the original PDF already showing the same split across the same two
+    pages.
+    """
+    sections = list(sections)
+    for index in range(len(sections) - 1):
+        number, text = sections[index]
+        if not text:
+            continue
+        matches = list(SENTENCE_END.finditer(text))
+        cut = matches[-1].end() if matches else 0
+        if cut == 0 or cut >= len(text):
+            continue
+        carry = text[cut:].strip()
+        if not carry:
+            continue
+        next_number, next_text = sections[index + 1]
+        sections[index] = (number, text[:cut].strip())
+        sections[index + 1] = (next_number, (carry + " " + next_text).strip())
+    return sections
+
+
 def run_pdf_translate_job(
     job_id: str,
     content: bytes,
@@ -4867,7 +4898,7 @@ def run_pdf_translate_job(
             source = detect_source_language(markdown)
             update_job(job_id, source=source)
         markdown = expand_lowercase_ligatures(markdown, source)
-        sections = pdf_sections(markdown)
+        sections = merge_cross_page_sentences(pdf_sections(markdown))
         planned = [(page_number, split_long_text(page_text, MAX_CHARS)) for page_number, page_text in sections]
         total = sum(len(chunks) for _, chunks in planned)
         update_job(job_id, total=total, message=f"Translating 0 / {total} chunks")
@@ -5551,12 +5582,8 @@ async def translate_pdf(
     page_range: str = Form(""),
 ):
     markdown = await extract_pdf_markdown(file, page_range, source)
-    translated = []
-    for section in re.split(r"(?m)^# Page ", markdown):
-        section = section.strip()
-        if not section:
-            continue
-        page_number, _, page_text = section.partition("\n")
-        translated.append(f"# Page {page_number.strip()}\n\n{translate_text(page_text.strip(), source, target)}")
+    sections = merge_cross_page_sentences(pdf_sections(markdown))
+    translated = [f"# Page {page_number}\n\n{translate_text(page_text, source, target)}"
+                  for page_number, page_text in sections]
     return "\n\n".join(translated)
 
