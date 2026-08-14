@@ -263,7 +263,7 @@ CORE_LANGUAGES = {
     "sv": "swe_Latn", "da": "dan_Latn", "fi": "fin_Latn", "el": "ell_Grek",
     "hu": "hun_Latn", "bg": "bul_Cyrl",
     "zh": "zho_Hans", "ja": "jpn_Jpan",
-    "vi": "vie_Latn", "tr": "tur_Latn",
+    "tr": "tur_Latn",
     # No dedicated pair model exists for Latin, and langdetect cannot name it, so auto-detect will
     # read a Latin source as Italian or Romanian - it has to be set by hand. The fallback answers
     # in Latin (>>lat<< is in its vocabulary, checked) but reaches for the vocabulary of its bible
@@ -687,8 +687,10 @@ PDF_BROKEN_LIGATURE_RUN = re.compile(
 PDF_BROKEN_LOWERCASE_LIGATURES = {"ĩ": "fb"}
 PDF_BROKEN_LOWERCASE_RUN = re.compile(
     r"(?<=[a-zà-öø-ÿ])[" + "".join(PDF_BROKEN_LOWERCASE_LIGATURES) + r"](?=[a-zà-öø-ÿ])")
-# Languages that write these letters themselves, in the internal code's language part.
-LIGATURE_NATIVE_LANGUAGES = {"vie"}
+# Languages that write these letters themselves, in the internal code's language part. Vietnamese
+# was the only one and is no longer offered (see CORE_LANGUAGES), left empty rather than removed
+# in case a future language needs the same carve-out.
+LIGATURE_NATIVE_LANGUAGES: Set[str] = set()
 
 
 def expand_pdf_ligatures(text: str) -> str:
