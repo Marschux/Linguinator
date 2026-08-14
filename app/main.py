@@ -2926,7 +2926,20 @@ def page_column_walls(lines: List[Dict[str, Any]]) -> List[Tuple[float, float, f
     one column runs over its own first-line indent all the time, a table's grid is not crossed at
     all. Crossings are counted inside the column's own band only, so the running footer of a
     landscape table does not disqualify it.
+
+    The band handed back can reach further than the one the crossing check uses, though: a wall
+    is proven by the lines that *start* a column, but a paragraph's last lines do not have to -
+    the lowest line of Two_Column_Paper's left column sits 3pt below every line that begins at its
+    wall, and a band built only from starting lines left it on the document's own right margin,
+    straight across the column to its right. Extended one ordinary line-gap's worth of slack at a
+    time through whatever text runs on continuously past the proven band, in either direction,
+    which is why it stops at a real break - a wider gap than the page's own leading, such as the
+    rule above a footnote - instead of reaching across the whole page the way a first attempt at
+    this did (it walled a paragraph nowhere near it, see the test naming a picture in
+    Stall-Kamera-System).
     """
+    spacing = typical_line_spacing(lines)
+    all_ys = sorted({line["y"] for line in lines}, reverse=True)
     walls = []
     for x in sorted({line["x"] for line in lines}):
         own = [line for line in lines if abs(line["x"] - x) <= 1.0]
@@ -2940,6 +2953,16 @@ def page_column_walls(lines: List[Dict[str, Any]]) -> List[Tuple[float, float, f
             continue
         if walls and x - walls[-1][0] <= 1.0:
             continue
+        if spacing:
+            tolerance = 2.0 * spacing
+            for y in [y for y in all_ys if y < bottom]:
+                if bottom - y > tolerance:
+                    break
+                bottom = y
+            for y in reversed([y for y in all_ys if y > top]):
+                if y - top > tolerance:
+                    break
+                top = y
         walls.append((x, bottom, top))
     return walls
 
