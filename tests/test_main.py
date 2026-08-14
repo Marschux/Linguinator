@@ -587,14 +587,6 @@ class MainTests(unittest.TestCase):
         self.assertEqual(main.model_language_code("Helsinki-NLP/opus-mt-tc-bible-big-mul-mul", "deu_Latn"), ">>deu<<")
         self.assertEqual(main.model_language_code("Helsinki-NLP/opus-mt-en-de", "deu_Latn"), "deu_Latn")
 
-    def test_model_language_code_maps_aliases_the_fallback_actually_knows(self):
-        # The fallback's vocabulary has >>ara<< but no >>arb<<. An unknown prefix is silently
-        # tokenised as plain text rather than rejected, leaving the model without a target
-        # signal: nl>ar came back in Korean before this mapping existed.
-        self.assertEqual(main.model_language_code("Helsinki-NLP/opus-mt-tc-bible-big-mul-mul", "arb_Arab"), ">>ara<<")
-        # A dedicated bilingual model takes the internal code unchanged, aliases included.
-        self.assertEqual(main.model_language_code("Helsinki-NLP/opus-mt-de-ar", "arb_Arab"), "arb_Arab")
-
     def test_every_core_language_has_a_prefix_token_alias_entry_or_matches_directly(self):
         # Guard for the next language added: its short code must either be one the fallback
         # already knows or be mapped in FALLBACK_LANGUAGE_ALIASES. The vocabulary itself cannot
@@ -1025,11 +1017,10 @@ class MainTests(unittest.TestCase):
         self.assertIn("eng_Latn", payload["favorites"])
 
     def test_ocr_language_code_maps_source_language_to_tesseract(self):
-        with patch.object(main, "installed_ocr_languages", return_value=("deu", "eng", "fra", "ara", "chi_sim")):
+        with patch.object(main, "installed_ocr_languages", return_value=("deu", "eng", "fra", "chi_sim")):
             self.assertEqual(main.ocr_language_code("deu_Latn"), "deu")
             self.assertEqual(main.ocr_language_code("fra_Latn"), "fra")
-            # Tesseract names these differently than we do.
-            self.assertEqual(main.ocr_language_code("arb_Arab"), "ara")
+            # Tesseract names this differently than we do.
             self.assertEqual(main.ocr_language_code("zho_Hans"), "chi_sim")
             self.assertEqual(main.ocr_language_code(main.AUTO_SOURCE), "eng")
 
@@ -1160,7 +1151,9 @@ class MainTests(unittest.TestCase):
             self.assertLessEqual(len(latin), main.OCR_PROBE_LIMIT)
             # Cyrillic: no English, it does not occur in that script.
             self.assertEqual(main.ocr_probe_languages("Cyrillic"), "rus+ukr+bul")
-            self.assertEqual(main.ocr_probe_languages("Hebrew"), "heb")
+            # Hebrew has no CORE_LANGUAGES entry (removed 14.08.2026), so nothing in that script
+            # can be named - the empty result falls back to English same as an unknown script.
+            self.assertEqual(main.ocr_probe_languages("Hebrew"), "eng")
             self.assertEqual(main.ocr_probe_languages(""), "eng")
             self.assertEqual(main.ocr_probe_languages("Klingon"), "eng")
 
@@ -1257,24 +1250,24 @@ class MainTests(unittest.TestCase):
     def test_auto_detect_rechecks_the_language_on_the_clean_text(self):
         # The probe mangles diacritics, so langdetect can land on a close relative. The clean
         # text from that read settles it.
-        detections = iter(["slk_Latn", "ces_Latn", "ces_Latn"])
+        detections = iter(["dan_Latn", "swe_Latn", "swe_Latn"])
 
         with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
-            with patch.object(main, "installed_ocr_languages", return_value=("ces", "deu", "eng", "fra", "slk")):
+            with patch.object(main, "installed_ocr_languages", return_value=("swe", "deu", "eng", "fra", "dan")):
                 with patch.object(main, "ocr_page_script", return_value="Latin"):
                     with patch.object(main, "detect_source_language", side_effect=lambda _text: next(detections)):
-                        with patch.object(main, "run_tesseract", side_effect=["probe", "slovak read", "czech read"]) as reads:
+                        with patch.object(main, "run_tesseract", side_effect=["probe", "danish read", "swedish read"]) as reads:
                             with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout="")):
                                 text = main.ocr_pdf_page(b"%PDF", 1)
 
-        self.assertEqual(text, "czech read")
-        self.assertEqual([call.args[1] for call in reads.call_args_list], ["eng+deu+fra", "slk", "ces"])
+        self.assertEqual(text, "swedish read")
+        self.assertEqual([call.args[1] for call in reads.call_args_list], ["eng+deu+fra", "dan", "swe"])
 
     def test_auto_detect_skips_the_second_read_when_the_probe_was_one_language(self):
         with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
-            with patch.object(main, "installed_ocr_languages", return_value=("eng", "heb")):
-                with patch.object(main, "ocr_page_script", return_value="Hebrew"):
-                    with patch.object(main, "run_tesseract", return_value="טקסט") as reads:
+            with patch.object(main, "installed_ocr_languages", return_value=("eng", "jpn")):
+                with patch.object(main, "ocr_page_script", return_value="Japanese"):
+                    with patch.object(main, "run_tesseract", return_value="テキスト") as reads:
                         with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout="")):
                             main.ocr_pdf_page(b"%PDF", 1)
 

@@ -260,10 +260,10 @@ def detect_pdf_script(text: str) -> str:
 CORE_LANGUAGES = {
     "en": "eng_Latn", "de": "deu_Latn", "fr": "fra_Latn", "es": "spa_Latn", "it": "ita_Latn",
     "nl": "nld_Latn", "pt": "por_Latn", "pl": "pol_Latn", "ru": "rus_Cyrl", "uk": "ukr_Cyrl",
-    "cs": "ces_Latn", "sv": "swe_Latn", "da": "dan_Latn", "fi": "fin_Latn", "el": "ell_Grek",
+    "sv": "swe_Latn", "da": "dan_Latn", "fi": "fin_Latn", "el": "ell_Grek",
     "hu": "hun_Latn", "bg": "bul_Cyrl",
-    "ar": "arb_Arab", "zh": "zho_Hans", "ja": "jpn_Jpan", "he": "heb_Hebr",
-    "hi": "hin_Deva", "vi": "vie_Latn", "id": "ind_Latn", "tr": "tur_Latn", "sq": "sqi_Latn",
+    "zh": "zho_Hans", "ja": "jpn_Jpan",
+    "hi": "hin_Deva", "vi": "vie_Latn", "id": "ind_Latn", "tr": "tur_Latn",
     # No dedicated pair model exists for Latin, and langdetect cannot name it, so auto-detect will
     # read a Latin source as Italian or Romanian - it has to be set by hand. The fallback answers
     # in Latin (>>lat<< is in its vocabulary, checked) but reaches for the vocabulary of its bible
@@ -528,12 +528,11 @@ def model_family(model_id: str) -> str:
 
 
 # The multilingual fallback labels some languages by their macro-language code where our internal
-# codes name a specific variety: it knows >>ara<< (Arabic) but not >>arb<< (Modern Standard
-# Arabic). An unknown prefix is not rejected - the tokenizer just splits it into ordinary subword
-# pieces, so the model receives no target signal at all and answers in whatever language it likes.
-# Before this mapping, nl>ar came back in Korean. Any language added here must be checked against
-# the fallback tokenizer's vocabulary, not assumed.
-FALLBACK_LANGUAGE_ALIASES = {"arb": "ara"}
+# codes name a specific variety. An unknown prefix is not rejected - the tokenizer just splits it
+# into ordinary subword pieces, so the model receives no target signal at all and answers in
+# whatever language it likes. Any language added here must be checked against the fallback
+# tokenizer's vocabulary, not assumed.
+FALLBACK_LANGUAGE_ALIASES: Dict[str, str] = {}
 
 
 def model_language_code(model_id: str, code: str) -> str:
@@ -1983,7 +1982,7 @@ def ensure_ocr_tools():
 
 OCR_FALLBACK_LANGUAGE = "eng"
 # Tesseract names a few languages differently than we do, same reason as FALLBACK_LANGUAGE_ALIASES.
-OCR_LANGUAGE_ALIASES = {"arb": "ara", "zho": "chi_sim"}
+OCR_LANGUAGE_ALIASES = {"zho": "chi_sim"}
 
 
 @lru_cache(maxsize=1)
