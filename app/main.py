@@ -100,10 +100,13 @@ PDF_LAYOUT_EDGE_MARGIN = 20.0
 # and has to stay a paragraph of its own.
 PDF_LAYOUT_MAX_INDENT = 40.0
 # How far a word gap may be stretched to justify a line, as a multiple of the font's own space.
-# Measured: read back, a line set word by word survives up to three times its normal gap and comes
-# apart at about 3.9, where MuPDF's extractor returns every word on a line of its own. Wider gaps
-# also tear holes into the setting, so a line that would need more stays ragged.
-PDF_JUSTIFY_MAX_SPACE = 3.0
+# Re-measured 14.08.2026 (the previous value, 3.0, came apart in production at 2.95 on
+# Mixed_Languages.pdf): read back after drawing, a line set word by word breaks into one span per
+# word at a strikingly constant factor of 2.88, independent of font size - swept 6pt to 32pt in
+# 0.01 steps against real German words, same breakpoint every time to two decimals, so this is
+# MuPDF's own span-grouping heuristic and not a per-size effect the old "about 3.9" measurement
+# missed. Wider gaps also tear holes into the setting, so a line that would need more stays ragged.
+PDF_JUSTIFY_MAX_SPACE = 2.8
 # A line opening with one of these is a list item of its own, however it is placed.
 PDF_LIST_MARKER = re.compile(r"^\s*(?:[-•‣▪●◦*]|\(?\d{1,3}[.)])\s")
 # How far a paragraph may be tightened purely to keep the original's line count. 0.9 because no
