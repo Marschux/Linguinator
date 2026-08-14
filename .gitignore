@@ -3,6 +3,7 @@
 !.env.example
 TODO.md
 Onboarding Testbench.md
+.claude/
 __pycache__/
 *.pyc
 *.pyo
