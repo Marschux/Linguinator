@@ -584,7 +584,14 @@ def token_count(tokenizer, text: str) -> int:
         return 0
 
 
-SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]*\s+")
+# Two alternatives, not one shared class: a Latin sentence needs the trailing whitespace to tell
+# "Mr." or "3.14" from a real end, but CJK punctuation (。！？, U+3002/FF01/FF1F) carries no space
+# after it at all - Japanese and Chinese prose runs terminator-to-first-character of the next
+# sentence. Requiring \s+ for those matched nothing on a real Japanese page (verified: zero
+# matches over a 3138-character story), so split_to_sentences fell through to
+# split_to_token_limit's blind character-count bisection - the exact "long multi-sentence input"
+# failure this whole function exists to avoid, just self-inflicted for every CJK document.
+SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]*\s+|[。！？][\"'”』】)\]]*")
 
 
 def split_to_sentences(tokenizer, text: str) -> List[str]:
