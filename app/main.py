@@ -2479,7 +2479,8 @@ def visual_to_logical(text: str) -> str:
     return logical
 
 
-def pdf_page_runs(page, rules: Optional[List[Dict[str, float]]] = None) -> List[Dict[str, Any]]:
+def pdf_page_runs(page, rules: Optional[List[Dict[str, float]]] = None,
+                  widget_rects: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
     """Every text run on a PyMuPDF page, positioned in PDF user space.
 
     MuPDF hands over text already split into lines and spans, each with its baseline origin,
@@ -2491,6 +2492,11 @@ def pdf_page_runs(page, rules: Optional[List[Dict[str, float]]] = None) -> List[
     ready-made text follows the order the page paints in, which for right-to-left text is the
     producer's business and not something to rely on. Sorting the characters by their own x
     gives the order they stand in on the page, whoever wrote the file.
+
+    `widget_rects` excludes an AcroForm field's own value, drawn by the widget's appearance
+    stream rather than the page's content stream: extracting it here would translate it as an
+    ordinary paragraph and draw the result where redaction cannot reach it, invisibly behind the
+    widget's original value, see pdf_page_widget_values.
     """
     runs: List[Dict[str, Any]] = []
     # ponytail: O(runs^2) per page, a few hundred runs at most; index by row if a page ever
@@ -2533,6 +2539,8 @@ def pdf_page_runs(page, rules: Optional[List[Dict[str, float]]] = None) -> List[
                 # the same ink are dropped: extracting both would translate the page twice and
                 # stamp the second translation across the first.
                 box = pymupdf.Rect(span["bbox"])
+                if widget_rects and any(overlaps_mostly(box, rect) for rect in widget_rects):
+                    continue
                 if any(overlaps_mostly(box, taken) for taken in boxes):
                     continue
                 # Recorded before the direction check, not after: an RTL run is ink on the page
@@ -2856,8 +2864,16 @@ def group_pdf_paragraphs(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             # continues a list item, whose marker hangs out to the left of its own text.
             first = len(current["lines"]) == 1
             left = previous["x"] if first else current["lines"][1]["x"]
+            # A centred block shares no left edge at all - each line is only as wide as its own
+            # text - but its centre stays put line to line, the same quantity paragraph_center
+            # measures later to reflow it. Without this, a multi-line centred heading split into
+            # one single-line "paragraph" per line, each translated with no context from the rest.
+            reference = previous if first else current["lines"][1]
+            reference_centre = (reference["x"] + reference["right"]) / 2
+            line_centre = (line["x"] + line["right"]) / 2
             aligned = (
                 abs(left - line["x"]) <= 3
+                or abs(reference_centre - line_centre) <= 3
                 or (first and 0 < previous["x"] - line["x"] <= PDF_LAYOUT_MAX_INDENT)
                 or (first and PDF_LIST_MARKER.match(previous["text"])
                     and 0 < line["x"] - previous["x"] <= PDF_LAYOUT_MAX_INDENT)
@@ -2918,6 +2934,29 @@ def page_column_walls(lines: List[Dict[str, Any]]) -> List[Tuple[float, float, f
     return walls
 
 
+def pdf_page_widget_values(page) -> List[Dict[str, Any]]:
+    """AcroForm field values on this page that carry text, each with its own annotation rect.
+
+    A field's value is painted by the widget's own appearance stream, not the page's content
+    stream: redact_translated_text cannot erase it, and a translation drawn as an ordinary
+    overlay paragraph would sit invisibly underneath the widget's original value. Read apart from
+    pdf_page_runs, whose text this filters back out (see its widget_rects), so the value can be
+    written into the field itself instead - render_pdf_layout_overlay.
+    """
+    values = []
+    for widget in page.widgets() or []:
+        # Only a text field's value is language content. A checkbox or radio button's "value" is
+        # one of its export states (often literally "Yes"/"Off"), not prose - writing a
+        # translated string into one does not toggle it, it invalidates the state and the box
+        # renders unchecked no matter what it held before.
+        if widget.field_type != pymupdf.PDF_WIDGET_TYPE_TEXT:
+            continue
+        text = (widget.field_value or "").strip()
+        if text:
+            values.append({"text": text, "field_name": widget.field_name, "rect": widget.rect})
+    return values
+
+
 def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, Any]]:
     try:
         document = pymupdf.open(stream=content, filetype="pdf")
@@ -2927,6 +2966,11 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
         raise HTTPException(status_code=422, detail="PDF has no pages")
 
     pages = []
+    # Checked once on the first page that has text, exactly like extract_pdf_markdown_from_bytes:
+    # a text layer is written by one producer for the whole file, and the check costs a render
+    # plus an OSD call. Unlike the markdown path there is no per-page OCR fallback here, so
+    # distrust aborts the whole layout pass instead of only that one page.
+    trust_text_layer = None
     for index in parse_page_range(page_range, document.page_count):
         page = document[index - 1]
         box = page.mediabox
@@ -2934,8 +2978,21 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
         rotated = page.rotation % 360 != 0
         obstacles = [] if rotated else pdf_page_obstacles(page)
         rules = [] if rotated else pdf_page_rules(page)
+        widgets = [] if rotated else pdf_page_widget_values(page)
         lines = ([] if rotated
-                 else group_pdf_lines(pdf_page_runs(page, rules), obstacles, rules))
+                 else group_pdf_lines(
+                     pdf_page_runs(page, rules, [widget["rect"] for widget in widgets]),
+                     obstacles, rules))
+        if trust_text_layer is None:
+            page_text = page.get_text().strip()
+            if page_text:
+                trust_text_layer = text_layer_is_trustworthy(content, index, page_text)
+                if not trust_text_layer:
+                    raise HTTPException(
+                        status_code=422,
+                        detail="Text layer does not match the page's printed script. "
+                               "Falling back to OCR extraction.",
+                    )
         pages.append({
             "number": index,
             "width": float(box.width),
@@ -2943,8 +3000,9 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
             "paragraphs": group_pdf_paragraphs(lines),
             "obstacles": obstacles,
             "columns": page_column_walls(lines),
+            "widgets": widgets,
         })
-    if not any(page["paragraphs"] for page in pages):
+    if not any(page["paragraphs"] or page["widgets"] for page in pages):
         raise HTTPException(
             status_code=422,
             detail="No positioned text found. This PDF may be scanned or image-only, "
@@ -3212,6 +3270,13 @@ def paragraph_line_limits(
     substantial = PDF_LAYOUT_WALL_MIN_SPAN * max(own_right - own_left, 1)
 
     limits = []
+    # A column applying to one line of a paragraph almost always applies to the next: only the
+    # lines that happened to *start* the column proved it, see page_column_walls, and its band can
+    # end above a paragraph's last lines even though the column beside them is exactly the same
+    # one. Carried forward within this paragraph only, and only across lines a column actually
+    # reached - an obstacle clearing partway down a paragraph (Stall-Kamera-System) is a genuine
+    # change of what stands beside it, not a gap in the evidence, and must not inherit anything.
+    last_column_limit = None
     for line in paragraph["lines"]:
         limit = right_margin
         wall = None
@@ -3227,9 +3292,16 @@ def paragraph_line_limits(
         # there is no neighbouring text to measure against, see page_column_walls. Weaker evidence
         # than a drawn box, so it never cuts below the line's own ink - that is what the max below
         # leaves standing.
+        column_limit = None
         for column, band_bottom, band_top in columns or []:
             if column > line["x"] + 1.0 and band_bottom <= line["y"] <= band_top:
-                limit = min(limit, column - 2)
+                candidate = column - 2
+                limit = min(limit, candidate)
+                column_limit = candidate if column_limit is None else min(column_limit, candidate)
+        if column_limit is not None:
+            last_column_limit = column_limit
+        elif last_column_limit is not None:
+            limit = min(limit, last_column_limit)
         # An image beside the line stops it just as a neighbouring column does; a box the line
         # runs inside stops it at that box's own right edge, see pdf_page_obstacles.
         for obstacle in obstacles or []:
@@ -3506,7 +3578,8 @@ def reflow_paragraph(
     return placed
 
 
-def redact_translated_text(content: bytes, pages: List[Dict[str, Any]], translations: List[str]) -> bytes:
+def redact_translated_text(content: bytes, pages: List[Dict[str, Any]], translations: List[str],
+                           widget_updates: Optional[Dict[Tuple[int, str], str]] = None) -> bytes:
     """Delete the original text of every translated paragraph from the source PDF.
 
     Painting boxes over it (the previous approach) left it in the file: copy/paste and Ctrl+F on
@@ -3554,6 +3627,10 @@ def redact_translated_text(content: bytes, pages: List[Dict[str, Any]], translat
                     page.add_redact_annot(rectangle, fill=False)
                     redacted = True
             index += 1
+        # Not redacted: a field's value never was page content to begin with, see
+        # pdf_page_runs' widget_rects. It skips the same number of translations as
+        # render_pdf_layout_overlay assigned it, though, to stay on the same paragraph past it.
+        index += len(page_data.get("widgets") or [])
         if redacted:
             page.apply_redactions(
                 images=pymupdf.PDF_REDACT_IMAGE_NONE,
@@ -3563,6 +3640,11 @@ def redact_translated_text(content: bytes, pages: List[Dict[str, Any]], translat
                 graphics=pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
                 text=pymupdf.PDF_REDACT_TEXT_REMOVE,
             )
+        for widget in page.widgets() or []:
+            value = (widget_updates or {}).get((page_data["number"], widget.field_name))
+            if value is not None:
+                widget.field_value = value
+                widget.update()
     return document.tobytes(garbage=3, deflate=True)
 
 
@@ -3664,6 +3746,11 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
     # below them, kept per page rather than per document, see the second pass.
     cramped: Dict[float, float] = {}
     cramped_pages: List[Dict[float, float]] = []
+    # AcroForm fields never go through reflow - a field holds one value, not lines to wrap - so
+    # they are collected separately here and written into the field itself by
+    # redact_translated_text, but still consume translations in lockstep with everything else:
+    # each page's widgets sit right after its paragraphs in the same flat, position-matched list.
+    widget_updates: Dict[Tuple[int, str], str] = {}
     for page in pages:
         reflowed: List[Tuple[Any, ...]] = []
         for paragraph in page["paragraphs"]:
@@ -3697,6 +3784,11 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
                     # minimum needed on this page, see the second pass.
                     if placed[0]["size"] < base * PDF_LAYOUT_MIN_SCALE:
                         cramped[key] = min(cramped.get(key, 1.0), placed[0]["size"] / base)
+            index += 1
+        for widget in page.get("widgets") or []:
+            if (index < len(translations) and translations[index].strip()
+                    and has_translatable_text(widget["text"])):
+                widget_updates[(page["number"], widget["field_name"])] = translations[index].strip()
             index += 1
         per_page.append(reflowed)
         cramped_pages.append(cramped)
@@ -3749,7 +3841,7 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
         })
 
     overlay_reader = PdfReader(BytesIO(create_pdf_from_pages(overlay_pages)))
-    reader = PdfReader(BytesIO(redact_translated_text(content, pages, kept)))
+    reader = PdfReader(BytesIO(redact_translated_text(content, pages, kept, widget_updates)))
     writer = PdfWriter()
     # Only the selected pages are translated, so only those are exported. Keeping the untouched
     # rest would make a single-page selection look like the unconverted original.
@@ -4793,7 +4885,13 @@ def run_pdf_layout_translate_job(
             run_pdf_translate_job(job_id, content, "application/pdf", source, target, filename, page_range, layout_fallback=True)
             return
         wait_if_paused_or_cancelled(job_id)
-        paragraphs = [paragraph["text"] for page in pages for paragraph in page["paragraphs"]]
+        # Widget field values are interleaved after their page's ordinary paragraphs, not
+        # collected separately: the stored translated_text is one flat "\n\n"-joined sequence
+        # matched to extract_pdf_layout's output purely by position (history re-export re-runs
+        # that same extraction and zips the blocks back on), so a field's translation has to sit
+        # at the exact position render_pdf_layout_overlay will look for it at, see there.
+        paragraphs = [item["text"] for page in pages
+                      for item in page["paragraphs"] + page["widgets"]]
         if source == AUTO_SOURCE:
             source = detect_source_language("\n\n".join(paragraphs))
             update_job(job_id, source=source)

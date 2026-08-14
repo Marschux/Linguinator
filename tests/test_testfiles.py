@@ -85,8 +85,8 @@ class TestfilePdfRoundTripTests(unittest.TestCase):
                 second = main.extract_pdf_layout(content, page_range)
 
                 self.assertEqual(
-                    [[p["text"] for p in page["paragraphs"]] for page in first],
-                    [[p["text"] for p in page["paragraphs"]] for page in second],
+                    [[item["text"] for item in page["paragraphs"] + page["widgets"]] for page in first],
+                    [[item["text"] for item in page["paragraphs"] + page["widgets"]] for page in second],
                 )
 
     def test_no_paragraph_contains_the_blank_line_the_reexport_splits_on(self):
@@ -97,8 +97,8 @@ class TestfilePdfRoundTripTests(unittest.TestCase):
             with self.subTest(document=path.name):
                 content = path.read_bytes()
                 for page in main.extract_pdf_layout(content, page_range_for(content)):
-                    for paragraph in page["paragraphs"]:
-                        self.assertNotIn("\n\n", paragraph["text"])
+                    for item in page["paragraphs"] + page["widgets"]:
+                        self.assertNotIn("\n\n", item["text"])
 
     def test_identity_roundtrip_keeps_every_paragraph_aligned(self):
         # Feed each paragraph's own text back in as its "translation": the re-export must find
@@ -108,7 +108,8 @@ class TestfilePdfRoundTripTests(unittest.TestCase):
                 content = path.read_bytes()
                 page_range = page_range_for(content)
                 pages = main.extract_pdf_layout(content, page_range)
-                paragraphs = [p["text"] for page in pages for p in page["paragraphs"]]
+                paragraphs = [item["text"] for page in pages
+                              for item in page["paragraphs"] + page["widgets"]]
                 self.assertTrue(paragraphs, f"{path.name} extracted no paragraphs at all")
 
                 stored = "\n\n".join(paragraphs)
@@ -149,7 +150,8 @@ class TestfileRedactionTests(unittest.TestCase):
             with self.subTest(document=path.name):
                 content = path.read_bytes()
                 pages = main.extract_pdf_layout(content, "1")
-                paragraphs = [p["text"] for page in pages for p in page["paragraphs"]]
+                paragraphs = [item["text"] for page in pages
+                              for item in page["paragraphs"] + page["widgets"]]
 
                 exported = main.export_pdf_layout_with_translated_text(
                     content, "\n\n".join("UEBERSETZT" for _ in paragraphs), "1"
