@@ -3420,6 +3420,21 @@ def page_column_walls(lines: List[Dict[str, Any]]) -> List[Tuple[float, float, f
                     break
                 top = y
         walls.append((x, bottom, top))
+    # Two walls whose bands overlap are proven to run together over that stretch - a two-column
+    # grid, not two unrelated columns that happen to share a page. Below that stretch, a wall
+    # still applies even past its own last line: Two_Column_Paper's right column ends a dozen
+    # lines above the left one, and paragraph_line_limits had nothing left to measure the left
+    # column's remaining lines against, handing them the document's right margin straight across
+    # the blank space where the right column used to be. Extended down to the lower of the two,
+    # never up - the pair is only proven where they actually overlapped.
+    for one in range(len(walls)):
+        for other in range(len(walls)):
+            if one == other:
+                continue
+            x1, bottom1, top1 = walls[one]
+            x2, bottom2, top2 = walls[other]
+            if bottom1 <= top2 and bottom2 <= top1 and bottom2 < bottom1:
+                walls[one] = (x1, bottom2, top1)
     return walls
 
 
