@@ -3385,6 +3385,26 @@ class MainTests(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir.parent, ignore_errors=True)
 
+    def test_update_job_caps_percent_below_complete_while_still_running(self):
+        temp_dir = test_temp_dir()
+        try:
+            with patch.object(main, "JOBS_DIR", temp_dir):
+                with main.JOBS_LOCK:
+                    main.JOBS.clear()
+                    main.JOB_RUNNERS.clear()
+                job_id = main.create_job("translate-pdf-layout", "eng_Latn", "deu_Latn", "big.pdf")
+                main.update_job(job_id, status="running", total=10, current=10, message="Rendering PDF")
+                # Every chunk translated, but the job is still running (PDF rendering/export
+                # comes after) - showing 100% here would read as finished when it is not.
+                self.assertEqual(main.get_job(job_id)["percent"], 99.0)
+                self.assertEqual(main.get_job(job_id)["eta_seconds"], 0)
+
+                main.update_job(job_id, status="complete", message="Complete")
+
+                self.assertEqual(main.get_job(job_id)["percent"], 100.0)
+        finally:
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
     def test_list_jobs_hides_payloads_and_adds_queue_positions(self):
         temp_dir = test_temp_dir()
         try:

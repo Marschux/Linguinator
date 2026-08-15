@@ -1561,7 +1561,14 @@ def update_job(job_id: str, **values):
         total = job.get("total") or 0
         started_at = job.get("started_at")
         if total:
-            job["percent"] = round((current / total) * 100, 1)
+            percent = (current / total) * 100
+            if job.get("status") == "running" and current >= total:
+                # Every chunk translated, but a PDF job still has to render the result -
+                # redaction, reflow, font subsetting - which can take real time on a big
+                # document. Without the cap the bar and the number both read as finished long
+                # before the file is actually there to download.
+                percent = min(percent, 99.0)
+            job["percent"] = round(percent, 1)
         if started_at and current and total and current < total:
             elapsed = time.time() - started_at
             job["eta_seconds"] = round((elapsed / current) * (total - current))

@@ -1363,12 +1363,12 @@ let languageData = null;
         title.className = "queue-title";
         const extension = jobExtension(job);
         row.dataset.fileType = fileTypeKey(extension);
+        appendTypeBadge(title, extension);
         const position = job.position ? "#" + job.position + " " : "";
         title.appendChild(document.createTextNode(
           position + (job.label || job.kind) + " - " + job.status));
         const meta = document.createElement("div");
         meta.className = "queue-meta";
-        appendTypeBadge(meta, extension);
         const languages = [job.source, job.target].filter(Boolean).map(formatLanguageLabel).join(" -> ");
         const started = job.started_at ? t("started") + " " + formatJobTime(job.started_at) : t("queued") + " " + formatJobTime(job.queued_at);
         meta.appendChild(document.createTextNode([languages, started].filter(Boolean).join(" | ")));
@@ -1377,7 +1377,11 @@ let languageData = null;
         const progressLabel = job.status === "queued" && job.position
           ? t("queuePosition", {position: job.position})
           : (job.percent || 0) + "%";
-        const eta = job.status === "running" ? "ETA " + formatEta(job.eta_seconds) : "";
+        // eta_seconds is 0 once every chunk is translated, even while a PDF job still has to
+        // render the result - "ETA 0s" next to "99%" and "Rendering PDF" reads as finished
+        // when it is not, so this only shows a real countdown, not the leftover zero.
+        const eta = job.status === "running" && job.eta_seconds
+          ? "ETA " + formatEta(job.eta_seconds) : "";
         progress.textContent = [
           progressLabel,
           (job.current || 0) + " / " + (job.total || 0) + " " + t("chunks"),
@@ -1755,7 +1759,6 @@ let languageData = null;
       link.textContent = item.original_name;
       const meta = document.createElement("div");
       meta.className = "history-meta";
-      appendTypeBadge(meta, item.source_extension);
       // Names, not codes: "deu_Latn -> eng_Latn" is unreadable at a glance in a long list.
       meta.appendChild(document.createTextNode(
         formatLanguageLabel(item.source) + " -> " + formatLanguageLabel(item.target)
@@ -1795,6 +1798,7 @@ let languageData = null;
       if (hasOriginal) format.value = "original";
       syncDownloadHref();
       format.addEventListener("change", syncDownloadHref);
+      appendTypeBadge(main, item.source_extension);
       main.appendChild(link);
       main.appendChild(meta);
       const actions = document.createElement("div");
