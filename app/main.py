@@ -5894,18 +5894,22 @@ def delete_history(item_id: str):
     if not md_path.exists() and not json_path.exists():
         raise HTTPException(status_code=404, detail="History item not found")
     source_path = None
+    export_path = None
     if json_path.exists():
         try:
             item = json.loads(json_path.read_text(encoding="utf-8"))
             source_extension = file_extension("x." + item.get("source_extension", ""))
             if source_extension:
                 source_path = history_source_path(item_id, source_extension)
+                export_path = history_export_path(item_id, source_extension)
         except Exception:
             source_path = None
     md_path.unlink(missing_ok=True)
     json_path.unlink(missing_ok=True)
     if source_path:
         source_path.unlink(missing_ok=True)
+    if export_path:
+        export_path.unlink(missing_ok=True)
     return {"deleted": item_id}
 
 

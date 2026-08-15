@@ -3497,6 +3497,26 @@ class MainTests(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir.parent, ignore_errors=True)
 
+    def test_delete_history_removes_cached_original_format_export(self):
+        # history_original_export writes this lazily on first original-format download and
+        # caches it (history_export_path) - delete_history used to only clean up the source
+        # file, leaving this one behind until the time-based cleanup_history caught up with it.
+        temp_dir = test_temp_dir()
+        try:
+            with patch.object(main, "HISTORY_DIR", temp_dir):
+                item_id = main.save_history(
+                    "text", "Hallo", "eng_Latn", "deu_Latn", "source.docx",
+                    minimal_docx(["Hello"]), "docx",
+                )
+                export_path = main.history_export_path(item_id, "docx")
+                export_path.write_bytes(b"cached export")
+                response = TestClient(main.app).delete(f"/history/{item_id}")
+
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(export_path.exists())
+        finally:
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
     def test_reset_history_keeps_only_the_newest_entries(self):
         temp_dir = test_temp_dir()
         try:
