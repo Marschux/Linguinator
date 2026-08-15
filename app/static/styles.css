@@ -429,9 +429,9 @@
     }
     .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
     .actions-right { flex: 1; justify-content: flex-end; }
-    /* Pause/Resume/Stop pack to the left of this row, Reset sits apart on the right - it deletes
-       data, so it does not belong in the same cluster a misclick could land in. */
-    .reset-history { margin-left: auto; }
+    /* Reset sits apart on the left of this row, Pause/Resume/Stop pack together on the right -
+       it deletes data, so it does not belong in the same cluster a misclick could land in. */
+    #pauseJob { margin-left: auto; }
     .primary-actions { justify-content: flex-end; }
     .section { margin-top: 1.4rem; }
     .hidden { display: none; }
