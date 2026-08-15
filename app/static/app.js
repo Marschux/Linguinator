@@ -1045,6 +1045,7 @@ let languageData = null;
     function setInputTab(tab) {
       const config = inputTabs[tab] || inputTabs.textarea;
       currentInputTab = tab;
+      localStorage.setItem("linguinator_input_tab", currentInputTab);
       const inputTabSelect = document.getElementById("inputTabSelect");
       if (inputTabSelect) inputTabSelect.value = currentInputTab;
       currentSourceFormat = config.sourceFormat;
@@ -1989,5 +1990,12 @@ let languageData = null;
     setInterval(() => {
       loadQueue().catch(() => {});
     }, 3000);
-    setInputTab("pdf");
+    // Restored only if that tab is still enabled - a stored tab from before it was disabled
+    // again (or before it was ever enabled) must not switch to a panel the user can't reach
+    // through the tab bar. Checked against inputTabs first so a stray localStorage value never
+    // reaches querySelector as a raw attribute selector.
+    const storedInputTab = localStorage.getItem("linguinator_input_tab");
+    const storedInputTabButton = storedInputTab && inputTabs[storedInputTab]
+      && document.querySelector('[data-input-tab="' + storedInputTab + '"]');
+    setInputTab(storedInputTabButton && !storedInputTabButton.disabled ? storedInputTab : "pdf");
     applyUiLanguage();
