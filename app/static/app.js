@@ -1803,7 +1803,13 @@ let languageData = null;
       format.className = "history-format";
       format.title = t("historyFormat");
       const hasOriginal = item.has_source_file && item.source_extension;
-      const historyFormats = ["md", "txt", "pdf", "doc"];
+      // Plain PDF is either worse than the original-format re-export (layout mode dropped) or,
+      // without layout mode, byte-for-byte the same output (history_original_export falls back to
+      // the same create_text_pdf) - offering it beside "Original Format (.pdf)" only invites
+      // picking the redundant one.
+      const historyFormats = item.source_extension === "pdf"
+        ? ["md", "txt", "doc"]
+        : ["md", "txt", "pdf", "doc"];
       if (hasOriginal) {
         historyFormats.push("original");
       }
