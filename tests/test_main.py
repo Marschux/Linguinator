@@ -2325,8 +2325,13 @@ class MainTests(unittest.TestCase):
     def test_level_table_sizes_pulls_a_whole_table_to_one_size(self):
         # Powerupall page 72: cells beside each other were levelled, rows above each other were
         # not, so the table alternated between two sizes row by row.
+        # Widths vary between calls (ragged), not fixed to one column width - a fixed width would
+        # itself look like a justified body-text column to pdf_layout_justified_columns and be
+        # wrongly excluded, see test_level_table_sizes_ignores_a_justified_body_text_column.
+        widths = iter((80, 95, 70, 88, 60, 92))
+
         def cell(left, baseline, size=11.0):
-            return {"lines": [{"x": left, "y": baseline, "right": left + 100, "size": size}]}
+            return {"lines": [{"x": left, "y": baseline, "right": left + next(widths), "size": size}]}
 
         paragraphs = [cell(50, 740, 16.0),                      # heading above the table
                       cell(50, 700), cell(200, 700),            # first row
@@ -2340,6 +2345,37 @@ class MainTests(unittest.TestCase):
         self.assertEqual(targets[1:5], [6.0, 6.0, 6.0, 6.0])
         self.assertEqual(targets[0], 16.0)   # a heading is a size of its own
         self.assertEqual(targets[5], 9.0)    # body text is no part of the table
+
+    def test_level_table_sizes_ignores_a_justified_body_text_column(self):
+        # Two_Column_Paper page 6: a data table sits above two columns of running text. Both
+        # columns' paragraphs shared close to the same vertical range - ordinary for two columns
+        # of similar length - and satisfied the same "beside"/"same left edge, small gap" geometry
+        # the table's own cells did, pulling the whole page down to the table's 3.8pt minimum. A
+        # justified column (consistent right edge, unlike a table's ragged cells) is now excluded
+        # from both relations that would otherwise link it in.
+        def line(left, baseline, right, size=9.4):
+            return {"x": left, "y": baseline, "right": right, "size": size}
+
+        # Left column: several lines wide enough and consistent enough to read as justified body
+        # text (>=100pt wide, most lines share the same right edge).
+        left_lines = [line(52.0, y, 300.0) for y in (580.0, 566.0, 552.0, 538.0, 524.0)]
+        # Right column, roughly the same vertical range as the left one - what used to trigger the
+        # "beside" relation between the two columns.
+        right_lines = [line(306.6, y, 555.0) for y in (581.4, 567.4, 553.4, 539.4, 525.4)]
+        left_paragraph = {"lines": left_lines}
+        right_paragraph = {"lines": right_lines}
+        # A genuine table cell just below, ragged and narrow - what actually needed to shrink.
+        cell_paragraph = {"lines": [line(55.0, 480.0, 116.0, size=7.8)]}
+
+        paragraphs = [left_paragraph, right_paragraph, cell_paragraph]
+        bases = [9.4, 9.4, 7.8]
+        targets = [6.2, 6.6, 3.8]
+
+        main.level_table_sizes(paragraphs, bases, targets, [])
+
+        self.assertEqual(targets[0], 6.2)
+        self.assertEqual(targets[1], 6.6)
+        self.assertEqual(targets[2], 3.8)
 
     def test_level_table_sizes_holds_one_cell_to_one_size(self):
         # A cell whose text falls into several paragraphs came back with the first one larger

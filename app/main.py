@@ -3888,6 +3888,14 @@ def level_table_sizes(paragraphs: List[Dict[str, Any]], bases: List[float], targ
                max(line["y"] for line in item["lines"])) for item in paragraphs]
     cell = [(enclosing_box_sides(item, obstacles), enclosing_box_bottom(item, obstacles))
             for item in paragraphs]
+    # The third relation below is only supposed to catch cells, but nothing in its own geometry
+    # test tells a table column from an ordinary column of running text - both are paragraphs
+    # stacked at the same left edge, and Two_Column_Paper's body column gaps (as tight as 1.2x
+    # the font size in its own tighter typesetting) are well inside the 3x this allows just as a
+    # real table row's is. Same signal already used to tell the two apart in group_pdf_paragraphs:
+    # a table cell's text is ragged-right, a real column fills to a consistent right edge.
+    justified_columns = pdf_layout_justified_columns(
+        [line for item in paragraphs for line in item["lines"]])
     group = list(range(count))
 
     def root(index):
@@ -3913,7 +3921,13 @@ def level_table_sizes(paragraphs: List[Dict[str, Any]], bases: List[float], targ
                     and other_bottom - bases[index] <= top \
                     and other_top + bases[index] >= bottom:
                 beside[index] = beside[other] = True
-                if comparable(index, other):
+                # Two columns of running text land in this same "beside" test whenever a pair of
+                # paragraphs happens to occupy close to the same vertical range - ordinary for two
+                # columns of similar length, and Two_Column_Paper's own body columns joined this
+                # way and pulled the whole page down to 3.8pt. A real table row's cells are never
+                # a justified column themselves, see the vertical-stacking relation below.
+                if (comparable(index, other) and round(left) not in justified_columns
+                        and round(other_left) not in justified_columns):
                     join(index, other)
             # The same cell, where the document draws one.
             elif cell[index][0] is not None and cell[index] == cell[other] and comparable(index,
@@ -3927,6 +3941,7 @@ def level_table_sizes(paragraphs: List[Dict[str, Any]], bases: List[float], targ
             # test above.
             if beside[index] and beside[other] and comparable(index, other) \
                     and abs(extent[index][0] - extent[other][0]) <= 3 \
+                    and round(extent[index][0]) not in justified_columns \
                     and min(extent[index][2] - extent[other][3],
                             extent[other][2] - extent[index][3]) <= 3 * bases[index]:
                 join(index, other)
