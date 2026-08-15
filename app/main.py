@@ -497,6 +497,23 @@ OPUS_PAIRS = load_opus_pairs()
 
 AUTO_SOURCE = "auto"
 
+CORE_LANGUAGE_CODES = frozenset(CORE_LANGUAGES.values())
+
+
+def ensure_known_language(code: str, allow_auto: bool = False) -> None:
+    """Reject a source/target that is not one of the internal deu_Latn-style codes.
+
+    Never checked before: an unvalidated code (the short "de" instead of "deu_Latn", say, from a
+    direct API call rather than the UI's own dropdown, which always sends the right one) reached
+    model_language_code with no signal the fallback model recognises, and reached the flag lookup
+    in app.js the same way - languageCountries only knows the internal codes, so it fell back to
+    a globe with nothing in the history record to explain why.
+    """
+    if allow_auto and code == AUTO_SOURCE:
+        return
+    if code not in CORE_LANGUAGE_CODES:
+        raise HTTPException(status_code=400, detail=f"Unknown language code: {code}")
+
 
 def detect_source_language(text: str) -> str:
     """Guess the internal language code (deu_Latn-style) of text, falling back to
@@ -5192,6 +5209,8 @@ def job_control(job_id: str, action: str):
 
 @app.post("/jobs/translate")
 def start_translate_job(request: TranslateRequest):
+    ensure_known_language(request.source, allow_auto=True)
+    ensure_known_language(request.target)
     ensure_queue_workers()
     text = "\n\n".join(str(item) for item in request.q) if isinstance(request.q, list) else str(request.q)
     job_id = create_job("translate", request.source, request.target, "Text")
@@ -5206,6 +5225,8 @@ def start_translate_url_job(
     source: str = Form(DEFAULT_SOURCE),
     target: str = Form(DEFAULT_TARGET),
 ):
+    ensure_known_language(source, allow_auto=True)
+    ensure_known_language(target)
     ensure_queue_workers()
     # Checked here as well as in the runner so a bad address is rejected while the user is still
     # looking at the form, instead of turning into a failed job in the queue.
@@ -5225,6 +5246,8 @@ async def start_translate_file_job(
     columns: str = Form(""),
     sheet_name: str = Form(""),
 ):
+    ensure_known_language(source, allow_auto=True)
+    ensure_known_language(target)
     ensure_queue_workers()
     content = await read_upload_bytes(file, "Source file")
     filename = file.filename or "source"
@@ -5257,6 +5280,8 @@ async def start_translate_pdf_job(
     target: str = Form(DEFAULT_TARGET),
     page_range: str = Form(""),
 ):
+    ensure_known_language(source, allow_auto=True)
+    ensure_known_language(target)
     ensure_queue_workers()
     content = await read_upload_bytes(file, "PDF")
     filename = file.filename or "pdf"
@@ -5286,6 +5311,8 @@ async def start_translate_pdf_layout_job(
     target: str = Form(DEFAULT_TARGET),
     page_range: str = Form(""),
 ):
+    ensure_known_language(source, allow_auto=True)
+    ensure_known_language(target)
     ensure_queue_workers()
     content = await read_upload_bytes(file, "PDF")
     filename = file.filename or "pdf"

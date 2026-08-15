@@ -1016,6 +1016,20 @@ class MainTests(unittest.TestCase):
         self.assertEqual(payload["favorites"], main.FAVORITE_LANGUAGES)
         self.assertIn("eng_Latn", payload["favorites"])
 
+    def test_ensure_known_language_rejects_anything_not_a_core_language(self):
+        main.ensure_known_language("deu_Latn")
+        main.ensure_known_language(main.AUTO_SOURCE, allow_auto=True)
+        with self.assertRaises(HTTPException):
+            main.ensure_known_language(main.AUTO_SOURCE)
+        with self.assertRaises(HTTPException):
+            # The short ISO code, not the internal deu_Latn-style one - what a direct API call
+            # (bypassing the UI's own dropdown, which always sends the right one) could send.
+            main.ensure_known_language("de")
+
+    def test_translate_job_route_rejects_an_unknown_target(self):
+        response = TestClient(main.app).post("/jobs/translate", json={"q": "Hallo", "target": "de"})
+        self.assertEqual(response.status_code, 400)
+
     def test_ocr_language_code_maps_source_language_to_tesseract(self):
         with patch.object(main, "installed_ocr_languages", return_value=("deu", "eng", "fra", "chi_sim")):
             self.assertEqual(main.ocr_language_code("deu_Latn"), "deu")
