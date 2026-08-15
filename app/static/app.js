@@ -51,8 +51,8 @@ let languageData = null;
         pause: "Pause",
         resume: "Resume",
         stop: "Stop",
+        cancel: "Cancel",
         historyReset: "Reset",
-        skip: "Skip",
         history: "History",
         noHistory: "No saved translations yet.",
         noHistoryMatch: "No history entries match this filter.",
@@ -159,8 +159,8 @@ let languageData = null;
         pause: "Pause",
         resume: "Fortsetzen",
         stop: "Stoppen",
+        cancel: "Abbrechen",
         historyReset: "Zurücksetzen",
-        skip: "Überspringen",
         history: "Verlauf",
         noHistory: "Noch keine gespeicherten Übersetzungen.",
         noHistoryMatch: "Kein Verlaufseintrag passt zu diesem Filter.",
@@ -267,8 +267,8 @@ let languageData = null;
         pause: "Pausar",
         resume: "Continuar",
         stop: "Detener",
+        cancel: "Cancelar",
         historyReset: "Restablecer",
-        skip: "Omitir",
         history: "Historial",
         noHistory: "Aún no hay traducciones guardadas.",
         noHistoryMatch: "Ningún elemento del historial coincide con este filtro.",
@@ -375,8 +375,8 @@ let languageData = null;
         pause: "Pause",
         resume: "Reprendre",
         stop: "Arrêter",
+        cancel: "Annuler",
         historyReset: "Réinitialiser",
-        skip: "Passer",
         history: "Historique",
         noHistory: "Aucune traduction enregistrée.",
         noHistoryMatch: "Aucun élément de l'historique ne correspond à ce filtre.",
@@ -1428,7 +1428,7 @@ let languageData = null;
         row.appendChild(main);
         const actions = document.createElement("div");
         actions.className = "queue-actions";
-        actions.appendChild(queueActionButton(job, "cancel", t("skip"), ["queued", "running", "paused"]));
+        actions.appendChild(queueActionButton(job, "cancel", t("cancel"), ["queued", "running", "paused"]));
         row.appendChild(actions);
         row.classList.toggle("watched", job.id === activeJobId);
         row.title = t("watchJob");
