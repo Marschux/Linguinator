@@ -3254,6 +3254,16 @@ def group_pdf_paragraphs(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     # interleaving column (see group_pdf_lines) can still be found once its own immediate
     # neighbour in the list turns out to belong to the other column. Only consulted under the
     # tighter guard above - see PDF_LAYOUT_CONTINUATION_MAX_RATIO and pdf_layout_justified_columns.
+    #
+    # ponytail: a table header cell wrapped to two lines (Landscape_Mixed_Pages: "Peak spring" /
+    # "velocity (m/s)") is split into two paragraphs by the same mechanism this comment describes,
+    # and not recovered - a table cell is never a justified column. Tried widening the recovery to
+    # a fresh one-line candidate regardless of justified_columns; reverted, it also merges genuinely
+    # separate rows of MatterhornProtokoll's own table of contents ("Pruefpunkt 01: ..." with
+    # "Pruefpunkt 02: ..."), whose line-to-line gap ratio (1.234-1.24) sits inside the exact same
+    # band real continuations do (1.15-1.33x) - ratio and one-line-candidate alone cannot tell a
+    # tightly-set list from a wrapped cell apart, ordinary text is needed to. Left as the smaller
+    # bug (uneven table font sizes) rather than risk splicing unrelated table rows together.
     last_by_x: Dict[int, Dict[str, Any]] = {}
     for line in lines:
         matched = None
