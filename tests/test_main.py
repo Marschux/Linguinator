@@ -2953,6 +2953,81 @@ class MainTests(unittest.TestCase):
             "everywhere.",
         ])
 
+    def test_group_pdf_paragraphs_reunites_a_wrapped_bordered_table_header_cell(self):
+        # Landscape_Mixed_Pages page 1 (real coordinates, rounded): a table header cell wrapped
+        # to two lines ("Peak spring" / "velocity (m/s)"), interrupted by the rest of its own row
+        # in reading order before its own second line is reached. Needs both a drawn rule near
+        # its own column (has_cell_border) and a row that is only partially filled at that height
+        # (row_is_partial, only 2 of 10 columns) - neither alone is safe, see the comment on the
+        # last_by_x loop.
+        def line(text, x, y, right, size=8.5):
+            return {"text": text, "x": x, "y": y, "right": right, "size": size}
+
+        lines = [
+            line("Site", 46, 522, 65), line("Country", 122, 522, 153),
+            line("Channel", 198, 522, 229), line("Peak spring", 275, 522, 317.8),
+            line("Mean depth (m)", 351, 522, 409.3), line("Installed capacity", 427, 522, 491),
+            line("Turbines", 503, 522, 536), line("Commissioned", 579, 522, 633),
+            line("Operator", 656, 522, 690), line("Status", 732, 522, 760),
+            line("velocity (m/s)", 275, 511, 323.0),
+        ]
+        # page_column_walls only recognises a column once several lines start at its x - three
+        # data rows below the header, reusing the same ten x's, so the header's own columns
+        # actually get established.
+        for row, y in enumerate((495.0, 478.0, 461.0)):
+            for x in (46, 122, 198, 275, 351, 427, 503, 579, 656, 732):
+                lines.append(line(f"row{row}", x, y, x + 30))
+        rules = [{"x": x, "bottom": 353.3, "top": 533.3}
+                for x in (40, 116, 192, 268.6, 344.8, 420.9, 497.1, 573.3, 649.5, 725.7, 802)]
+
+        paragraphs = main.group_pdf_paragraphs(lines, rules)
+
+        self.assertIn("Peak spring velocity (m/s)", [p["text"] for p in paragraphs])
+
+    def test_group_pdf_paragraphs_keeps_a_bordered_tables_own_rows_apart(self):
+        # Table_Across_Pages (real coordinates, rounded): a genuine data table whose own
+        # row-to-row gap is just as tight as a wrapped header cell's two lines, and every column
+        # is filled on every row - has_cell_border alone would merge "MP-001" straight into
+        # "MP-002", one whole column into a single paragraph.
+        def line(text, x, y, right, size=9.0):
+            return {"text": text, "x": x, "y": y, "right": right, "size": size}
+
+        columns = (51, 121, 186, 261, 316, 386)
+        rules = [{"x": x, "bottom": 82, "top": 768} for x in (40, 90, 150, 210, 280, 350, 420)]
+        lines = []
+        for row, y in enumerate((626.9, 610.4)):
+            for x in columns:
+                lines.append(line(f"row{row}-col{x}", x, y, x + 40))
+
+        paragraphs = main.group_pdf_paragraphs(lines, rules)
+
+        self.assertEqual(len(paragraphs), len(columns) * 2)
+
+    def test_group_pdf_paragraphs_keeps_an_unbordered_checklists_rows_apart(self):
+        # Powerupall page 85 (real coordinates, rounded): an informal two-column checklist of
+        # eight independent entries, no drawn table grid at all. row_is_partial alone would merge
+        # "Social status"/"Wealth"/"Attractiveness"/"Popularity" into one paragraph, because
+        # page_column_walls does not reliably find every real column on a page without rules to
+        # confirm them - has_cell_border (no rules here) is what keeps this one safe.
+        def line(text, x, y, right, size=10.0):
+            return {"text": text, "x": x, "y": y, "right": right, "size": size}
+
+        lines = [
+            line("Social status", 101, 614.6, 160), line("Career success", 317, 614.6, 380),
+            line("Wealth", 101, 601.7, 140), line("Talent and skillfulness", 317, 601.7, 420),
+            line("Attractiveness", 101, 588.7, 170),
+            line("Receiving praise from authority figures", 317, 588.7, 490),
+            line("Popularity", 101, 575.6, 150), line("Closest to perfection", 317, 575.6, 400),
+        ]
+
+        paragraphs = main.group_pdf_paragraphs(lines)
+
+        self.assertEqual([p["text"] for p in paragraphs], [
+            "Social status", "Career success", "Wealth", "Talent and skillfulness",
+            "Attractiveness", "Receiving praise from authority figures", "Popularity",
+            "Closest to perfection",
+        ])
+
     def test_paragraph_center_finds_a_centred_heading(self):
         # Powerupall's text column runs 65..551. A centred heading sits within a couple of points
         # of its middle with matching room on both sides; reflow_paragraph used to set it flush

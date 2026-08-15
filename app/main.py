@@ -2879,6 +2879,22 @@ PDF_COLUMN_MIN_RUNS = 3
 # Half a line: below that it is a tick, a bullet or a piece of an icon, and MatterhornProtokoll's
 # own row rules are 18.6pt tall.
 PDF_RULE_MIN_HEIGHT = 6.0
+# How close a column's own text has to sit to a drawn vertical rule before group_pdf_paragraphs
+# trusts it as that rule's own cell (ordinary left-padding inside a table cell) rather than an
+# unrelated column that happens to sit somewhere past it. Landscape_Mixed_Pages' own header cells
+# measured at 6.4pt.
+PDF_TABLE_BORDER_PADDING = 10.0
+# How close two of page_column_walls' own columns have to sit before group_pdf_paragraphs treats
+# them as one - a page number column measured a few points off its title column's x, or a header
+# cell's padding differing a hair from the rule beside it, would otherwise count as two columns
+# and throw off the row-completeness check below.
+PDF_TABLE_ROW_COLUMN_CLUSTER = 12.0
+# The largest share of a row's active columns a genuine wrapped continuation may still have
+# content in, before group_pdf_paragraphs reads it as a full new row instead. A table header cell
+# wrapped to a second line only ever fills the few columns whose own header happened to wrap
+# (Landscape_Mixed_Pages: "velocity (m/s)" / "(MW)", 2 of 10 columns, 0.2) - a real new row of the
+# table fills all or nearly all of them (Table_Across_Pages: 6 of 6, 1.0).
+PDF_TABLE_ROW_MAX_FILL = 0.5
 
 
 def pdf_page_obstacles(page) -> List[Dict[str, float]]:
@@ -3180,7 +3196,8 @@ def pdf_layout_justified_columns(lines: List[Dict[str, Any]]) -> Set[int]:
     return columns
 
 
-def group_pdf_paragraphs(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def group_pdf_paragraphs(lines: List[Dict[str, Any]],
+                         rules: Optional[List[Dict[str, float]]] = None) -> List[Dict[str, Any]]:
     """Bundle lines into paragraphs, purely so the model gets whole sentences.
 
     A wrong split only costs translation quality here, never placement: every line keeps its
@@ -3233,6 +3250,51 @@ def group_pdf_paragraphs(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
     justified_columns = pdf_layout_justified_columns(lines)
 
+    # A column with a drawn rule close to its own left edge sits inside an actual bordered table
+    # cell. On its own this is not enough evidence a wrapped line belongs with the one above it -
+    # a real table's own row-to-row gap can be every bit as tight as a wrapped cell's own two
+    # lines (Table_Across_Pages) - so it is only ever used together with row_is_partial below.
+    bordered_columns = [rule["x"] for rule in rules or []]
+
+    def has_cell_border(x: float) -> bool:
+        return any(abs(rule_x - x) <= PDF_TABLE_BORDER_PADDING for rule_x in bordered_columns)
+
+    # The page's real columns (page_column_walls), clustered so a page number a few points off
+    # its title column, or a header cell's padding differing a hair from the rule beside it,
+    # still reads as the one column it is. Each cluster keeps every wall's own (bottom, top) span
+    # rather than collapsing to just an x: a busy page can hold more than one table, and a column
+    # that does not even reach this far up or down the page was never part of this row's own grid
+    # to begin with.
+    row_column_clusters: List[List[Tuple[float, float, float]]] = []
+    for wall in sorted(page_column_walls(lines), key=lambda wall: wall[0]):
+        if row_column_clusters and wall[0] - row_column_clusters[-1][-1][0] <= PDF_TABLE_ROW_COLUMN_CLUSTER:
+            row_column_clusters[-1].append(wall)
+        else:
+            row_column_clusters.append([wall])
+    lines_by_y: Dict[float, List[Dict[str, Any]]] = {}
+    for own_line in lines:
+        lines_by_y.setdefault(round(own_line["y"], 1), []).append(own_line)
+
+    def row_is_partial(y: float) -> bool:
+        """Whether only a minority of the columns active at `y` have anything there - a table
+        header cell wrapped to a second line only ever fills the few columns whose own header
+        happened to wrap, never (close to) every column the way a genuine new row of the table
+        does. See PDF_TABLE_ROW_MAX_FILL. Only meaningful once has_cell_border has already
+        confirmed this is a real bordered table - page_column_walls is not reliable evidence of
+        a column on its own for an informal, ruleless list (Powerupall page 85's own two-column
+        checklist), where it missed a real column entirely and read a plain, complete row as a
+        partial one.
+        """
+        active = [cluster for cluster in row_column_clusters
+                 if any(wall[1] <= y <= wall[2] for wall in cluster)]
+        if len(active) < 2:
+            return False
+        present = sum(1 for cluster in active
+                      if any(abs(other["x"] - wall[0]) <= PDF_TABLE_ROW_COLUMN_CLUSTER
+                            for wall in cluster
+                            for other in lines_by_y.get(round(y, 1), [])))
+        return present / len(active) <= PDF_TABLE_ROW_MAX_FILL
+
     def paragraph_column_x(paragraph: Dict[str, Any]) -> int:
         # The same reference paragraph_fits_line's own "left" uses: a paragraph's first line is
         # often indented or a list marker and does not sit at the column's real x, its second
@@ -3252,18 +3314,21 @@ def group_pdf_paragraphs(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     paragraphs: List[Dict[str, Any]] = []
     # The paragraph most recently extended at each x, so a genuine paragraph split across an
     # interleaving column (see group_pdf_lines) can still be found once its own immediate
-    # neighbour in the list turns out to belong to the other column. Only consulted under the
-    # tighter guard above - see PDF_LAYOUT_CONTINUATION_MAX_RATIO and pdf_layout_justified_columns.
+    # neighbour in the list turns out to belong to the other column. Guarded by the tighter
+    # PDF_LAYOUT_CONTINUATION_MAX_RATIO, and by one of two further conditions, each covering a
+    # different shape of interruption:
     #
-    # ponytail: a table header cell wrapped to two lines (Landscape_Mixed_Pages: "Peak spring" /
-    # "velocity (m/s)") is split into two paragraphs by the same mechanism this comment describes,
-    # and not recovered - a table cell is never a justified column. Tried widening the recovery to
-    # a fresh one-line candidate regardless of justified_columns; reverted, it also merges genuinely
-    # separate rows of MatterhornProtokoll's own table of contents ("Pruefpunkt 01: ..." with
-    # "Pruefpunkt 02: ..."), whose line-to-line gap ratio (1.234-1.24) sits inside the exact same
-    # band real continuations do (1.15-1.33x) - ratio and one-line-candidate alone cannot tell a
-    # tightly-set list from a wrapped cell apart, ordinary text is needed to. Left as the smaller
-    # bug (uneven table font sizes) rather than risk splicing unrelated table rows together.
+    # - both x's are pdf_layout_justified_columns (real body text), for a paragraph already
+    #   several lines long that another column interleaves with, line after line.
+    # - the candidate's own column has_cell_border and the new line's row_is_partial, for a table
+    #   header cell wrapped to a second line, interrupted once by the rest of its own row. Neither
+    #   check alone is safe (measured against the full test corpus): a drawn border only proves
+    #   "this is a table", not "this line is a wrap" (Table_Across_Pages' own row-to-row gap is
+    #   every bit as tight as a wrapped cell's two lines), and row-completeness alone trusts
+    #   page_column_walls to know every real column, which it does not for an informal, ruleless
+    #   list (Powerupall page 85's two-column checklist). Required together, each rules out the
+    #   other's failure case: a real table's rows fill (close to) every column of it, and an
+    #   unruled list never has a border to begin with.
     last_by_x: Dict[int, Dict[str, Any]] = {}
     for line in lines:
         matched = None
@@ -3274,10 +3339,12 @@ def group_pdf_paragraphs(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             candidate = last_by_x.get(round(line["x"]))
             if (candidate is not None and candidate is not interrupting
                     and interrupting is not None
-                    and round(line["x"]) in justified_columns
-                    and paragraph_column_x(interrupting) in justified_columns
                     and paragraph_fits_line(candidate, line,
-                                            size_ratio=PDF_LAYOUT_CONTINUATION_MAX_RATIO)):
+                                            size_ratio=PDF_LAYOUT_CONTINUATION_MAX_RATIO)
+                    and ((round(line["x"]) in justified_columns
+                         and paragraph_column_x(interrupting) in justified_columns)
+                         or (has_cell_border(candidate["lines"][0]["x"])
+                             and row_is_partial(line["y"])))):
                 matched = candidate
         if matched is not None:
             matched["lines"].append(line)
@@ -3411,7 +3478,7 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
             "number": index,
             "width": float(box.width),
             "height": float(box.height),
-            "paragraphs": group_pdf_paragraphs(lines),
+            "paragraphs": group_pdf_paragraphs(lines, rules),
             "obstacles": obstacles,
             "columns": page_column_walls(lines),
             "row_rules": row_rules,
