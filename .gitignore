@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 TODO.md
+mistake.md
 Onboarding Testbench.md
 .claude/
 __pycache__/

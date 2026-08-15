@@ -1175,6 +1175,15 @@ class MainTests(unittest.TestCase):
         with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout=report)):
             self.assertEqual(main.ocr_page_script(Path("page.png")), "Cyrillic")
 
+    def test_ocr_page_osd_reads_the_confidence_too(self):
+        report = "Page number: 0\nOrientation in degrees: 0\nScript: Cyrillic\nScript confidence: 3.4\n"
+        with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout=report)):
+            self.assertEqual(main.ocr_page_osd(Path("page.png")), ("Cyrillic", 3.4))
+
+    def test_ocr_page_osd_stays_quiet_when_osd_fails(self):
+        with patch.object(main.subprocess, "run", side_effect=OSError("no osd")):
+            self.assertEqual(main.ocr_page_osd(Path("page.png")), ("", 0.0))
+
     def test_dominant_text_script_names_the_script(self):
         self.assertEqual(main.dominant_text_script("Hello world"), "Latin")
         self.assertEqual(main.dominant_text_script("הרפובליקה הפדרלית"), "Hebrew")
@@ -1187,18 +1196,32 @@ class MainTests(unittest.TestCase):
         # Hebrew. Nothing in the file flags this, the fonts do carry a ToUnicode table.
         with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
             with patch.object(main, "render_pdf_page", return_value=Path("page.png")):
-                with patch.object(main, "ocr_page_script", return_value="Hebrew"):
+                with patch.object(main, "ocr_page_osd", return_value=("Hebrew", 12.22)):
                     self.assertFalse(main.text_layer_is_trustworthy(b"%PDF", 1, "hinmrg tilrdph"))
-                with patch.object(main, "ocr_page_script", return_value="Latin"):
+                with patch.object(main, "ocr_page_osd", return_value=("Latin", 4.17)):
                     self.assertTrue(main.text_layer_is_trustworthy(b"%PDF", 1, "hinmrg tilrdph"))
                 # Japanese is written with Han characters, so those two never contradict.
-                with patch.object(main, "ocr_page_script", return_value="Japanese"):
+                with patch.object(main, "ocr_page_osd", return_value=("Japanese", 10.0)):
                     self.assertTrue(main.text_layer_is_trustworthy(b"%PDF", 1, "作成日 東京都"))
                 # OSD silent, or a page without letters: nothing to contradict.
-                with patch.object(main, "ocr_page_script", return_value=""):
+                with patch.object(main, "ocr_page_osd", return_value=("", 0.0)):
                     self.assertTrue(main.text_layer_is_trustworthy(b"%PDF", 1, "hinmrg tilrdph"))
-                with patch.object(main, "ocr_page_script", return_value="Hebrew"):
+                with patch.object(main, "ocr_page_osd", return_value=("Hebrew", 12.22)):
                     self.assertTrue(main.text_layer_is_trustworthy(b"%PDF", 1, "12345"))
+
+    def test_text_layer_is_trusted_when_osd_has_too_little_signal(self):
+        # A numbers-heavy German table page: OSD misreads it as Cyrillic, but at confidence
+        # 0.42 and 1.67 - measured on the real fixture, too little real-letter signal to mean
+        # anything, unlike a genuinely broken page (Hebrew at 2.50-12.22).
+        with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
+            with patch.object(main, "render_pdf_page", return_value=Path("page.png")):
+                with patch.object(main, "ocr_page_osd", return_value=("Cyrillic", 0.42)):
+                    self.assertTrue(main.text_layer_is_trustworthy(b"%PDF", 1, "Tisch 12,50 EUR"))
+                with patch.object(main, "ocr_page_osd", return_value=("Cyrillic", 1.67)):
+                    self.assertTrue(main.text_layer_is_trustworthy(b"%PDF", 1, "Tisch 12,50 EUR"))
+                # Right at and above the threshold, a genuine mismatch is still caught.
+                with patch.object(main, "ocr_page_osd", return_value=("Hebrew", 2.50)):
+                    self.assertFalse(main.text_layer_is_trustworthy(b"%PDF", 1, "hinmrg tilrdph"))
 
     def test_pdf_extraction_falls_back_to_ocr_for_a_lying_text_layer(self):
         document = FakeDocument([FakePage("hinmrg lß tilrdph hqilbuprh und mehr text"),
@@ -2713,6 +2736,65 @@ class MainTests(unittest.TestCase):
              "size": 11.0, "bold": False},
         ]
         self.assertEqual(len(main.group_pdf_paragraphs(run_on)), 1)
+
+    def test_group_pdf_paragraphs_reconnects_two_interleaved_columns(self):
+        # Two_Column_Paper page 1 (real coordinates, rounded): a justified two-column layout
+        # whose two columns share baselines often enough that group_pdf_lines' cell splitting (see
+        # PDF_COLUMN_MIN_RUNS) hands group_pdf_paragraphs a flat list that alternates line by
+        # line, right/left/right/left. Comparing only against paragraphs[-1] then means a
+        # paragraph's own next line is never the thing being compared against - it is always the
+        # other column - and every line came out as a paragraph of its own.
+        def line(text, x, y, right):
+            return {"text": text, "x": x, "y": y, "right": right, "size": 9.4}
+
+        lines = [
+            line("into the turbine blade design that", 306.64, 700.0, 543.28),
+            line("The ocean floor survey revealed", 52.0, 694.0, 288.64),
+            line("captures both tidal and current energy", 306.64, 688.4, 543.28),
+            line("unusual sediment patterns near the", 52.0, 682.4, 288.64),
+            line("across a wide range of flow speeds.", 306.64, 676.8, 460.0),
+            line("coastal shelf that required further study.", 52.0, 670.8, 200.0),
+        ]
+
+        paragraphs = main.group_pdf_paragraphs(lines)
+
+        self.assertEqual([p["text"] for p in paragraphs], [
+            "into the turbine blade design that captures both tidal and current energy "
+            "across a wide range of flow speeds.",
+            "The ocean floor survey revealed unusual sediment patterns near the "
+            "coastal shelf that required further study.",
+        ])
+
+    def test_group_pdf_paragraphs_keeps_ragged_list_rows_apart(self):
+        # Powerupall page 72 (real coordinates, rounded): a two-column list of short, ragged-right
+        # entries, not a justified block. The row-to-row gap here (13.56pt) is no wider than an
+        # ordinary within-entry line gap - it is only smaller because the neighbouring row's own
+        # first line happened to be taller - so a fix that reconnects columns by gap and alignment
+        # alone would splice one entry's answer onto the next question's. Only the column's own
+        # right edges - identical, page-filling, for the paper; a different length almost every
+        # time here - tell the two cases apart. See PDF_LAYOUT_CONTINUATION_MIN_WIDTH.
+        def line(text, x, y, right):
+            return {"text": text, "x": x, "y": y, "right": right, "size": 11.04}
+
+        lines = [
+            line("I will never be able to learn this.", 95.42, 477.67, 268.16),
+            line("I can try. If I take it one step at a time,", 311.45, 477.67, 516.63),
+            line("it might begin to make sense.", 311.45, 464.71, 469.90),
+            line("No one at the party will talk to me.", 95.42, 451.15, 281.97),
+            line("I can say hello to people and see what", 311.45, 451.15, 520.01),
+            line("happens. There are friendly people", 311.45, 438.19, 520.05),
+            line("everywhere.", 311.45, 425.23, 375.20),
+        ]
+
+        paragraphs = main.group_pdf_paragraphs(lines)
+
+        self.assertEqual([p["text"] for p in paragraphs], [
+            "I will never be able to learn this.",
+            "I can try. If I take it one step at a time, it might begin to make sense.",
+            "No one at the party will talk to me.",
+            "I can say hello to people and see what happens. There are friendly people "
+            "everywhere.",
+        ])
 
     def test_paragraph_center_finds_a_centred_heading(self):
         # Powerupall's text column runs 65..551. A centred heading sits within a couple of points

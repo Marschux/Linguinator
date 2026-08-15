@@ -2034,6 +2034,12 @@ OCR_SCRIPT_LANGUAGES = {"HanT": ("chi_tra",)}
 # coverage comes from the script OSD read off the image, not from a longer list.
 OCR_PROBE_LIMIT = 3
 OSD_SCRIPT = re.compile(r"^Script:\s*(\S+)", re.MULTILINE)
+OSD_SCRIPT_CONFIDENCE = re.compile(r"^Script confidence:\s*([\d.]+)", re.MULTILINE)
+# A guess below this is noise, not a reading. Measured 14.08.2026 on real pages: a numbers-heavy
+# German table page misread as Cyrillic scored 0.42 and 1.67, while pages OSD was actually right
+# to flag - a genuinely Hebrew page whose text layer claims Latin - scored 2.50 and 12.22.
+# scripts_are_compatible below this is worth as little as no answer at all.
+OCR_SCRIPT_MIN_CONFIDENCE = 2.0
 # Levels in tesseract's TSV output: 2 is a block of text, 5 a single word.
 TSV_BLOCK_LEVEL = 2
 TSV_WORD_LEVEL = 5
@@ -2052,8 +2058,8 @@ def run_tesseract(image_path: Path, languages: str) -> str:
     return result.stdout.strip()
 
 
-def ocr_page_script(image_path: Path) -> str:
-    """The script OSD sees in a page image ("Latin", "Cyrillic", …), empty when it cannot tell."""
+def ocr_page_osd(image_path: Path) -> Tuple[str, float]:
+    """The script OSD sees in a page image and its confidence, ("", 0.0) when it cannot tell."""
     try:
         result = subprocess.run(
             # OSD refuses below 50 characters by default and exits with an error. A scanned page
@@ -2069,9 +2075,17 @@ def ocr_page_script(image_path: Path) -> str:
     except Exception:
         # Too little text even for that, no osd traineddata, a failed call: none of it may end
         # the job. A wrong script only costs the throwaway probe, which the recheck can correct.
-        return ""
-    match = OSD_SCRIPT.search(result.stdout)
-    return match.group(1) if match else ""
+        return "", 0.0
+    script_match = OSD_SCRIPT.search(result.stdout)
+    confidence_match = OSD_SCRIPT_CONFIDENCE.search(result.stdout)
+    script = script_match.group(1) if script_match else ""
+    confidence = float(confidence_match.group(1)) if confidence_match else 0.0
+    return script, confidence
+
+
+def ocr_page_script(image_path: Path) -> str:
+    """The script OSD sees in a page image ("Latin", "Cyrillic", …), empty when it cannot tell."""
+    return ocr_page_osd(image_path)[0]
 
 
 def ocr_script_is_usable(script: str) -> bool:
@@ -2204,10 +2218,14 @@ def text_layer_is_trustworthy(content: bytes, page_number: int, text: str) -> bo
         return True
     try:
         with tempfile.TemporaryDirectory() as temp_dir:
-            printed = ocr_page_script(render_pdf_page(content, page_number, temp_dir))
+            printed, confidence = ocr_page_osd(render_pdf_page(content, page_number, temp_dir))
     except Exception:
         return True
-    return not printed or scripts_are_compatible(printed, claimed)
+    if not printed or confidence < OCR_SCRIPT_MIN_CONFIDENCE:
+        # A numbers-heavy table page misread as Cyrillic at confidence 0.42-1.67 - too little
+        # real-letter signal for OSD to mean anything, same as no answer at all.
+        return True
+    return scripts_are_compatible(printed, claimed)
 
 
 def ocr_page_blocks(image_path: Path, languages: str) -> List[Dict[str, Any]]:
@@ -2855,6 +2873,48 @@ def typical_line_spacing(lines: List[Dict[str, Any]]) -> float:
     return min(repeated) if repeated else 0.0
 
 
+# Ceiling on the leading/size ratio a line may sit at and still extend a paragraph that is not
+# the immediately preceding one (see group_pdf_paragraphs). Below the ordinary 1.8x tolerance
+# because that gap is the only thing standing between a genuine reconnection and a table's own
+# row-to-row gap once the immediate-only check is relaxed. Measured (Aug 2026): every real
+# continuation across Two_Column_Paper's two columns and Powerupall's page 72 list sat at
+# 1.15-1.33x; every false candidate - MatterhornProtokoll's Index, Version and Abschnitt columns,
+# row to row - sat at 1.74-1.77x. 1.5 splits the two with room on both sides.
+PDF_LAYOUT_CONTINUATION_MAX_RATIO = 1.5
+# Share of a column's own lines that has to end at that column's single most common right edge,
+# and how wide that edge has to sit past the column's own left edge, before group_pdf_paragraphs
+# trusts a gap enough to look past the immediately preceding paragraph for it. Ratio alone still
+# lets two false positives through: a table column of repeated short words ("Objekt"/"Objekt")
+# hits a high share purely by having little to vary, and a page-number column hits 100% while
+# being a few points wide. Width alone still passes MatterhornProtokoll's Fehlerbedingung column
+# (191-349pt even on single-line rows). Measured (Aug 2026): Two_Column_Paper's two columns and
+# Powerupall page 72's indented paragraph opener sat at 86-93% repeat share and 209-486pt width;
+# every column of MatterhornProtokoll's tables and TOC, and Powerupall's own two list columns
+# (33-42%, ragged - each entry a different length), missed one or the other by a wide margin.
+PDF_LAYOUT_CONTINUATION_MIN_JUSTIFIED_SHARE = 0.5
+PDF_LAYOUT_CONTINUATION_MIN_WIDTH = 100.0
+
+
+def pdf_layout_justified_columns(lines: List[Dict[str, Any]]) -> Set[int]:
+    """The x's (rounded to the point) whose lines mostly end at the same right edge.
+
+    Evidence that a column is body text set flush, not a table cell or list entry - those wrap
+    ragged, a different length practically every time. See group_pdf_paragraphs.
+    """
+    by_x: Dict[int, List[int]] = {}
+    for line in lines:
+        by_x.setdefault(round(line["x"]), []).append(round(line["right"]))
+    columns = set()
+    for x, rights in by_x.items():
+        if len(rights) < 3:
+            continue
+        edge, count = Counter(rights).most_common(1)[0]
+        if (count / len(rights) >= PDF_LAYOUT_CONTINUATION_MIN_JUSTIFIED_SHARE
+                and edge - x >= PDF_LAYOUT_CONTINUATION_MIN_WIDTH):
+            columns.add(x)
+    return columns
+
+
 def group_pdf_paragraphs(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Bundle lines into paragraphs, purely so the model gets whole sentences.
 
@@ -2864,52 +2924,92 @@ def group_pdf_paragraphs(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     # Allowed with a bit of room over the page's own leading, so an ordinary line of the same
     # paragraph still fits while the wider gap before the next one does not.
     spacing_limit = 1.25 * typical_line_spacing(lines)
+
+    def paragraph_fits_line(current: Dict[str, Any], line: Dict[str, Any],
+                            size_ratio: float = 1.8) -> bool:
+        previous = current["lines"][-1]
+        spacing = previous["y"] - line["y"]
+        # A paragraph's first line rarely sits where the rest of it does, and it is the second
+        # line that sets the real left edge: measured against that once it exists. Until then,
+        # a line further left continues an indented opening line, and a line further right
+        # continues a list item, whose marker hangs out to the left of its own text.
+        first = len(current["lines"]) == 1
+        left = previous["x"] if first else current["lines"][1]["x"]
+        # A centred block shares no left edge at all - each line is only as wide as its own
+        # text - but its centre stays put line to line, the same quantity paragraph_center
+        # measures later to reflow it. Without this, a multi-line centred heading split into
+        # one single-line "paragraph" per line, each translated with no context from the rest.
+        reference = previous if first else current["lines"][1]
+        reference_centre = (reference["x"] + reference["right"]) / 2
+        line_centre = (line["x"] + line["right"]) / 2
+        aligned = (
+            abs(left - line["x"]) <= 3
+            or abs(reference_centre - line_centre) <= 3
+            or (first and 0 < previous["x"] - line["x"] <= PDF_LAYOUT_MAX_INDENT)
+            or (first and PDF_LIST_MARKER.match(previous["text"])
+                and 0 < line["x"] - previous["x"] <= PDF_LAYOUT_MAX_INDENT)
+        )
+        return (
+            0 < spacing <= max(size_ratio * max(previous["size"], line["size"]), spacing_limit)
+            and aligned
+            # A marker opens an item, so it can only ever open a paragraph too. Consecutive
+            # one-line items are indistinguishable from a wrapped paragraph by geometry
+            # alone: same left edge, same leading, and a whole list came out as prose.
+            and not PDF_LIST_MARKER.match(line["text"])
+            and abs(previous["size"] - line["size"]) <= 0.2 * previous["size"]
+            # A change of weight ends a paragraph just as a change of size does. Not every
+            # document sets its headings larger: Get_Started_With_Smallpdf sets them bold at
+            # the body size, so they were swallowed by the paragraph below and lost both their
+            # own weight (paragraph_base_size and the bold vote go by majority) and their own
+            # alignment. Safe against a bold lead-in inside a sentence, because a line's own
+            # weight is already decided by which face most of its characters use.
+            and bool(previous.get("bold")) == bool(line.get("bold"))
+        )
+
+    justified_columns = pdf_layout_justified_columns(lines)
+
+    def paragraph_column_x(paragraph: Dict[str, Any]) -> int:
+        # The same reference paragraph_fits_line's own "left" uses: a paragraph's first line is
+        # often indented or a list marker and does not sit at the column's real x, its second
+        # line does. Keying last_by_x on whichever line was added most recently would otherwise
+        # lose a paragraph the moment its own opening (indented) line is what got stored - and a
+        # paragraph that has not grown a second line yet still needs to read as belonging to its
+        # column for the justified_columns check below, or its own opening line blocks it.
+        own = paragraph["lines"]
+        x = round(own[1]["x"] if len(own) > 1 else own[0]["x"])
+        if x in justified_columns:
+            return x
+        for column in justified_columns:
+            if 0 < x - column <= PDF_LAYOUT_MAX_INDENT:
+                return column
+        return x
+
     paragraphs: List[Dict[str, Any]] = []
+    # The paragraph most recently extended at each x, so a genuine paragraph split across an
+    # interleaving column (see group_pdf_lines) can still be found once its own immediate
+    # neighbour in the list turns out to belong to the other column. Only consulted under the
+    # tighter guard above - see PDF_LAYOUT_CONTINUATION_MAX_RATIO and pdf_layout_justified_columns.
+    last_by_x: Dict[int, Dict[str, Any]] = {}
     for line in lines:
-        for current in paragraphs[-1:]:
-            previous = current["lines"][-1]
-            spacing = previous["y"] - line["y"]
-            # A paragraph's first line rarely sits where the rest of it does, and it is the second
-            # line that sets the real left edge: measured against that once it exists. Until then,
-            # a line further left continues an indented opening line, and a line further right
-            # continues a list item, whose marker hangs out to the left of its own text.
-            first = len(current["lines"]) == 1
-            left = previous["x"] if first else current["lines"][1]["x"]
-            # A centred block shares no left edge at all - each line is only as wide as its own
-            # text - but its centre stays put line to line, the same quantity paragraph_center
-            # measures later to reflow it. Without this, a multi-line centred heading split into
-            # one single-line "paragraph" per line, each translated with no context from the rest.
-            reference = previous if first else current["lines"][1]
-            reference_centre = (reference["x"] + reference["right"]) / 2
-            line_centre = (line["x"] + line["right"]) / 2
-            aligned = (
-                abs(left - line["x"]) <= 3
-                or abs(reference_centre - line_centre) <= 3
-                or (first and 0 < previous["x"] - line["x"] <= PDF_LAYOUT_MAX_INDENT)
-                or (first and PDF_LIST_MARKER.match(previous["text"])
-                    and 0 < line["x"] - previous["x"] <= PDF_LAYOUT_MAX_INDENT)
-            )
-            fits = (
-                0 < spacing <= max(1.8 * max(previous["size"], line["size"]), spacing_limit)
-                and aligned
-                # A marker opens an item, so it can only ever open a paragraph too. Consecutive
-                # one-line items are indistinguishable from a wrapped paragraph by geometry
-                # alone: same left edge, same leading, and a whole list came out as prose.
-                and not PDF_LIST_MARKER.match(line["text"])
-                and abs(previous["size"] - line["size"]) <= 0.2 * previous["size"]
-                # A change of weight ends a paragraph just as a change of size does. Not every
-                # document sets its headings larger: Get_Started_With_Smallpdf sets them bold at
-                # the body size, so they were swallowed by the paragraph below and lost both their
-                # own weight (paragraph_base_size and the bold vote go by majority) and their own
-                # alignment. Safe against a bold lead-in inside a sentence, because a line's own
-                # weight is already decided by which face most of its characters use.
-                and bool(previous.get("bold")) == bool(line.get("bold"))
-            )
-            if fits:
-                current["lines"].append(line)
-                break
+        matched = None
+        interrupting = paragraphs[-1] if paragraphs else None
+        if interrupting is not None and paragraph_fits_line(interrupting, line):
+            matched = interrupting
         else:
-            paragraphs.append({"lines": [line]})
+            candidate = last_by_x.get(round(line["x"]))
+            if (candidate is not None and candidate is not interrupting
+                    and interrupting is not None
+                    and round(line["x"]) in justified_columns
+                    and paragraph_column_x(interrupting) in justified_columns
+                    and paragraph_fits_line(candidate, line,
+                                            size_ratio=PDF_LAYOUT_CONTINUATION_MAX_RATIO)):
+                matched = candidate
+        if matched is not None:
+            matched["lines"].append(line)
+        else:
+            matched = {"lines": [line]}
+            paragraphs.append(matched)
+        last_by_x[paragraph_column_x(matched)] = matched
     for paragraph in paragraphs:
         paragraph["text"] = " ".join(line["text"] for line in paragraph["lines"])
     return paragraphs
