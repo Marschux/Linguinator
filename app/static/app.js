@@ -58,6 +58,11 @@ let languageData = null;
         noHistoryMatch: "No history entries match this filter.",
         pageInfo: "Page {page} / {total}",
         queued: "Queued",
+        statusRunning: "running",
+        statusPaused: "paused",
+        statusComplete: "complete",
+        statusFailed: "failed",
+        statusCancelled: "cancelled",
         queuePosition: "Queue position #{position}",
         watchJob: "Click to follow this job in the tab title.",
         unwatchJob: "Click to stop following it; the tab title goes back to plain Linguinator.",
@@ -161,6 +166,11 @@ let languageData = null;
         noHistoryMatch: "Kein History-Eintrag passt zu diesem Filter.",
         pageInfo: "Seite {page} / {total}",
         queued: "Eingereiht",
+        statusRunning: "läuft",
+        statusPaused: "pausiert",
+        statusComplete: "fertig",
+        statusFailed: "fehlgeschlagen",
+        statusCancelled: "abgebrochen",
         queuePosition: "Warteschlangenposition #{position}",
         watchJob: "Klicken, um diesen Job im Tab-Titel zu verfolgen.",
         unwatchJob: "Klicken, um die Verfolgung zu beenden; der Tab-Titel zeigt wieder nur Linguinator.",
@@ -264,6 +274,11 @@ let languageData = null;
         noHistoryMatch: "Ningún elemento del historial coincide con este filtro.",
         pageInfo: "Página {page} / {total}",
         queued: "En cola",
+        statusRunning: "en curso",
+        statusPaused: "en pausa",
+        statusComplete: "completo",
+        statusFailed: "fallido",
+        statusCancelled: "cancelado",
         queuePosition: "Posición en cola #{position}",
         watchJob: "Haz clic para seguir este trabajo en el título de la pestaña.",
         unwatchJob: "Haz clic para dejar de seguirlo; el título vuelve a ser solo Linguinator.",
@@ -367,6 +382,11 @@ let languageData = null;
         noHistoryMatch: "Aucun élément de l'historique ne correspond à ce filtre.",
         pageInfo: "Page {page} / {total}",
         queued: "En file",
+        statusRunning: "en cours",
+        statusPaused: "en pause",
+        statusComplete: "terminé",
+        statusFailed: "échoué",
+        statusCancelled: "annulé",
         queuePosition: "Position en file #{position}",
         watchJob: "Cliquer pour suivre ce job dans le titre de l'onglet.",
         unwatchJob: "Cliquer pour ne plus le suivre ; le titre revient à Linguinator seul.",
@@ -553,6 +573,19 @@ let languageData = null;
         text = text.replace("{" + name + "}", value);
       }
       return text;
+    }
+
+    // job.status is the server's own internal word (queued/running/paused/complete/failed/
+    // cancelled) and stays that way regardless of UI language - every place that shows it to a
+    // reader goes through this instead of the raw value, or it is stuck in English no matter
+    // which language is picked.
+    const STATUS_KEYS = {
+      queued: "queued", running: "statusRunning", paused: "statusPaused",
+      complete: "statusComplete", failed: "statusFailed", cancelled: "statusCancelled",
+    };
+
+    function translateStatus(status) {
+      return t(STATUS_KEYS[status] || status);
     }
 
     function setText(selector, key) {
@@ -1153,7 +1186,7 @@ let languageData = null;
     }
 
     function titleFor(status, percent, position, label) {
-      const titleStatus = status.charAt(0).toUpperCase() + status.slice(1);
+      const titleStatus = translateStatus(status);
       let prefix;
       if ((status === "queued" || status === "running") && position && position > 0) {
         prefix = "#" + position + " " + titleStatus;
@@ -1366,7 +1399,7 @@ let languageData = null;
         appendTypeBadge(title, extension);
         const position = job.position ? "#" + job.position + " " : "";
         title.appendChild(document.createTextNode(
-          position + (job.label || job.kind) + " - " + job.status));
+          position + (job.label || job.kind) + " - " + translateStatus(job.status)));
         const meta = document.createElement("div");
         meta.className = "queue-meta";
         const languages = [job.source, job.target].filter(Boolean).map(formatLanguageLabel).join(" -> ");
