@@ -1754,7 +1754,7 @@ let languageData = null;
     // the same kind of document looks the same wherever it shows up.
     const FILE_TYPE_GROUPS = {
       pdf: "pdf", docx: "office", odt: "office", pptx: "pptx",
-      csv: "csv", xlsx: "csv", md: "markdown", web: "website",
+      csv: "csv", xlsx: "csv", md: "markdown", web: "website", txt: "textarea",
     };
 
     function fileTypeKey(extension) {

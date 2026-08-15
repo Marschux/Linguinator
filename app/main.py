@@ -331,7 +331,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.14.1", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.14.3", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -5625,9 +5625,9 @@ def start_translate_job(request: TranslateRequest):
     ensure_known_language(request.target)
     ensure_queue_workers()
     text = "\n\n".join(str(item) for item in request.q) if isinstance(request.q, list) else str(request.q)
-    job_id = create_job("translate", request.source, request.target, "Text")
-    update_job(job_id, text=text)
-    register_job_runner(job_id, run_text_job, (job_id, text, request.source, request.target))
+    job_id = create_job("translate", request.source, request.target, "Text.txt")
+    update_job(job_id, text=text, original_name="text.txt", source_extension="txt")
+    register_job_runner(job_id, run_text_job, (job_id, text, request.source, request.target, "text.txt", b"", "txt"))
     return {"job_id": job_id}
 
 
