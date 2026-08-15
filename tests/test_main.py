@@ -2290,8 +2290,11 @@ class MainTests(unittest.TestCase):
         )
 
     def test_layout_overlay_leaves_wordless_fragments_untouched(self):
-        # A fragment keeps its original: it must be neither redacted away nor redrawn, or the
-        # page loses a character it could have kept.
+        # A fragment keeps its own original text rather than whatever came back in its
+        # translation slot - guard_hallucination's length check cannot catch a short, plausible
+        # invention for a fragment with nothing to translate. It is still redacted and redrawn
+        # like any other paragraph, though (see test_layout_overlay_resizes_wordless_fragments_
+        # to_match_their_table), so its own text has to survive that round trip unchanged.
         pages = [{
             "number": 1, "width": 400.0, "height": 300.0,
             "paragraphs": [
@@ -2390,6 +2393,44 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(sizes["Linke"], sizes["Rechte"])
         self.assertNotEqual(sizes["Überschrift"], sizes["Linke"])
+
+    def test_layout_overlay_resizes_wordless_fragments_to_match_their_table(self):
+        # Landscape_Mixed_Pages: a table's numeric column ("4.8", "38", ...) has nothing to
+        # translate, so it used to be skipped entirely by render_pdf_layout_overlay and
+        # redact_translated_text alike - left at its own original size while the label cell
+        # beside it shrank to fit a much longer translation, which read as the same "two sizes in
+        # one row" fault test_layout_overlay_sets_the_cells_of_a_row_in_one_size guards against.
+        # The fragment's own original text has to survive unchanged, though - see
+        # test_layout_overlay_leaves_wordless_fragments_untouched - only its size may move.
+        pages = [{
+            "number": 1, "width": 400.0, "height": 300.0,
+            "paragraphs": [
+                {"text": "Label", "lines": [
+                    {"text": "Label", "x": 50.0, "y": 200.0, "right": 150.0, "size": 11.0},
+                ]},
+                {"text": "42", "lines": [
+                    {"text": "42", "x": 200.0, "y": 200.0, "right": 220.0, "size": 11.0},
+                ]},
+            ],
+        }]
+        source = main.create_pdf_from_pages([{
+            "width": 400, "height": 300, "margin": 40,
+            "source_page": "", "continuation": False, "footer": False,
+            "lines": [{"text": text, "font": "F1", "size": 11, "line_height": 14, "x": x, "y": 200}
+                      for text, x in (("Label", 50), ("42", 200))],
+        }])
+
+        # "Nein" stands in for whatever a hallucinated translation of "42" might have come back
+        # as - guard_hallucination's length check would not catch it, has_translatable_text does.
+        overlay = main.render_pdf_layout_overlay(
+            source, pages, ["Beschriftung deutlich laenger als Original", "Nein"])
+
+        spans = [span for span in pdf_spans(overlay, 0) if span["text"].strip()]
+        numeral = next(span for span in spans if span["text"].strip() == "42")
+        label_size = next(span["size"] for span in spans if span["text"].startswith("Beschriftung"))
+
+        self.assertEqual(round(numeral["size"], 1), round(label_size, 1))
+        self.assertNotIn("Nein", [span["text"] for span in spans])
 
     def test_level_table_sizes_pulls_a_whole_table_to_one_size(self):
         # Powerupall page 72: cells beside each other were levelled, rows above each other were

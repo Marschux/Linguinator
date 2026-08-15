@@ -4101,10 +4101,11 @@ def redact_translated_text(content: bytes, pages: List[Dict[str, Any]], translat
         neighbours = [line for other in page_data["paragraphs"] for line in other["lines"]]
         for paragraph in page_data["paragraphs"]:
             # A paragraph without a translation keeps its original text rather than being
-            # erased with nothing put in its place - as does an untranslatable fragment, whose
-            # stored "translation" is just its own original text.
-            if (index < len(translations) and translations[index].strip()
-                    and has_translatable_text(paragraph["text"])):
+            # erased with nothing put in its place. An untranslatable fragment (a table's numeric
+            # column, say) is redacted like any other: render_pdf_layout_overlay draws its own
+            # original text back at whatever size level_table_sizes settled on, and skipping the
+            # redaction here would leave that redraw stamped straight over the untouched original.
+            if index < len(translations) and translations[index].strip():
                 for line in paragraph["lines"]:
                     size = line["size"]
                     # Still narrower than the line's full height - a rectangle only has to touch
@@ -4271,8 +4272,16 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
     for page in pages:
         reflowed: List[Tuple[Any, ...]] = []
         for paragraph in page["paragraphs"]:
-            if (index < len(translations) and translations[index].strip()
-                    and has_translatable_text(paragraph["text"])):
+            if index < len(translations) and translations[index].strip():
+                # A fragment too short/numeric to translate (has_translatable_text) still keeps
+                # its own original text - translations[index] may be the model inventing on it,
+                # a page number or a table cell like "4.8" is exactly what guard_hallucination's
+                # length check cannot catch - but it still needs to go through reflow and join
+                # level_table_sizes' grouping below: a table's numeric column left untouched
+                # while its header and label columns shrink to fit their translation looks just
+                # as inconsistent as the header staying split from the column ever did.
+                translatable = has_translatable_text(paragraph["text"])
+                text = translations[index] if translatable else paragraph["text"]
                 obstacles = page.get("obstacles") or []
                 row_rules = page.get("row_rules") or []
                 floor = paragraph_floor(paragraph, page["paragraphs"], obstacles, row_rules)
@@ -4281,7 +4290,7 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
                     paragraph, page["paragraphs"], right_margin, obstacles,
                     page.get("columns"))
                 centre = paragraph_center(paragraph, left_margin, right_margin, obstacles)
-                placed = reflow_paragraph(paragraph, translations[index], floor, width_limit,
+                placed = reflow_paragraph(paragraph, text, floor, width_limit,
                                           box_floor=box_floor, centre=centre)
                 if len(placed) > PDF_LAYOUT_MAX_LINE_GROWTH * len(paragraph["lines"]):
                     # Not a translation of this paragraph any more. Overflow is tolerated, but a
@@ -4289,7 +4298,7 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
                     # the original is the better of the two things to be looking at.
                     kept[index] = ""
                 else:
-                    reflowed.append((paragraph, translations[index], floor, width_limit,
+                    reflowed.append((paragraph, text, floor, width_limit,
                                      box_floor, centre, placed))
                     base = paragraph_base_size(paragraph)
                     key = round(base, 1)
