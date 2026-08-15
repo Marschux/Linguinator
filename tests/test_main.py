@@ -1372,6 +1372,64 @@ class MainTests(unittest.TestCase):
         # Round-trips through the ToUnicode CMap, so the text stays selectable.
         self.assertIn("Привет", pdf_text(content))
 
+    def test_image_line_bands_wraps_around_a_partial_width_image(self):
+        # Image on the left half of a 200pt-wide body; the free gap is on the right.
+        image = {"x": 0.0, "right": 100.0, "top": 200.0, "bottom": 100.0}
+        bands = main.image_line_bands([image], width=200.0, margin=0.0, top=200.0, line_height=10.0)
+
+        self.assertEqual(bands[0], (100.0, 100.0))
+        # Past the image's bottom, back to the full body width.
+        self.assertEqual(bands[-1], (0.0, 200.0))
+
+    def test_image_line_bands_takes_the_widest_gap_between_two_images(self):
+        left = {"x": 0.0, "right": 60.0, "top": 200.0, "bottom": 150.0}
+        right = {"x": 260.0, "right": 300.0, "top": 200.0, "bottom": 150.0}
+        bands = main.image_line_bands([left, right], width=300.0, margin=0.0, top=200.0, line_height=10.0)
+
+        self.assertEqual(bands[0], (60.0, 200.0))
+
+    def test_drop_below_wide_images_skips_a_full_width_image_and_leaves_a_narrow_one_alone(self):
+        wide = {"x": 0.0, "right": 300.0, "top": 200.0, "bottom": 100.0}
+        y, skipped = main.drop_below_wide_images([wide], width=300.0, margin=0.0, y=200.0)
+        self.assertEqual(y, 100.0)
+        self.assertEqual(skipped, 100.0)
+
+        narrow = {"x": 0.0, "right": 60.0, "top": 200.0, "bottom": 100.0}
+        y, skipped = main.drop_below_wide_images([narrow], width=300.0, margin=0.0, y=200.0)
+        self.assertEqual(y, 200.0)
+        self.assertIsNone(skipped)
+
+    def test_pdf_document_pages_places_image_only_on_the_first_output_page(self):
+        width, height, margin = 300.0, 400.0, 20.0
+        wide_image = {"bytes": b"fake", "x": margin, "right": width - margin,
+                     "top": height - margin - 24, "bottom": height - margin - 24 - 50}
+        text = "# Page 1\n\n" + ("A long paragraph that overflows onto a second page. " * 40)
+        pages = main.pdf_document_pages(text, {"1": {"images": [wide_image], "width": width, "height": height}})
+
+        self.assertEqual(pages[0]["images"], [wide_image])
+        self.assertTrue(pages[0]["continuation"] is False)
+        self.assertTrue(len(pages) > 1)
+        self.assertNotIn("images", pages[1])
+        self.assertTrue(pages[1]["continuation"])
+
+    def test_create_text_pdf_reinserts_the_source_pdfs_own_image(self):
+        source = pymupdf.open()
+        page = source.new_page(width=300, height=400)
+        pix = pymupdf.Pixmap(pymupdf.csRGB, (0, 0, 40, 40), False)
+        pix.set_rect(pix.irect, (200, 0, 0))
+        page.insert_image(pymupdf.Rect(20, 20, 100, 100), pixmap=pix)
+        source_content = source.tobytes()
+
+        content = main.create_text_pdf("# Page 1\n\nTranslated body text.", source_content)
+
+        self.assertEqual(len(pymupdf.open(stream=content, filetype="pdf")[0].get_images()), 1)
+        self.assertIn("Translated body text.", pdf_text(content))
+
+    def test_create_text_pdf_without_source_content_stays_image_free(self):
+        content = main.create_text_pdf("# Page 1\n\nTranslated body text.")
+
+        self.assertEqual(pymupdf.open(stream=content, filetype="pdf")[0].get_images(), [])
+
     def test_detect_pdf_script_identifies_known_scripts(self):
         self.assertEqual(main.detect_pdf_script("Hello world"), "")
         self.assertEqual(main.detect_pdf_script("你好"), "cjk")

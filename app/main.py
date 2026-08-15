@@ -91,6 +91,12 @@ PDF_LINE_HEIGHT = 14
 PDF_FONT_SIZE = 11
 PDF_HEADING_FONT_SIZE = 15
 PDF_FOOTER_FONT_SIZE = 9
+# Below this, an image is a bullet icon or a decorative divider, not something worth reinserting
+# into the re-exported translation or reserving text-wrap space for.
+PDF_IMAGE_MIN_SIZE = 24.0
+# A gap narrower than this cannot hold a real line of text - text falls back to full width below
+# the image instead of one word per line squeezed beside it.
+PDF_IMAGE_MIN_TEXT_BAND = 80.0
 # How far the overlay may shrink the font to make a longer translation fit its original lines.
 PDF_LAYOUT_MIN_SCALE = 0.7
 # Kept clear of the page edge when a paragraph has nothing to its right.
@@ -1041,9 +1047,10 @@ def pdf_render_lines(text: str) -> List[Dict[str, Any]]:
     return lines
 
 
-def paginate_pdf_lines(lines: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]]:
+def paginate_pdf_lines(lines: List[Dict[str, Any]],
+                       usable_height: float = PDF_PAGE_HEIGHT - (2 * PDF_MARGIN) - 26
+                       ) -> List[List[Dict[str, Any]]]:
     pages = [[]]
-    usable_height = PDF_PAGE_HEIGHT - (2 * PDF_MARGIN) - 26
     used_height = 0
     for line in lines:
         line_height = line["line_height"]
@@ -1055,9 +1062,144 @@ def paginate_pdf_lines(lines: List[Dict[str, Any]]) -> List[List[Dict[str, Any]]
     return pages or [[]]
 
 
-def pdf_document_pages(text: str) -> List[Dict[str, Any]]:
+def pdf_image_blocks_width(image: Dict[str, float], width: float, margin: float) -> bool:
+    """Whether `image` leaves no side gap worth wrapping a line of text into
+    (PDF_IMAGE_MIN_TEXT_BAND) - a hard floor for text to start below, not something to wrap a
+    narrow column beside. True for a full-page scan, false for a picture that only takes up part
+    of the line's width."""
+    occupied = min(image["right"], margin + width) - max(image["x"], margin)
+    return width - occupied < PDF_IMAGE_MIN_TEXT_BAND
+
+
+def image_line_bands(images: List[Dict[str, float]], width: float, margin: float,
+                     top: float, line_height: float) -> List[Tuple[float, float]]:
+    """The (x, usable width) a line of text may occupy at each step down from `top`, narrowed by
+    whichever of `images` reach that height, widest free gap first. Assumes the caller has
+    already dropped `top` below every image `pdf_image_blocks_width` calls wide (see
+    pdf_render_lines_with_images) - what is left here is genuinely partial-width images, where
+    "too narrow a gap" only means a real but unusably thin sliver next to one, not the whole line.
+
+    Stops once past the lowest image and appends one trailing full-width entry: wrap_text_to_width
+    reuses a width list's last entry for every line past its length, so the caller never has to
+    know in advance how many lines a paragraph will take.
+    """
+    if not images:
+        return [(margin, width)]
+    lowest = min(image["bottom"] for image in images)
+    bands = []
+    y = top
+    while y > lowest:
+        covers = sorted((max(image["x"], margin), min(image["right"], margin + width))
+                        for image in images if image["bottom"] <= y <= image["top"])
+        gaps = []
+        cursor = margin
+        for left, right in covers:
+            if left > cursor:
+                gaps.append((cursor, left - cursor))
+            cursor = max(cursor, right)
+        if cursor < margin + width:
+            gaps.append((cursor, margin + width - cursor))
+        x, usable = max(gaps, key=lambda gap: gap[1]) if gaps else (margin, 0.0)
+        if usable < PDF_IMAGE_MIN_TEXT_BAND:
+            # ponytail: a still-wide obstacle reachable here only if two wide images stack with a
+            # narrow gap between them mid-paragraph (pdf_image_blocks_width only runs once per
+            # paragraph start, see pdf_render_lines_with_images) - text overlaps it rather than
+            # the page failing to render. Not seen in the test corpus; move the wide-image check
+            # into this loop if a real document hits it.
+            x, usable = margin, width
+        bands.append((x, usable))
+        y -= line_height
+    bands.append((margin, width))
+    return bands
+
+
+def drop_below_wide_images(images: List[Dict[str, float]], width: float, margin: float,
+                           y: float) -> Tuple[float, Optional[float]]:
+    """`y`, moved down below every image `pdf_image_blocks_width` calls wide and currently active
+    at that height, plus the total distance moved (None if nothing moved) so the caller can emit
+    a spacer line covering it - create_pdf_from_pages draws lines back to back by line_height
+    alone, with no notion of images, so a width-only fix here would leave the skipped lines drawn
+    straight across the image instead of below it.
+    """
+    start = y
+    while True:
+        blockers = [image["bottom"] for image in images
+                   if pdf_image_blocks_width(image, width, margin) and image["bottom"] < y <= image["top"]]
+        if not blockers:
+            break
+        y = min(blockers)
+    return y, (start - y) or None
+
+
+def pdf_render_lines_with_images(text: str, images: List[Dict[str, float]], width: float,
+                                 margin: float, top: float) -> List[Dict[str, Any]]:
+    """pdf_render_lines, narrowed around `images` active at each line's height (image_line_bands).
+
+    Only used for the first output page of a source page that actually has images - continuation
+    pages, and every source page without one, keep the plain fixed-width pdf_render_lines. A '#'
+    heading inside a page's own body text is not something OCR or plain PDF extraction produces
+    (it only ever prefixes the page as a whole, added separately by create_pdf_from_pages), so it
+    is drawn at full width rather than teaching the band logic a second font's line height too.
+    """
+    lines = []
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    y = top
+    for paragraph in normalized.split("\n"):
+        stripped = paragraph.strip()
+        if stripped.startswith("#"):
+            heading = stripped.lstrip("#").strip()
+            if heading:
+                for line in wrap_pdf_line(heading, PDF_HEADING_FONT_SIZE):
+                    lines.append({"text": line, "font": "F2", "size": PDF_HEADING_FONT_SIZE,
+                                 "line_height": 18, "x": margin})
+                    y -= 18
+                lines.append({"text": "", "font": "F1", "size": PDF_FONT_SIZE, "line_height": 8,
+                             "x": margin})
+                y -= 8
+                continue
+        y, skipped = drop_below_wide_images(images, width, margin, y)
+        if skipped:
+            lines.append({"text": "", "font": "F1", "size": PDF_FONT_SIZE, "line_height": skipped,
+                         "x": margin})
+        bands = image_line_bands(images, width, margin, y, PDF_LINE_HEIGHT)
+        wrapped = wrap_text_to_width(stripped, [band[1] for band in bands], PDF_FONT_SIZE)
+        for index, line in enumerate(wrapped):
+            lines.append({"text": line, "font": "F1", "size": PDF_FONT_SIZE,
+                         "line_height": PDF_LINE_HEIGHT,
+                         "x": bands[min(index, len(bands) - 1)][0]})
+            y -= PDF_LINE_HEIGHT
+    return lines
+
+
+def pdf_document_pages(text: str,
+                       page_images: Optional[Dict[str, Dict[str, Any]]] = None
+                       ) -> List[Dict[str, Any]]:
+    page_images = page_images or {}
     document_pages = []
     for section in markdown_page_sections(text):
+        info = page_images.get(section["page_number"])
+        if info and info["images"]:
+            width, height = info["width"], info["height"]
+            margin = PDF_MARGIN
+            # Below the "Page N" heading and its 24pt gap, exactly where create_pdf_from_pages
+            # starts drawing page_data["lines"] - see its own y = height - margin, y -= 24.
+            lines = pdf_render_lines_with_images(
+                section["text"], info["images"], width - 2 * margin, margin, height - margin - 24)
+            content_pages = paginate_pdf_lines(lines, height - 2 * margin - 26)
+            for index, page_lines in enumerate(content_pages, start=1):
+                page_dict = {
+                    "source_page": section["page_number"],
+                    "continuation": index > 1,
+                    "lines": page_lines,
+                    "width": width,
+                    "height": height,
+                }
+                if index == 1:
+                    # Never repeated on a continuation page: the image already sat once at its
+                    # real position, and there is no second "real position" to put it at.
+                    page_dict["images"] = info["images"]
+                document_pages.append(page_dict)
+            continue
         content_pages = paginate_pdf_lines(pdf_render_lines(section["text"]))
         for index, lines in enumerate(content_pages, start=1):
             document_pages.append({
@@ -1154,12 +1296,16 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
     # rather than the page:
     # adding a page invalidates the page objects handed out before it.
     lines: List[Tuple[Any, ...]] = []
+    # (page index, image dict) - drawn in its own pass after every page exists, same reason.
+    images: List[Tuple[int, Dict[str, Any]]] = []
     for output_page_number, page_data in enumerate(pages, start=1):
         width = page_data.get("width", PDF_PAGE_WIDTH)
         height = page_data.get("height", PDF_PAGE_HEIGHT)
         margin = page_data.get("margin", PDF_MARGIN)
         document.new_page(width=width, height=height)
         index = output_page_number - 1
+        for image in page_data.get("images") or []:
+            images.append((index, image, height))
         y = height - margin
         if page_data["source_page"]:
             heading = "Page " + page_data["source_page"]
@@ -1181,6 +1327,16 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
     for _, text, _, _, face, _, _, _, _ in lines:
         codepoints.setdefault(pdf_font_key(text, face), set()).update(map(ord, text))
     fonts = {key: subset_font(*key, points) for key, points in codepoints.items()}
+    for index, image, height in images:
+        # y-up (bottom counted from the page's own bottom, like every other PDF coordinate this
+        # module works in), flipped to MuPDF's y-down insert_image space here - the same flip
+        # draw_pdf_line does for text.
+        rect = pymupdf.Rect(image["x"], height - image["top"],
+                            image["right"], height - image["bottom"])
+        try:
+            document[index].insert_image(rect, stream=image["bytes"])
+        except Exception:
+            pass
     for index, *line in lines:
         draw_pdf_line(document[index], *line, fonts)
 
@@ -1197,8 +1353,14 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
     return document.tobytes(garbage=3, deflate=True)
 
 
-def create_text_pdf(text: str) -> bytes:
-    return create_pdf_from_pages(pdf_document_pages(text))
+def create_text_pdf(text: str, source_content: bytes = b"") -> bytes:
+    """A fresh PDF from plain translated text (see create_pdf_from_pages), with the original's
+    own images placed back at their original position when `source_content` is the source PDF
+    itself - see extract_pdf_page_images. Every other caller has no PDF to take images from
+    (arbitrary text, or a translation whose source was never a PDF) and gets the plain export
+    unchanged."""
+    page_images = extract_pdf_page_images(source_content) if source_content else None
+    return create_pdf_from_pages(pdf_document_pages(text, page_images))
 
 
 def docx_escape(text: str) -> str:
@@ -2443,6 +2605,34 @@ def extract_pdf_markdown_from_bytes(
     return markdown
 
 
+def extract_pdf_page_images(content: bytes) -> Dict[str, Dict[str, Any]]:
+    """Every page's own images and page size, keyed by page number as a string - matching the
+    "# Page N" markers pdf_sections splits translated markdown on, so create_text_pdf can place a
+    PDF's original images on its re-exported translation (pdf_page_images) without threading
+    anything through the job pipeline: this just re-opens the same source bytes history already
+    keeps around and reads positions fresh, the way export_pdf_layout_with_translated_text does
+    for the layout pipeline's own history re-export.
+
+    Never raises - a page whose bytes can no longer be parsed keeps the plain, image-less export
+    rather than failing a translation that already exists.
+    """
+    try:
+        document = pymupdf.open(stream=content, filetype="pdf")
+    except Exception:
+        return {}
+    info = {}
+    for index in range(document.page_count):
+        page = document[index]
+        images = pdf_page_images(page)
+        if images:
+            info[str(index + 1)] = {
+                "images": images,
+                "width": float(page.rect.width),
+                "height": float(page.rect.height),
+            }
+    return info
+
+
 MUPDF_BOLD_FLAG = 1 << 4  # span flag bit 4, per PyMuPDF's text-extraction flag table
 MUPDF_ITALIC_FLAG = 1 << 1  # bit 1 of the same table
 
@@ -2732,6 +2922,28 @@ def pdf_page_obstacles(page) -> List[Dict[str, float]]:
         obstacles.append({"x": mapped.x0, "right": mapped.x1,
                           "top": mapped.y1, "bottom": mapped.y0})
     return obstacles
+
+
+def pdf_page_images(page) -> List[Dict[str, Any]]:
+    """Every image on the page with its own raw bytes, positioned in PDF user space like
+    pdf_page_obstacles - except this is for drawing the image back, not just avoiding it, see
+    extract_pdf_page_images. PDF_IMAGE_MIN_SIZE drops icons and decorative dividers the same way
+    pdf_page_obstacles drops hairlines.
+    """
+    inverse = ~pdf_page_flip_matrix(page)
+    images = []
+    for xref, *_ in page.get_images(full=True):
+        try:
+            data = page.parent.extract_image(xref)["image"]
+        except Exception:
+            continue
+        for rect in page.get_image_rects(xref):
+            mapped = pymupdf.Rect(rect) * inverse
+            if mapped.width < PDF_IMAGE_MIN_SIZE or mapped.height < PDF_IMAGE_MIN_SIZE:
+                continue
+            images.append({"bytes": data, "x": mapped.x0, "right": mapped.x1,
+                           "top": mapped.y1, "bottom": mapped.y0})
+    return images
 
 
 def pdf_page_rules(page) -> List[Dict[str, float]]:
@@ -5479,7 +5691,7 @@ def export_original_history_content(extension: str, content: bytes, text: str, s
     if extension == "pdf":
         if source_meta.get("layout") == "true":
             return export_pdf_layout_with_translated_text(content, text, source_meta.get("page_range", ""))
-        return create_text_pdf(text)
+        return create_text_pdf(text, content)
     if extension in ("md", "txt"):
         return text.encode("utf-8")
     raise HTTPException(status_code=400, detail="Unsupported history original format")
