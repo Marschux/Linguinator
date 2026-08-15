@@ -1064,9 +1064,10 @@ def paginate_pdf_lines(lines: List[Dict[str, Any]],
 
 def pdf_image_blocks_width(image: Dict[str, float], width: float, margin: float) -> bool:
     """Whether `image` leaves no side gap worth wrapping a line of text into
-    (PDF_IMAGE_MIN_TEXT_BAND) - a hard floor for text to start below, not something to wrap a
-    narrow column beside. True for a full-page scan, false for a picture that only takes up part
-    of the line's width."""
+    (PDF_IMAGE_MIN_TEXT_BAND). Such an image (a full-page scan, typically) is dropped from the
+    re-exported translation entirely rather than reflowed around - see pdf_document_pages -
+    leaving the plain, image-less text export instead of pushing every line onto a page of its
+    own below it."""
     occupied = min(image["right"], margin + width) - max(image["x"], margin)
     return width - occupied < PDF_IMAGE_MIN_TEXT_BAND
 
@@ -1074,10 +1075,10 @@ def pdf_image_blocks_width(image: Dict[str, float], width: float, margin: float)
 def image_line_bands(images: List[Dict[str, float]], width: float, margin: float,
                      top: float, line_height: float) -> List[Tuple[float, float]]:
     """The (x, usable width) a line of text may occupy at each step down from `top`, narrowed by
-    whichever of `images` reach that height, widest free gap first. Assumes the caller has
-    already dropped `top` below every image `pdf_image_blocks_width` calls wide (see
-    pdf_render_lines_with_images) - what is left here is genuinely partial-width images, where
-    "too narrow a gap" only means a real but unusably thin sliver next to one, not the whole line.
+    whichever of `images` reach that height, widest free gap first. `images` is assumed already
+    filtered of anything pdf_image_blocks_width calls wide (see pdf_document_pages) - what is left
+    here is genuinely partial-width images, where "too narrow a gap" only means several of them
+    jointly leaving less than PDF_IMAGE_MIN_TEXT_BAND free, not one image covering the whole line.
 
     Stops once past the lowest image and appends one trailing full-width entry: wrap_text_to_width
     reuses a width list's last entry for every line past its length, so the caller never has to
@@ -1101,34 +1102,13 @@ def image_line_bands(images: List[Dict[str, float]], width: float, margin: float
             gaps.append((cursor, margin + width - cursor))
         x, usable = max(gaps, key=lambda gap: gap[1]) if gaps else (margin, 0.0)
         if usable < PDF_IMAGE_MIN_TEXT_BAND:
-            # ponytail: a still-wide obstacle reachable here only if two wide images stack with a
-            # narrow gap between them mid-paragraph (pdf_image_blocks_width only runs once per
-            # paragraph start, see pdf_render_lines_with_images) - text overlaps it rather than
-            # the page failing to render. Not seen in the test corpus; move the wide-image check
-            # into this loop if a real document hits it.
+            # Several individually-narrow images jointly leaving no real gap on this one line -
+            # full width, text overlaps them here rather than the page failing to render.
             x, usable = margin, width
         bands.append((x, usable))
         y -= line_height
     bands.append((margin, width))
     return bands
-
-
-def drop_below_wide_images(images: List[Dict[str, float]], width: float, margin: float,
-                           y: float) -> Tuple[float, Optional[float]]:
-    """`y`, moved down below every image `pdf_image_blocks_width` calls wide and currently active
-    at that height, plus the total distance moved (None if nothing moved) so the caller can emit
-    a spacer line covering it - create_pdf_from_pages draws lines back to back by line_height
-    alone, with no notion of images, so a width-only fix here would leave the skipped lines drawn
-    straight across the image instead of below it.
-    """
-    start = y
-    while True:
-        blockers = [image["bottom"] for image in images
-                   if pdf_image_blocks_width(image, width, margin) and image["bottom"] < y <= image["top"]]
-        if not blockers:
-            break
-        y = min(blockers)
-    return y, (start - y) or None
 
 
 def pdf_render_lines_with_images(text: str, images: List[Dict[str, float]], width: float,
@@ -1157,10 +1137,6 @@ def pdf_render_lines_with_images(text: str, images: List[Dict[str, float]], widt
                              "x": margin})
                 y -= 8
                 continue
-        y, skipped = drop_below_wide_images(images, width, margin, y)
-        if skipped:
-            lines.append({"text": "", "font": "F1", "size": PDF_FONT_SIZE, "line_height": skipped,
-                         "x": margin})
         bands = image_line_bands(images, width, margin, y, PDF_LINE_HEIGHT)
         wrapped = wrap_text_to_width(stripped, [band[1] for band in bands], PDF_FONT_SIZE)
         for index, line in enumerate(wrapped):
@@ -1178,13 +1154,21 @@ def pdf_document_pages(text: str,
     document_pages = []
     for section in markdown_page_sections(text):
         info = page_images.get(section["page_number"])
+        images = []
         if info and info["images"]:
+            # An image wide enough to leave no usable side gap (a full-page scan, typically)
+            # is dropped rather than reflowed around: pushing every line of text below it would
+            # turn one source page into two output pages, translation on its own page with
+            # nothing to show for the original - worse than just not drawing that image at all.
+            images = [image for image in info["images"]
+                     if not pdf_image_blocks_width(image, info["width"] - 2 * PDF_MARGIN, PDF_MARGIN)]
+        if images:
             width, height = info["width"], info["height"]
             margin = PDF_MARGIN
             # Below the "Page N" heading and its 24pt gap, exactly where create_pdf_from_pages
             # starts drawing page_data["lines"] - see its own y = height - margin, y -= 24.
             lines = pdf_render_lines_with_images(
-                section["text"], info["images"], width - 2 * margin, margin, height - margin - 24)
+                section["text"], images, width - 2 * margin, margin, height - margin - 24)
             content_pages = paginate_pdf_lines(lines, height - 2 * margin - 26)
             for index, page_lines in enumerate(content_pages, start=1):
                 page_dict = {
@@ -1197,7 +1181,7 @@ def pdf_document_pages(text: str,
                 if index == 1:
                     # Never repeated on a continuation page: the image already sat once at its
                     # real position, and there is no second "real position" to put it at.
-                    page_dict["images"] = info["images"]
+                    page_dict["images"] = images
                 document_pages.append(page_dict)
             continue
         content_pages = paginate_pdf_lines(pdf_render_lines(section["text"]))

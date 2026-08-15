@@ -1388,25 +1388,35 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(bands[0], (60.0, 200.0))
 
-    def test_drop_below_wide_images_skips_a_full_width_image_and_leaves_a_narrow_one_alone(self):
-        wide = {"x": 0.0, "right": 300.0, "top": 200.0, "bottom": 100.0}
-        y, skipped = main.drop_below_wide_images([wide], width=300.0, margin=0.0, y=200.0)
-        self.assertEqual(y, 100.0)
-        self.assertEqual(skipped, 100.0)
+    def test_pdf_image_blocks_width_is_true_for_a_full_page_image_only(self):
+        full_page = {"x": 0.0, "right": 300.0, "top": 200.0, "bottom": 100.0}
+        self.assertTrue(main.pdf_image_blocks_width(full_page, width=300.0, margin=0.0))
 
-        narrow = {"x": 0.0, "right": 60.0, "top": 200.0, "bottom": 100.0}
-        y, skipped = main.drop_below_wide_images([narrow], width=300.0, margin=0.0, y=200.0)
-        self.assertEqual(y, 200.0)
-        self.assertIsNone(skipped)
+        left_half = {"x": 0.0, "right": 150.0, "top": 200.0, "bottom": 100.0}
+        self.assertFalse(main.pdf_image_blocks_width(left_half, width=300.0, margin=0.0))
 
-    def test_pdf_document_pages_places_image_only_on_the_first_output_page(self):
+    def test_pdf_document_pages_drops_a_full_page_image_and_keeps_plain_text(self):
+        # A source page whose only image blocks the whole width (a full-page scan) gets the
+        # plain, image-less text export instead of every line being pushed onto a page of its
+        # own below the picture - see pdf_image_blocks_width.
         width, height, margin = 300.0, 400.0, 20.0
         wide_image = {"bytes": b"fake", "x": margin, "right": width - margin,
                      "top": height - margin - 24, "bottom": height - margin - 24 - 50}
-        text = "# Page 1\n\n" + ("A long paragraph that overflows onto a second page. " * 40)
+        text = "# Page 1\n\nShort translated body text."
         pages = main.pdf_document_pages(text, {"1": {"images": [wide_image], "width": width, "height": height}})
 
-        self.assertEqual(pages[0]["images"], [wide_image])
+        self.assertEqual(len(pages), 1)
+        self.assertNotIn("images", pages[0])
+        self.assertNotIn("width", pages[0])
+
+    def test_pdf_document_pages_keeps_a_partial_width_image_and_places_it_once(self):
+        width, height, margin = 300.0, 400.0, 20.0
+        narrow_image = {"bytes": b"fake", "x": margin, "right": margin + 100,
+                        "top": height - margin - 24, "bottom": height - margin - 24 - 50}
+        text = "# Page 1\n\n" + ("A long paragraph that overflows onto a second page. " * 40)
+        pages = main.pdf_document_pages(text, {"1": {"images": [narrow_image], "width": width, "height": height}})
+
+        self.assertEqual(pages[0]["images"], [narrow_image])
         self.assertTrue(pages[0]["continuation"] is False)
         self.assertTrue(len(pages) > 1)
         self.assertNotIn("images", pages[1])
