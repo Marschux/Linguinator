@@ -5610,6 +5610,22 @@ def delete_history(item_id: str):
     return {"deleted": item_id}
 
 
+@app.delete("/history")
+def reset_history(keep: int = 0):
+    """Delete every history entry except the `keep` most recent ones.
+
+    history_items() already sorts newest first, so the cut is just a slice; each item past it
+    goes through delete_history for its source file and both stored paths, not a bare unlink.
+    """
+    keep = max(0, keep)
+    items = history_items()
+    deleted = 0
+    for item in items[keep:]:
+        delete_history(item["id"])
+        deleted += 1
+    return {"deleted": deleted, "kept": len(items) - deleted}
+
+
 @app.get("/")
 def index():
     return FileResponse(APP_DIR / "templates" / "index.html", media_type="text/html")

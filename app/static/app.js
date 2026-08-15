@@ -51,6 +51,7 @@ let languageData = null;
         pause: "Pause",
         resume: "Resume",
         stop: "Stop",
+        historyReset: "Reset",
         skip: "Skip",
         history: "History",
         noHistory: "No saved translations yet.",
@@ -82,6 +83,7 @@ let languageData = null;
         sheetNameHint: "XLSX sheet name, optional",
         csvColumnsHint: "CSV/XLSX columns, e.g. title,description or A,B",
         historyFilterHint: "Filter history...",
+        historyResetPrompt: "How many recent history entries to keep? (0 deletes all)",
         tipReload: "Reload Linguinator.",
         tipUiLanguage: "Select the interface language.",
         tipTheme: "Toggle light/dark mode.",
@@ -110,6 +112,7 @@ let languageData = null;
         tipPause: "Pause the entire queue.",
         tipResume: "Resume the entire queue.",
         tipStop: "Cancel the entire queue.",
+        tipHistoryReset: "Delete old history entries, keeping a number you choose.",
         tipHistoryToggle: "Show or hide the history list.",
         tipHistoryFilter: "Filter history by filename or languages.",
         tipPrevPage: "Previous page.",
@@ -150,6 +153,7 @@ let languageData = null;
         pause: "Pause",
         resume: "Fortsetzen",
         stop: "Stoppen",
+        historyReset: "Zurücksetzen",
         skip: "Überspringen",
         history: "History",
         noHistory: "Noch keine gespeicherten Übersetzungen.",
@@ -181,6 +185,7 @@ let languageData = null;
         sheetNameHint: "XLSX-Blattname, optional",
         csvColumnsHint: "CSV/XLSX-Spalten, z. B. titel,beschreibung oder A,B",
         historyFilterHint: "History filtern...",
+        historyResetPrompt: "Wie viele History-Einträge sollen behalten werden? (0 löscht alle)",
         tipReload: "Linguinator neu laden.",
         tipUiLanguage: "Sprache der Oberfläche wählen.",
         tipTheme: "Zwischen hell und dunkel wechseln.",
@@ -209,6 +214,7 @@ let languageData = null;
         tipPause: "Gesamte Warteschlange pausieren.",
         tipResume: "Gesamte Warteschlange fortsetzen.",
         tipStop: "Gesamte Warteschlange abbrechen.",
+        tipHistoryReset: "Alte History-Einträge löschen, eine wählbare Anzahl bleibt erhalten.",
         tipHistoryToggle: "History ein- oder ausklappen.",
         tipHistoryFilter: "History nach Dateiname oder Sprachen filtern.",
         tipPrevPage: "Vorherige Seite.",
@@ -249,6 +255,7 @@ let languageData = null;
         pause: "Pausar",
         resume: "Continuar",
         stop: "Detener",
+        historyReset: "Restablecer",
         skip: "Omitir",
         history: "Historial",
         noHistory: "Aún no hay traducciones guardadas.",
@@ -280,6 +287,7 @@ let languageData = null;
         sheetNameHint: "Nombre de hoja XLSX, opcional",
         csvColumnsHint: "Columnas CSV/XLSX, p. ej. título,descripción o A,B",
         historyFilterHint: "Filtrar historial...",
+        historyResetPrompt: "¿Cuántas entradas recientes del historial conservar? (0 elimina todas)",
         tipReload: "Recargar Linguinator.",
         tipUiLanguage: "Elegir el idioma de la interfaz.",
         tipTheme: "Cambiar entre modo claro y oscuro.",
@@ -308,6 +316,7 @@ let languageData = null;
         tipPause: "Pausar toda la cola.",
         tipResume: "Continuar toda la cola.",
         tipStop: "Cancelar toda la cola.",
+        tipHistoryReset: "Eliminar entradas antiguas del historial, conservando la cantidad que elijas.",
         tipHistoryToggle: "Mostrar u ocultar el historial.",
         tipHistoryFilter: "Filtrar el historial por nombre o idiomas.",
         tipPrevPage: "Página anterior.",
@@ -348,6 +357,7 @@ let languageData = null;
         pause: "Pause",
         resume: "Reprendre",
         stop: "Arrêter",
+        historyReset: "Réinitialiser",
         skip: "Passer",
         history: "Historique",
         noHistory: "Aucune traduction enregistrée.",
@@ -379,6 +389,7 @@ let languageData = null;
         sheetNameHint: "Nom de feuille XLSX, optionnel",
         csvColumnsHint: "Colonnes CSV/XLSX, p. ex. titre,description ou A,B",
         historyFilterHint: "Filtrer l'historique...",
+        historyResetPrompt: "Combien d'entrées récentes de l'historique conserver ? (0 supprime tout)",
         tipReload: "Recharger Linguinator.",
         tipUiLanguage: "Choisir la langue de l'interface.",
         tipTheme: "Basculer entre mode clair et sombre.",
@@ -407,6 +418,7 @@ let languageData = null;
         tipPause: "Mettre toute la file en pause.",
         tipResume: "Reprendre toute la file.",
         tipStop: "Annuler toute la file.",
+        tipHistoryReset: "Supprimer les anciennes entrées de l'historique, en conservant un nombre au choix.",
         tipHistoryToggle: "Afficher ou masquer l'historique.",
         tipHistoryFilter: "Filtrer l'historique par nom ou langues.",
         tipPrevPage: "Page précédente.",
@@ -585,6 +597,7 @@ let languageData = null;
       setText("#pauseJob", "pause");
       setText("#resumeJob", "resume");
       setText("#stopJob", "stop");
+      setText("#resetHistory", "historyReset");
       setText('label[for="history"]', "history");
       setTitle("#uiLanguage", "uiLanguage");
       for (const element of document.querySelectorAll("[data-title-key]")) {
@@ -1644,6 +1657,15 @@ let languageData = null;
       return (bytes / 1024 / 1024).toFixed(1) + " MB";
     }
 
+    async function resetHistory() {
+      const answer = window.prompt(t("historyResetPrompt"), String(historyItems.length));
+      if (answer === null) return;
+      const keep = parseInt(answer, 10);
+      if (isNaN(keep) || keep < 0) return;
+      await fetch("history?keep=" + keep, {method: "DELETE"});
+      await loadHistory();
+    }
+
     async function loadHistory() {
       const response = await fetch("history");
       const data = await response.json();
@@ -1871,6 +1893,7 @@ let languageData = null;
     document.getElementById("pauseJob").addEventListener("click", () => controlQueue("pause"));
     document.getElementById("resumeJob").addEventListener("click", () => controlQueue("resume"));
     document.getElementById("stopJob").addEventListener("click", () => controlQueue("cancel"));
+    document.getElementById("resetHistory").addEventListener("click", () => resetHistory());
 
     setupUiLanguagePicker();
     loadLanguages().catch((error) => {

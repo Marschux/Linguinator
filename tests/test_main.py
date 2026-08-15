@@ -3364,6 +3364,26 @@ class MainTests(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir.parent, ignore_errors=True)
 
+    def test_reset_history_keeps_only_the_newest_entries(self):
+        temp_dir = test_temp_dir()
+        try:
+            for index, day in enumerate(("01", "02", "03")):
+                item_id = f"2026-08-{day}-text-{index}"
+                (temp_dir / f"{item_id}.md").write_text("result", encoding="utf-8")
+                (temp_dir / f"{item_id}.json").write_text(json.dumps({
+                    "id": item_id, "kind": "text", "source": "eng_Latn", "target": "deu_Latn",
+                    "created_at": f"2026-08-{day}T00:00:00+00:00", "filename": f"{item_id}.md",
+                }), encoding="utf-8")
+
+            with patch.object(main, "HISTORY_DIR", temp_dir):
+                response = TestClient(main.app).delete("/history?keep=1")
+                remaining = main.history_items()
+
+            self.assertEqual(response.json(), {"deleted": 2, "kept": 1})
+            self.assertEqual([item["id"] for item in remaining], ["2026-08-03-text-2"])
+        finally:
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
     def test_list_jobs_hides_payloads_and_adds_queue_positions(self):
         temp_dir = test_temp_dir()
         try:
