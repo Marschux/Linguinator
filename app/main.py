@@ -132,6 +132,14 @@ PDF_LAYOUT_BOXED_MIN_SCALE = 0.5
 # the Powerupall pages reported as colliding, the four paragraphs that still ran into their
 # neighbour at the ordinary minimum needed 0.54 to 0.64 to clear it.
 PDF_LAYOUT_CROWDED_MIN_SCALE = 0.5
+# A hard floor under both minimums above, in points rather than as a fraction of the base size.
+# level_table_sizes joins a whole table into one group through its rows and columns, so on a wide
+# table (Landscape_Mixed_Pages, 10 columns by 9 rows) a single cramped cell - one long word in a
+# narrow column, crowded by the row below - drags every other cell down with it: measured, an 8.5pt
+# table came back at a uniform 4.2pt, technically consistent but no longer legible. Below this, a
+# cell overflows its row instead of shrinking further - recoverable by the reader, where six-point
+# text across a whole table is not.
+PDF_LAYOUT_ABSOLUTE_MIN_SIZE = 6.0
 # A reflow taller than this multiple of the paragraph it replaces is not laid out at all; the
 # original stays instead. Overflowing by a line or two is normal (German runs longer, and the
 # substitute font wider), a block three times the height is the model having invented text, and
@@ -4237,11 +4245,22 @@ def level_table_sizes(paragraphs: List[Dict[str, Any]], bases: List[float], targ
                 join(index, other)
 
     smallest: Dict[int, float] = {}
+    members: Dict[int, int] = {}
     for index in range(count):
         key = root(index)
         smallest[key] = min(smallest.get(key, targets[index]), targets[index])
+        members[key] = members.get(key, 0) + 1
     for index in range(count):
-        targets[index] = smallest[root(index)]
+        key = root(index)
+        level = smallest[key]
+        # A single cramped cell is free to be that small on its own - the floor only stops it
+        # pulling every *other* cell of a table it shares no size problem with down with it. A
+        # wide table (Landscape_Mixed_Pages, 10 columns by 9 rows) chains every cell into one
+        # group through its rows and columns, so one long word in one narrow, crowded cell used to
+        # take the whole table from 8.5pt to a uniform, illegible 4.2pt.
+        if members[key] > 1:
+            level = max(level, min(PDF_LAYOUT_ABSOLUTE_MIN_SIZE, bases[index]))
+        targets[index] = level
 
 
 def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], translations: List[str]) -> bytes:
@@ -4352,7 +4371,10 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
         lines: List[Dict[str, Any]] = []
         for (paragraph, text, floor, width_limit, box_floor, centre, placed), base, target in zip(
                 reflowed, bases, targets):
-            if placed[0]["size"] > target:
+            # Not just shrinking: level_table_sizes' floor can also raise a target back above a
+            # single cramped cell's own tiny natural size, and that cell has to be redrawn at the
+            # bigger size to actually show it - a bare "> target" only ever pulled sizes down.
+            if abs(placed[0]["size"] - target) > 0.05:
                 placed = reflow_paragraph(paragraph, text, floor, width_limit, target / base,
                                           box_floor=box_floor, centre=centre)
             lines.extend(placed)
