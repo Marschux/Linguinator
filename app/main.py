@@ -2542,6 +2542,18 @@ def visual_to_logical(text: str) -> str:
     return logical
 
 
+def pdf_page_flip_matrix(page):
+    """The Y-flip between MuPDF's rendered coordinates (down from the top) and the reading-space
+    coordinates the rest of the layout pipeline works in - counted from `page.rect`, not
+    `page.mediabox`. `page.transformation_matrix` ignores `/Rotate` and always flips by the
+    mediabox height, which is the wrong edge once rotation has swapped width and height; get_text,
+    get_drawings and get_image_rects already report positions in the rotated `page.rect` frame
+    (verified against Rotated_Pages.pdf), so only the flip itself needs the right height. Equal to
+    `page.transformation_matrix` whenever rotation is 0, since rect and mediabox then coincide.
+    """
+    return pymupdf.Matrix(1, 0, 0, -1, 0, page.rect.height)
+
+
 def pdf_page_runs(page, rules: Optional[List[Dict[str, float]]] = None,
                   widget_rects: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
     """Every text run on a PyMuPDF page, positioned in PDF user space.
@@ -2565,7 +2577,7 @@ def pdf_page_runs(page, rules: Optional[List[Dict[str, float]]] = None,
     # ponytail: O(runs^2) per page, a few hundred runs at most; index by row if a page ever
     # shows up where it isn't.
     boxes: List[Any] = []
-    inverse = ~page.transformation_matrix
+    inverse = ~pdf_page_flip_matrix(page)
     # ponytail: rawdict carries a dict per character, heavier than dict on long documents;
     # narrow it to pages that hold right-to-left text if extraction ever shows up in a profile.
     for block in page.get_text("rawdict")["blocks"]:
@@ -2708,7 +2720,7 @@ def pdf_page_obstacles(page) -> List[Dict[str, float]]:
     fraction of an em below its own baseline - taken as a floor it would stop the paragraph it
     belongs to from growing at all.
     """
-    inverse = ~page.transformation_matrix
+    inverse = ~pdf_page_flip_matrix(page)
     rects = [rect for image in page.get_images(full=True)
              for rect in page.get_image_rects(image[0])]
     rects += [drawing["rect"] for drawing in page.get_drawings()]
@@ -2731,7 +2743,7 @@ def pdf_page_rules(page) -> List[Dict[str, float]]:
     paints both cells of a row in one text run ("Objekt   Mensch  -  "), while the line between
     them is drawn, unambiguous and exactly where the boundary is.
     """
-    inverse = ~page.transformation_matrix
+    inverse = ~pdf_page_flip_matrix(page)
     rules = []
     for drawing in page.get_drawings():
         mapped = pymupdf.Rect(drawing["rect"]) * inverse
@@ -2755,7 +2767,7 @@ def pdf_page_row_rules(page) -> List[Dict[str, float]]:
     straight through the drawn row rule into the row beneath - see enclosing_box_bottom, which is
     where this is used.
     """
-    inverse = ~page.transformation_matrix
+    inverse = ~pdf_page_flip_matrix(page)
     rules = []
     for drawing in page.get_drawings():
         mapped = pymupdf.Rect(drawing["rect"]) * inverse
@@ -3164,17 +3176,21 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
     trust_text_layer = None
     for index in parse_page_range(page_range, document.page_count):
         page = document[index - 1]
-        box = page.mediabox
-        # Rotated pages would need the whole overlay transformed; they keep their original text.
+        # page.rect, not page.mediabox: it already swaps width/height for a 90/270 rotated page,
+        # matching the reading-space coordinates pdf_page_runs/obstacles/rules extract into (see
+        # pdf_page_flip_matrix).
+        box = page.rect
+        # ponytail: AcroForm widgets keep their original text on a rotated page - widget.rect's
+        # own rotation convention isn't verified against pdf_page_flip_matrix yet, and a rotated
+        # scan with a text field is a narrow case. Lift this once that's checked.
         rotated = page.rotation % 360 != 0
-        obstacles = [] if rotated else pdf_page_obstacles(page)
-        rules = [] if rotated else pdf_page_rules(page)
-        row_rules = [] if rotated else pdf_page_row_rules(page)
+        obstacles = pdf_page_obstacles(page)
+        rules = pdf_page_rules(page)
+        row_rules = pdf_page_row_rules(page)
         widgets = [] if rotated else pdf_page_widget_values(page)
-        lines = ([] if rotated
-                 else group_pdf_lines(
-                     pdf_page_runs(page, rules, [widget["rect"] for widget in widgets]),
-                     obstacles, rules))
+        lines = group_pdf_lines(
+            pdf_page_runs(page, rules, [widget["rect"] for widget in widgets]),
+            obstacles, rules)
         if trust_text_layer is None:
             page_text = page.get_text().strip()
             if page_text:
@@ -3836,7 +3852,7 @@ def redact_translated_text(content: bytes, pages: List[Dict[str, Any]], translat
                         line["y"] - 0.30 * size,
                         right,
                         line["y"] + 0.5 * size,
-                    ) * page.transformation_matrix
+                    ) * pdf_page_flip_matrix(page)
                     page.add_redact_annot(rectangle, fill=False)
                     redacted = True
             index += 1
