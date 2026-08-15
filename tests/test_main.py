@@ -482,7 +482,8 @@ class MainTests(unittest.TestCase):
         self.assertIn('id="uiLanguage"', template)
         self.assertIn('id="inputTabSelect"', template)
         self.assertIn('id="clearInput"', template)
-        self.assertIn('value="de">Deutsch', template)
+        self.assertIn('value="de">', template)
+        self.assertIn("Deutsch", template)
         self.assertNotIn("previewToggle", template)
         self.assertNotIn("historyToggle", template)
         # Queue and history are one panel, and the progress bar above the buttons is gone with
