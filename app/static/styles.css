@@ -450,7 +450,7 @@
       white-space: nowrap;
     }
     .reset-history-panel label { font-size: .85rem; }
-    .reset-history-input { width: 3.5rem; padding: .35rem .5rem; }
+    .reset-history-panel input[type=number] { width: 5rem; flex: 0 0 auto; padding: .5rem .6rem; }
     .tabs {
       /* A grid, not a flex row: every tab keeps the same width, including the ones on a second
          line. Flex made the last line stretch its few items across the full width. */
