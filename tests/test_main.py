@@ -1981,6 +1981,24 @@ class MainTests(unittest.TestCase):
         self.assertEqual(placed[0]["size"], 11.0)
         self.assertAlmostEqual(placed[1]["y"] - placed[2]["y"], 26.0, places=2)
 
+    def test_reflow_paragraph_leaves_a_real_gap_before_the_next_paragraph(self):
+        # 1.15em of clearance only kept ascenders/descenders from touching the next paragraph's
+        # own text - not enough to still read as a paragraph break. Landscape_Mixed_Pages page 3:
+        # "...Betriebsdauer in aggressiven Meeresumgebungen bieten." ran straight into "Die
+        # Umwandlung..." with no visible gap, both at normal reading size. Measured against the
+        # original: paragraphs there sit 2.15x the font size apart, 1.35x for an ordinary line.
+        paragraph = {"lines": [
+            {"text": "One", "x": 50.0, "y": 700.0, "right": 400.0, "size": 10.0},
+            {"text": "two", "x": 50.0, "y": 686.5, "right": 400.0, "size": 10.0},
+        ]}
+        floor = 640.0  # the next paragraph's own first-line baseline
+
+        placed = main.reflow_paragraph(paragraph, "Eine deutlich laengere Uebersetzung " * 5, floor=floor)
+
+        self.assertGreater(len(placed), 2)
+        gap = placed[-1]["y"] - floor
+        self.assertGreaterEqual(gap, 1.8 * placed[-1]["size"])
+
     def test_reflow_paragraph_does_not_shrink_when_the_overflow_has_room(self):
         # With nothing below it, a paragraph used to be shrunk to the floor purely for having
         # more lines than the original. Knowing what is below lets it stay readable.

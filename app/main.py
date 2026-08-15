@@ -3687,7 +3687,12 @@ def reflow_paragraph(
         # the lowest overflow baseline has to clear the next paragraph's baseline by that much.
         # Against a box's lower edge only the descenders have to stay above it - keeping the full
         # em there costs a roomy cell a line, and with it type size, for nothing.
-        clearance = 0.3 if floor == box_floor else 1.15
+        # 1.15 only keeps ascenders/descenders from touching - enough to not overlap, not enough to
+        # read as a paragraph break. Measured on Landscape_Mixed_Pages page 3: the original sets
+        # paragraphs 21.5pt apart at 10pt body text, 2.15x the font size, against 1.35x for an
+        # ordinary line of the same paragraph - a real paragraph gap is close to double an ordinary
+        # line's leading, not merely clear of it.
+        clearance = 0.3 if floor == box_floor else 2.0
         return lowest >= floor + clearance * size
 
     # Walled in: inside a box that has no room left for another line. A third of an em of
