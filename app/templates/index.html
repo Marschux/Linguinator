@@ -116,7 +116,14 @@
           <button id="pauseJob" class="secondary" disabled title="Pause the entire queue." data-title-key="tipPause">Pause</button>
           <button id="resumeJob" class="secondary" disabled title="Resume the entire queue." data-title-key="tipResume">Resume</button>
           <button id="stopJob" class="secondary" disabled title="Cancel the entire queue." data-title-key="tipStop">Stop</button>
-          <button id="resetHistory" class="secondary" type="button" title="Delete old history entries, keeping a number you choose." data-title-key="tipHistoryReset">Reset</button>
+          <div class="reset-history">
+            <button id="resetHistory" class="secondary" type="button" title="Delete old history entries, keeping a number you choose." data-title-key="tipHistoryReset">Reset</button>
+            <div id="resetHistoryPanel" class="reset-history-panel invisible">
+              <label for="resetHistoryKeep" id="resetHistoryKeepLabel">Keep</label>
+              <input id="resetHistoryKeep" type="number" min="0" step="1" class="reset-history-input">
+              <button id="resetHistoryConfirm" type="button" title="Confirm." data-title-key="tipHistoryResetConfirm">&#10003;</button>
+            </div>
+          </div>
         </div>
       </div>
       <div id="jobsBody">
