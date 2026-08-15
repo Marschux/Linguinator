@@ -33,6 +33,7 @@ let languageData = null;
         allLanguages: "All languages",
         loading: "Loading...",
         textField: "Text Field",
+        textResult: "Result",
         text: "TXT File",
         markdown: "Markdown",
         officeDoc: "DOC File",
@@ -105,6 +106,7 @@ let languageData = null;
         tipTarget: "Select the target language.",
         tipTextarea: "Enter text or load it from a file.",
         tipCounter: "Characters used, character limit, and estimated translation chunks.",
+        tipTextResult: "The translation, once the job completes.",
         tipFilePick: "Select the file to load.",
         tipSheetName: "Optional XLSX sheet name. Leave empty to use the first sheet.",
         tipCsvColumns: "Column names or letters to translate.",
@@ -141,6 +143,7 @@ let languageData = null;
         allLanguages: "Alle Sprachen",
         loading: "Lädt...",
         textField: "Textfeld",
+        textResult: "Ergebnis",
         text: "TXT-Datei",
         markdown: "Markdown",
         officeDoc: "Office-Dokument",
@@ -213,6 +216,7 @@ let languageData = null;
         tipTarget: "Zielsprache wählen.",
         tipTextarea: "Text eingeben oder aus einer Datei laden.",
         tipCounter: "Verbrauchte Zeichen, Zeichengrenze und geschätzte Chunks.",
+        tipTextResult: "Die Übersetzung, sobald der Job abgeschlossen ist.",
         tipFilePick: "Zu ladende Datei wählen.",
         tipSheetName: "Optionaler XLSX-Blattname. Leer lassen für das erste Blatt.",
         tipCsvColumns: "Zu uebersetzende Spaltennamen oder -buchstaben.",
@@ -249,6 +253,7 @@ let languageData = null;
         allLanguages: "Todos los idiomas",
         loading: "Cargando...",
         textField: "Campo de texto",
+        textResult: "Resultado",
         text: "Archivo TXT",
         markdown: "Markdown",
         officeDoc: "Documento Office",
@@ -321,6 +326,7 @@ let languageData = null;
         tipTarget: "Elegir el idioma de destino.",
         tipTextarea: "Escribir el texto o cargarlo de un archivo.",
         tipCounter: "Caracteres usados, límite y bloques estimados.",
+        tipTextResult: "La traducción, una vez que el trabajo se complete.",
         tipFilePick: "Elegir el archivo a cargar.",
         tipSheetName: "Nombre de hoja XLSX, opcional. Vacío usa la primera hoja.",
         tipCsvColumns: "Nombres o letras de las columnas a traducir.",
@@ -357,6 +363,7 @@ let languageData = null;
         allLanguages: "Toutes les langues",
         loading: "Chargement...",
         textField: "Champ texte",
+        textResult: "Résultat",
         text: "Fichier TXT",
         markdown: "Markdown",
         officeDoc: "Document Office",
@@ -429,6 +436,7 @@ let languageData = null;
         tipTarget: "Choisir la langue cible.",
         tipTextarea: "Saisir le texte ou le charger depuis un fichier.",
         tipCounter: "Caractères utilisés, limite et blocs estimés.",
+        tipTextResult: "La traduction, une fois le travail terminé.",
         tipFilePick: "Choisir le fichier à charger.",
         tipSheetName: "Nom de feuille XLSX, optionnel. Vide pour la première feuille.",
         tipCsvColumns: "Noms ou lettres des colonnes à traduire.",
@@ -627,6 +635,7 @@ let languageData = null;
       setText("#websiteUrlLabel", "website");
       setText("#websiteHint", "websiteHint");
       setText('label[for="text"]', "textField");
+      setText('label[for="textResult"]', "textResult");
       setText('label[for="pdf"]', "pdf");
       setText("#loadTextFile", "loadFile");
       setText("#translate", "translateInput");
@@ -1078,6 +1087,8 @@ let languageData = null;
 
     function setResult(text) {
       fullResultText = text;
+      const box = document.getElementById("textResult");
+      if (box) box.value = text;
     }
 
     function clearCurrentWork() {
@@ -1493,7 +1504,10 @@ let languageData = null;
         if (token !== pollToken) return;
         updateDocumentTitle(job);
         if (job.status === "complete") {
-          setResult(job.result || "");
+          // Every other job kind's result is a whole document (or several pages of markdown) -
+          // fine for History's download, too much for a small inline box meant for a sentence
+          // or two typed into the Text Field tab.
+          setResult(job.kind === "translate" ? (job.result || "") : "");
           lastCompletedJob = job;
               loadHistory();
           loadQueue();
