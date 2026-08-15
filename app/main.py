@@ -2726,14 +2726,19 @@ def visual_to_logical(text: str) -> str:
 
 def pdf_page_flip_matrix(page):
     """The Y-flip between MuPDF's rendered coordinates (down from the top) and the reading-space
-    coordinates the rest of the layout pipeline works in - counted from `page.rect`, not
-    `page.mediabox`. `page.transformation_matrix` ignores `/Rotate` and always flips by the
-    mediabox height, which is the wrong edge once rotation has swapped width and height; get_text,
-    get_drawings and get_image_rects already report positions in the rotated `page.rect` frame
-    (verified against Rotated_Pages.pdf), so only the flip itself needs the right height. Equal to
-    `page.transformation_matrix` whenever rotation is 0, since rect and mediabox then coincide.
+    coordinates the rest of the layout pipeline works in.
+
+    get_text, get_drawings and get_image_rects report positions in the page's own raw, un-rotated
+    content-stream space - matching `page.mediabox`, not `page.rect` - /Rotate is a display
+    instruction, not a transform on the coordinates those calls hand back (re-measured
+    15.08.2026: on a /Rotate 270 page, a footer's own raw y-origin landed near the *top* of
+    `page.mediabox.height`, not `page.rect.height`, and every extracted paragraph came out
+    shifted, several lines running to negative y). Equal to `page.transformation_matrix` always -
+    both are a plain flip by the raw mediabox height, rotation left for the pages/viewer to apply
+    on top of content that is built and merged in this same raw frame, see extract_pdf_layout and
+    render_pdf_layout_overlay.
     """
-    return pymupdf.Matrix(1, 0, 0, -1, 0, page.rect.height)
+    return pymupdf.Matrix(1, 0, 0, -1, 0, page.mediabox.height)
 
 
 def pdf_page_runs(page, rules: Optional[List[Dict[str, float]]] = None,
@@ -3457,10 +3462,11 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
     trust_text_layer = None
     for index in parse_page_range(page_range, document.page_count):
         page = document[index - 1]
-        # page.rect, not page.mediabox: it already swaps width/height for a 90/270 rotated page,
-        # matching the reading-space coordinates pdf_page_runs/obstacles/rules extract into (see
-        # pdf_page_flip_matrix).
-        box = page.rect
+        # page.mediabox, not page.rect: pdf_page_runs/obstacles/rules extract into the page's own
+        # raw, un-rotated frame (see pdf_page_flip_matrix), and the overlay is built and merged in
+        # that same frame - /Rotate is left on the merged page for the viewer to apply once, to
+        # both the kept original content and the overlay together.
+        box = page.mediabox
         # ponytail: AcroForm widgets keep their original text on a rotated page - widget.rect's
         # own rotation convention isn't verified against pdf_page_flip_matrix yet, and a rotated
         # scan with a text field is a narrow case. Lift this once that's checked.

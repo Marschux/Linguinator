@@ -106,6 +106,7 @@ class FakeMuPdfPage:
         self.spans = spans
         self.transformation_matrix = pymupdf.Matrix(1, 0, 0, -1, 0, height)
         self.rect = pymupdf.Rect(0, 0, 600.0, height)
+        self.mediabox = self.rect
 
     def get_text(self, kind):
         lines = [{"dir": span["dir"], "spans": [span]} for span in self.spans]
