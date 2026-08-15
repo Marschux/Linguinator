@@ -783,11 +783,21 @@ def clean_source_text(text: str) -> str:
     return LEADER_RUN.sub(" ", text).strip()
 
 
-def guard_hallucination(source: str, translated: str) -> str:
+def guard_hallucination(source: str, translated: str, target: str = "") -> str:
     """Keep the original wherever the model clearly invented rather than translated."""
     if len(translated) > HALLUCINATION_LENGTH_FACTOR * weighted_length(source) + HALLUCINATION_LENGTH_MARGIN:
         return source
     if HALLUCINATION_MARKUP.search(translated) and not HALLUCINATION_MARKUP.search(source):
+        return source
+    # A CJK character in a translation whose source carried none and whose target is not itself
+    # written in one is invented, not translated - MatterhornProtokoll's footer, a short line
+    # repeated on every page, came back "Competence Center 的 PDF/UA-1" on three of them, same
+    # single character in the same spot each time. Under the length guard and free of
+    # HALLUCINATION_MARKUP's wiki syntax, so nothing else catches it - and the one stray character
+    # is enough to make detect_pdf_script pick the CJK fallback font for the entire line, which
+    # does not cover Latin as well as the document's own font and garbled the rest of it too.
+    if (CJK_DENSE_CHARS.search(translated) and not CJK_DENSE_CHARS.search(source)
+            and not target.startswith(("zho", "jpn"))):
         return source
     return translated
 
@@ -817,9 +827,9 @@ def translate_one(text: str, source: str, target: str) -> str:
             decoded = tokenizer.batch_decode(generated, skip_special_tokens=True)[0]
             # Guarded per sentence, because that is the unit the model invents in: one made-up
             # sentence in the middle of a paragraph used to take the whole paragraph down with it.
-            results.append(guard_hallucination(part, decoded))
+            results.append(guard_hallucination(part, decoded, target))
         joined = normalize_translated_text(" ".join(part.strip() for part in results if part.strip()))
-        return guard_hallucination(text, joined)
+        return guard_hallucination(text, joined, target)
     finally:
         end_model_use()
 
@@ -867,12 +877,12 @@ def translate_batch(texts: List[str], source: str, target: str) -> List[str]:
 
     parts: Dict[int, List[str]] = {}
     for owner, source_text, text in zip(owners, sources, decoded):
-        text = guard_hallucination(source_text, text)
+        text = guard_hallucination(source_text, text, target)
         if text.strip():
             parts.setdefault(owner, []).append(text.strip())
     results = ["" for _ in texts]
     for owner, pieces in parts.items():
-        results[owner] = guard_hallucination(texts[owner], normalize_translated_text(" ".join(pieces)))
+        results[owner] = guard_hallucination(texts[owner], normalize_translated_text(" ".join(pieces)), target)
     return results
 
 
@@ -2733,6 +2743,29 @@ def pdf_page_rules(page) -> List[Dict[str, float]]:
     return rules
 
 
+def pdf_page_row_rules(page) -> List[Dict[str, float]]:
+    """The horizontal hairlines of the page: a table's own row rules, in PDF user space.
+
+    The mirror of pdf_page_rules, for the other axis. A table whose grid is drawn entirely in
+    hairlines rather than filled cells - MatterhornProtokoll's, where even the row dividers are
+    0.48pt-thick fills - leaves nothing in pdf_page_obstacles at all, that function drops
+    hairlines on purpose. Column width still had page_column_walls to fall back on for an empty
+    cell, but nothing stood in for a row's own lower edge: a cell whose translation grew past its
+    single original line, with no neighbouring paragraph directly below it in the same column, ran
+    straight through the drawn row rule into the row beneath - see enclosing_box_bottom, which is
+    where this is used.
+    """
+    inverse = ~page.transformation_matrix
+    rules = []
+    for drawing in page.get_drawings():
+        mapped = pymupdf.Rect(drawing["rect"]) * inverse
+        # Level and wide: a vertical hairline is a column rule (pdf_page_rules) or a letter's own
+        # stroke, and says nothing about where one row ends and the next begins.
+        if mapped.height < 2 and mapped.width >= PDF_RULE_MIN_HEIGHT:
+            rules.append({"y": (mapped.y0 + mapped.y1) / 2, "left": mapped.x0, "right": mapped.x1})
+    return rules
+
+
 def rule_between(left_start: float, right_start: float, y: float,
                  rules: Optional[List[Dict[str, float]]]) -> bool:
     """Whether a drawn vertical rule stands between where two runs on one baseline begin.
@@ -3136,6 +3169,7 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
         rotated = page.rotation % 360 != 0
         obstacles = [] if rotated else pdf_page_obstacles(page)
         rules = [] if rotated else pdf_page_rules(page)
+        row_rules = [] if rotated else pdf_page_row_rules(page)
         widgets = [] if rotated else pdf_page_widget_values(page)
         lines = ([] if rotated
                  else group_pdf_lines(
@@ -3158,6 +3192,7 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
             "paragraphs": group_pdf_paragraphs(lines),
             "obstacles": obstacles,
             "columns": page_column_walls(lines),
+            "row_rules": row_rules,
             "widgets": widgets,
         })
     if not any(page["paragraphs"] or page["widgets"] for page in pages):
@@ -3242,7 +3277,8 @@ def has_translatable_text(text: str) -> bool:
 
 
 def enclosing_box_bottom(paragraph: Dict[str, Any],
-                         obstacles: Optional[List[Dict[str, float]]] = None) -> Optional[float]:
+                         obstacles: Optional[List[Dict[str, float]]] = None,
+                         row_rules: Optional[List[Dict[str, float]]] = None) -> Optional[float]:
     """The lower edge of the tightest shape the paragraph sits *inside*, or None.
 
     A table cell or a hint box. Growing past that edge is how translated text ended up outside
@@ -3256,11 +3292,18 @@ def enclosing_box_bottom(paragraph: Dict[str, Any],
     bottoms = [obstacle["bottom"] for obstacle in obstacles or []
                if obstacle["x"] <= left and obstacle["right"] >= right
                and obstacle["bottom"] < bottom and obstacle["top"] >= bottom - 0.5 * size]
+    # A row rule drawn as a hairline never turns into an obstacle above - see pdf_page_row_rules -
+    # but it is exactly as much a wall for the cell sitting on it. Matched the same way a column's
+    # rule is in group_pdf_lines: the rule has to span the paragraph's own width, or it belongs to
+    # a narrower cell beside it, not this one.
+    bottoms += [rule["y"] for rule in row_rules or []
+               if rule["left"] <= left and rule["right"] >= right and rule["y"] < bottom]
     return max(bottoms) if bottoms else None
 
 
 def paragraph_floor(paragraph: Dict[str, Any], others: List[Dict[str, Any]],
-                    obstacles: Optional[List[Dict[str, float]]] = None) -> float:
+                    obstacles: Optional[List[Dict[str, float]]] = None,
+                    row_rules: Optional[List[Dict[str, float]]] = None) -> float:
     """How far down the paragraph may grow: the highest baseline below it in an overlapping
     column, or the bottom of the page when nothing stands in its way.
 
@@ -3302,7 +3345,7 @@ def paragraph_floor(paragraph: Dict[str, Any], others: List[Dict[str, Any]],
             # from reading as something the paragraph has to stay above.
             floor = obstacle["top"] if floor is None else max(floor, obstacle["top"])
     # A box the paragraph sits inside stops it at its own lower edge, see enclosing_box_bottom.
-    box = enclosing_box_bottom(paragraph, obstacles)
+    box = enclosing_box_bottom(paragraph, obstacles, row_rules)
     if box is not None:
         floor = box if floor is None else max(floor, box)
     return PDF_LAYOUT_EDGE_MARGIN if floor is None else max(floor, PDF_LAYOUT_EDGE_MARGIN)
@@ -3922,8 +3965,9 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
             if (index < len(translations) and translations[index].strip()
                     and has_translatable_text(paragraph["text"])):
                 obstacles = page.get("obstacles") or []
-                floor = paragraph_floor(paragraph, page["paragraphs"], obstacles)
-                box_floor = enclosing_box_bottom(paragraph, obstacles)
+                row_rules = page.get("row_rules") or []
+                floor = paragraph_floor(paragraph, page["paragraphs"], obstacles, row_rules)
+                box_floor = enclosing_box_bottom(paragraph, obstacles, row_rules)
                 width_limit = paragraph_line_limits(
                     paragraph, page["paragraphs"], right_margin, obstacles,
                     page.get("columns"))

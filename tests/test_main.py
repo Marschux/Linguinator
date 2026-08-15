@@ -2144,6 +2144,25 @@ class MainTests(unittest.TestCase):
         self.assertEqual(main.guard_hallucination("See [[Anchor]]", "Siehe [[Anker]]"), "Siehe [[Anker]]")
         self.assertEqual(main.guard_hallucination("a == b", "a == b"), "a == b")
 
+    def test_guard_hallucination_rejects_a_stray_cjk_character(self):
+        # MatterhornProtokoll's footer, a short line repeated on every page, came back "Competence
+        # Center 的 PDF/UA-1" - same single invented character in the same spot on three pages.
+        # Under the length guard and free of HALLUCINATION_MARKUP, nothing else catches it.
+        self.assertEqual(
+            main.guard_hallucination(
+                "PDF Association PDF/UA-Kompetenzzentrum",
+                "The PDF Association PDF/UA Competence Center 的 PDF/UA-1", "eng_Latn"),
+            "PDF Association PDF/UA-Kompetenzzentrum",
+        )
+        # A source that already carries the character is left alone - it belongs to the document.
+        self.assertEqual(main.guard_hallucination("見出し 的", "Heading 的", "eng_Latn"), "Heading 的")
+        # And translating INTO Chinese or Japanese is not a hallucination just because the source
+        # had none - that is the whole point of the translation.
+        self.assertEqual(
+            main.guard_hallucination("Chapter", "第一章", "zho_Hans"), "第一章")
+        self.assertEqual(
+            main.guard_hallucination("Chapter", "第一章", "jpn_Jpan"), "第一章")
+
     def test_guard_hallucination_allows_cjk_to_expand(self):
         # Han and kana carry a word in one or two characters, so a correct German translation is
         # several times its source in length. Measured pairs (fallback model, guard off, ja/zh -> de):
