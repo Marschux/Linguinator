@@ -669,16 +669,24 @@
       border-color: #22c55e;
     }
 
-    .queue-title {
+    .queue-title,
+    .history-title {
       color: var(--text);
       font-weight: 800;
       overflow-wrap: anywhere;
+      /* vertical-align: middle centers on the font's own metrics, which the badge's smaller size
+         and padding throw off against the bigger filename beside it - flex centers on the actual
+         rendered box instead. */
+      align-items: center;
+      display: flex;
+      min-width: 0;
     }
 
     .queue-type-badge {
       background: rgba(var(--tab-rgb, var(--overlay-rgb)), .18);
       border-radius: 4px;
       color: var(--tab-color, var(--muted));
+      flex: 0 0 auto;
       font-size: .7rem;
       font-weight: 700;
       margin-right: .9rem;

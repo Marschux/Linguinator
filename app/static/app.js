@@ -1786,6 +1786,8 @@ let languageData = null;
       row.dataset.fileType = fileTypeKey(item.source_extension);
       const main = document.createElement("div");
       main.className = "history-main";
+      const title = document.createElement("div");
+      title.className = "history-title";
       const link = document.createElement("a");
       // The name on its own line; everything that describes it - type, languages, size, when -
       // on the line below, so a long filename cannot push any of it out of sight.
@@ -1831,8 +1833,9 @@ let languageData = null;
       if (hasOriginal) format.value = "original";
       syncDownloadHref();
       format.addEventListener("change", syncDownloadHref);
-      appendTypeBadge(main, item.source_extension);
-      main.appendChild(link);
+      appendTypeBadge(title, item.source_extension);
+      title.appendChild(link);
+      main.appendChild(title);
       main.appendChild(meta);
       const actions = document.createElement("div");
       actions.className = "history-actions";
