@@ -4358,28 +4358,72 @@ def extract_docx_text_from_bytes(content: bytes) -> str:
     return result
 
 
+def docx_run_entries(paragraph, w_ns: str):
+    """Yield (node, signature) for each <w:t>/<w:tab>/<w:br>/<w:cr> in a paragraph, in document
+    order. signature is (bold, italic, is_hyperlink) for a text node, or "BREAK" for a tab/break.
+
+    Recurses into every descendant rather than assuming runs sit directly under <w:p> or
+    <w:hyperlink> - Word wraps runs in other elements too (tracked-changes' <w:ins>/<w:del>,
+    <w:smartTag>, ...), and a plain child-only walk would silently skip their text. A DOCX
+    hyperlink is a separate <w:hyperlink> element wrapping its run(s) rather than a flag on the
+    run's own properties (contrast PPTX's <a:hlinkClick> inside <a:rPr>), so is_hyperlink is
+    carried down from the moment a <w:hyperlink> ancestor is entered.
+    """
+    r_tag, rpr_tag = f"{{{w_ns}}}r", f"{{{w_ns}}}rPr"
+    hyperlink_tag = f"{{{w_ns}}}hyperlink"
+    text_tag = f"{{{w_ns}}}t"
+    space_tags = {f"{{{w_ns}}}tab", f"{{{w_ns}}}br", f"{{{w_ns}}}cr"}
+    bold_tag, italic_tag = f"{{{w_ns}}}b", f"{{{w_ns}}}i"
+
+    def walk(element, is_hyperlink, signature):
+        if element.tag == hyperlink_tag:
+            is_hyperlink = True
+        if element.tag == r_tag:
+            rpr = element.find(rpr_tag)
+            signature = (
+                rpr is not None and rpr.find(bold_tag) is not None,
+                rpr is not None and rpr.find(italic_tag) is not None,
+                is_hyperlink,
+            )
+        if element.tag == text_tag:
+            yield element, signature
+        elif element.tag in space_tags:
+            yield element, "BREAK"
+        for child in element:
+            yield from walk(child, is_hyperlink, signature)
+
+    yield from walk(paragraph, False, (False, False, False))
+
+
 def docx_paragraph_run_segments(paragraph, w_ns: str) -> List[List[Any]]:
-    """Group a paragraph's <w:t> nodes into segments split at tab/line-break marks.
+    """Group a paragraph's <w:t> nodes into segments split at tab/line-break marks and wherever
+    the run's bold/italic/hyperlink signature changes with real content on both sides.
 
     A tab-aligned "label<tab>value" line (a resume's "10.2022 bis heute<tab>Stellwerker bei
     ...") needs its two sides translated, and reinjected, independently - treating the whole
     line as one translatable block put the entire translation into the label's run and blanked
-    the value's, so the original tab stops jumped to nothing. <w:tab/>/<w:br/>/<w:cr/> carry no
-    text of their own and never being part of a <w:t> list, so it's their position among the
-    <w:t> nodes - not their own presence - that has to end a segment. A tab/break with no
-    accumulated content yet (leading padding, or two tabs in a row) does not start a new segment;
-    see the same "leave whitespace-only content where it is" reasoning in the export below.
+    the value's, so the original tab stops jumped to nothing. A run of different formatting
+    mid-sentence is the same problem without a tab: a hyperlink run translated as part of the
+    surrounding sentence and reinjected into the first run left the hyperlink with no visible,
+    clickable text at all. A formatting change on a run that is still empty (leading padding,
+    e.g.) does not start a new segment - the padding stays wherever the content after it lands.
     """
-    text_tag = f"{{{w_ns}}}t"
-    space_tags = {f"{{{w_ns}}}tab", f"{{{w_ns}}}br", f"{{{w_ns}}}cr"}
     segments: List[List[Any]] = []
     current: List[Any] = []
-    for node in paragraph.iter():
-        if node.tag == text_tag:
-            current.append(node)
-        elif node.tag in space_tags and any((n.text or "").strip() for n in current):
+    current_signature = None
+    for node, signature in docx_run_entries(paragraph, w_ns):
+        has_content = any((n.text or "").strip() for n in current)
+        if signature == "BREAK":
+            if has_content:
+                segments.append(current)
+                current = []
+                current_signature = None
+            continue
+        if has_content and signature != current_signature:
             segments.append(current)
             current = []
+        current.append(node)
+        current_signature = signature
     if any((n.text or "").strip() for n in current):
         segments.append(current)
     return segments
@@ -4603,19 +4647,66 @@ def extract_pptx_text_from_bytes(content: bytes) -> str:
     return result
 
 
-def pptx_paragraph_run_segments(paragraph, a_ns: str) -> List[List[Any]]:
-    """Same idea as docx_paragraph_run_segments: split at <a:br/>/<a:tab/> marks so a tab- or
-    line-break-separated line translates (and reinjects) each side independently."""
+def pptx_run_entries(paragraph, a_ns: str):
+    """Yield (node, signature) for each <a:t>/<a:br>/<a:tab> in a paragraph, in document order.
+
+    signature is (bold, italic, is_hyperlink) for a text node, or the string "BREAK" for a
+    tab/line-break. Recurses into every descendant rather than assuming runs sit directly under
+    <a:p> - a run's own <a:rPr b="1"/i="1"> carries its bold/italic, and a hyperlink is an
+    <a:hlinkClick> child of that same rPr (not a separate wrapping element the way DOCX does it),
+    so the signature only needs picking up once, on entering the run itself.
+    """
+    r_tag, rpr_tag = f"{{{a_ns}}}r", f"{{{a_ns}}}rPr"
     text_tag = f"{{{a_ns}}}t"
     space_tags = {f"{{{a_ns}}}br", f"{{{a_ns}}}tab"}
+    hlink_tag = f"{{{a_ns}}}hlinkClick"
+
+    def walk(element, signature):
+        if element.tag == r_tag:
+            rpr = element.find(rpr_tag)
+            signature = (
+                rpr is not None and rpr.get("b") == "1",
+                rpr is not None and rpr.get("i") == "1",
+                rpr is not None and rpr.find(hlink_tag) is not None,
+            )
+        if element.tag == text_tag:
+            yield element, signature
+        elif element.tag in space_tags:
+            yield element, "BREAK"
+        for child in element:
+            yield from walk(child, signature)
+
+    yield from walk(paragraph, (False, False, False))
+
+
+def pptx_paragraph_run_segments(paragraph, a_ns: str) -> List[List[Any]]:
+    """Group a paragraph's text nodes into segments split at tab/line-break marks and wherever
+    the run's bold/italic/hyperlink signature changes with real content on both sides.
+
+    A "label<tab>value" line needs its two sides translated independently (see
+    docx_paragraph_run_segments for the tab case) - a run of different formatting mid-sentence
+    is the same problem without a tab: translating "Weitere Informationen ... <link>unserer
+    Webseite</link> ... Internet." as one block put the whole sentence in the first run and
+    blanked the hyperlink's run, leaving a hyperlink with no visible, clickable text at all. A
+    formatting change on a run that is still empty (leading padding, e.g.) does not start a new
+    segment - same "leave whitespace-only content where it is" reasoning as the tab case.
+    """
     segments: List[List[Any]] = []
     current: List[Any] = []
-    for node in paragraph.iter():
-        if node.tag == text_tag:
-            current.append(node)
-        elif node.tag in space_tags and any((n.text or "").strip() for n in current):
+    current_signature = None
+    for node, signature in pptx_run_entries(paragraph, a_ns):
+        has_content = any((n.text or "").strip() for n in current)
+        if signature == "BREAK":
+            if has_content:
+                segments.append(current)
+                current = []
+                current_signature = None
+            continue
+        if has_content and signature != current_signature:
             segments.append(current)
             current = []
+        current.append(node)
+        current_signature = signature
     if any((n.text or "").strip() for n in current):
         segments.append(current)
     return segments
