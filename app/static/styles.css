@@ -517,10 +517,10 @@
     }
 
     .tab-panel { display: none; }
-    .tab-panel.active {
-      display: block;
-      min-height: 18.25rem;
-    }
+    .tab-panel.active { display: block; }
+    /* Only the Text Field tab's own textareas need a reserved height to avoid layout jumping
+       between tabs - the file/website/pdf panels are a handful of inputs and should hug them. */
+    #textareaPanel.active { min-height: 18.25rem; }
     .section.tab-panel { margin-top: 1rem; }
     .file-extra { display: none; }
     .file-extra.visible { display: block; }
