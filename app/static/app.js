@@ -1408,7 +1408,7 @@ let languageData = null;
         title.className = "queue-title";
         const extension = jobExtension(job);
         row.dataset.fileType = fileTypeKey(extension);
-        appendTypeBadge(title, extension);
+        appendTypeBadge(title, extension, job.label);
         const position = job.position ? "#" + job.position + " " : "";
         title.appendChild(document.createTextNode(
           position + (job.label || job.kind) + " - " + translateStatus(job.status)));
@@ -1775,16 +1775,22 @@ let languageData = null;
       return named ? named[1].toLowerCase() : "";
     }
 
-    function typeBadgeElement(extension) {
+    // The Text Field tab always submits under the fixed name "text.txt" (see /jobs/translate),
+    // the only thing that tells its badge apart from an actually uploaded .txt file.
+    function isTextFieldName(name) {
+      return String(name || "").toLowerCase() === "text.txt";
+    }
+
+    function typeBadgeElement(extension, name) {
       if (!extension) return null;
       const badge = document.createElement("span");
       badge.className = "queue-type-badge";
-      badge.textContent = String(extension).toUpperCase();
+      badge.textContent = extension === "txt" && isTextFieldName(name) ? "TEXT" : String(extension).toUpperCase();
       return badge;
     }
 
-    function appendTypeBadge(parent, extension) {
-      const badge = typeBadgeElement(extension);
+    function appendTypeBadge(parent, extension, name) {
+      const badge = typeBadgeElement(extension, name);
       if (badge) parent.appendChild(badge);
     }
 
@@ -1822,8 +1828,12 @@ let languageData = null;
       // without layout mode, byte-for-byte the same output (history_original_export falls back to
       // the same create_text_pdf) - offering it beside "Original Format (.pdf)" only invites
       // picking the redundant one.
+      // The Text Field tab's own output isn't a document with layout to preserve or reflow,
+      // so Markdown and Plain PDF (both meant for structured files) don't apply to it.
       const historyFormats = item.source_extension === "pdf"
         ? ["md", "txt", "doc"]
+        : isTextFieldName(item.original_name)
+        ? ["txt", "doc"]
         : ["md", "txt", "pdf", "doc"];
       if (hasOriginal) {
         historyFormats.push("original");
@@ -1854,7 +1864,7 @@ let languageData = null;
       if (hasOriginal) format.value = "original";
       syncDownloadHref();
       format.addEventListener("change", syncDownloadHref);
-      appendTypeBadge(title, item.source_extension);
+      appendTypeBadge(title, item.source_extension, item.original_name);
       title.appendChild(link);
       main.appendChild(title);
       main.appendChild(meta);
