@@ -4547,17 +4547,64 @@ ODT_TEXT_NS = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
 # "paragraph" in the rendered document. Querying only text:p silently dropped every heading
 # (measured: a two-heading test document lost both from the extracted text).
 ODT_PARAGRAPH_TAGS = {f"{{{ODT_TEXT_NS}}}p", f"{{{ODT_TEXT_NS}}}h"}
-# Neither has any .text of its own - a plain itertext() walk contributes nothing for them, gluing
-# the words on either side together the same way <w:tab/> did in DOCX.
+# Neither has any text of its own - a plain concatenation walk contributes nothing for them,
+# gluing the words on either side together the same way <w:tab/> did in DOCX.
 ODT_SPACING_TAGS = {f"{{{ODT_TEXT_NS}}}tab", f"{{{ODT_TEXT_NS}}}line-break"}
+ODT_LINK_TAG = f"{{{ODT_TEXT_NS}}}a"
 
 
-def odt_paragraph_text(element) -> str:
-    parts = [element.text or ""]
-    for child in element:
-        parts.append(" " if child.tag in ODT_SPACING_TAGS else odt_paragraph_text(child))
-        parts.append(child.tail or "")
-    return "".join(parts)
+def odt_run_entries(element):
+    """Yield (node, attr, signature) for each text-bearing position in a paragraph, in document
+    order. attr is "text" or "tail" (which attribute on node to read/overwrite), signature is
+    True/False for whether that position sits inside a <text:a> hyperlink, and a tab/line-break
+    yields (None, None, "BREAK").
+
+    ODF has no dedicated text node the way DOCX/PPTX's <w:t>/<a:t> do: text sits directly as the
+    .text/.tail of whichever element it follows (a plain run, a <text:span>, a <text:a> link).
+    Bold/italic are not tracked as a signature dimension here the way DOCX/PPTX's inline b/i
+    flags are - ODF spans reference a style by name instead of carrying the flag inline, and
+    resolving that against the stylesheet is a bigger job than this covers; only tabs, line
+    breaks and hyperlinks split a segment.
+    """
+    def walk(el, in_link):
+        in_link = in_link or el.tag == ODT_LINK_TAG
+        if el.text:
+            yield el, "text", in_link
+        for child in el:
+            if child.tag in ODT_SPACING_TAGS:
+                yield None, None, "BREAK"
+                continue
+            yield from walk(child, in_link)
+            if child.tail:
+                yield child, "tail", in_link
+
+    yield from walk(element, False)
+
+
+def odt_paragraph_run_segments(element) -> List[List[Tuple[Any, str]]]:
+    """Group a paragraph's text positions into segments split at tab/line-break marks and at a
+    <text:a> hyperlink's boundary, so each translates - and reinjects - independently. A segment
+    is a list of (element, "text"|"tail") pairs naming which attribute to overwrite, not a list
+    of child nodes - see odt_run_entries for why."""
+    segments: List[List[Tuple[Any, str]]] = []
+    current: List[Tuple[Any, str]] = []
+    current_signature = None
+    for node, attr, signature in odt_run_entries(element):
+        has_content = any((getattr(el, a) or "").strip() for el, a in current)
+        if signature == "BREAK":
+            if has_content:
+                segments.append(current)
+                current = []
+                current_signature = None
+            continue
+        if has_content and signature != current_signature:
+            segments.append(current)
+            current = []
+        current.append((node, attr))
+        current_signature = signature
+    if any((getattr(el, a) or "").strip() for el, a in current):
+        segments.append(current)
+    return segments
 
 
 def extract_odt_text_from_bytes(content: bytes) -> str:
@@ -4579,9 +4626,10 @@ def extract_odt_text_from_bytes(content: bytes) -> str:
     for element in root.iter():
         if element.tag not in ODT_PARAGRAPH_TAGS:
             continue
-        text = re.sub(r"\s+", " ", odt_paragraph_text(element)).strip()
-        if text:
-            paragraphs.append(text)
+        for segment in odt_paragraph_run_segments(element):
+            text = re.sub(r"\s+", " ", "".join(getattr(el, attr) or "" for el, attr in segment)).strip()
+            if text:
+                paragraphs.append(text)
 
     result = "\n\n".join(paragraphs).strip()
     if not result:
@@ -4607,12 +4655,26 @@ def export_odt_with_translated_text(content: bytes, translated_text: str) -> byt
     for element in root.iter():
         if element.tag not in ODT_PARAGRAPH_TAGS:
             continue
-        if not "".join(element.itertext()).strip():
-            continue
+        for segment in odt_paragraph_run_segments(element):
+            if block_index >= len(blocks):
+                break
+            # Same reasoning as export_docx_with_translated_text: target the first position that
+            # actually has a word in it, and restore the segment's own original leading/trailing
+            # whitespace, since a link- or break-triggered boundary otherwise has nothing left to
+            # keep the words on either side visually apart.
+            original = "".join(getattr(el, attr) or "" for el, attr in segment)
+            content_positions = [i for i, (el, attr) in enumerate(segment) if (getattr(el, attr) or "").strip()]
+            target_index = content_positions[0] if content_positions else 0
+            leading = original[:len(original) - len(original.lstrip())]
+            trailing = original[len(original.rstrip()):]
+            for index, (el, attr) in enumerate(segment):
+                if index == target_index:
+                    setattr(el, attr, leading + blocks[block_index] + trailing)
+                elif index in content_positions:
+                    setattr(el, attr, "")
+            block_index += 1
         if block_index >= len(blocks):
             break
-        replace_text_preserving_markup(element, blocks[block_index])
-        block_index += 1
     return write_zip_with_replacement(content, {"content.xml": ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)})
 
 
