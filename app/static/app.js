@@ -1407,7 +1407,7 @@ let languageData = null;
         const title = document.createElement("div");
         title.className = "queue-title";
         const extension = jobExtension(job);
-        row.dataset.fileType = fileTypeKey(extension);
+        row.dataset.fileType = fileTypeKey(extension, job.label);
         appendTypeBadge(title, extension, job.label);
         const position = job.position ? "#" + job.position + " " : "";
         title.appendChild(document.createTextNode(
@@ -1754,14 +1754,8 @@ let languageData = null;
     // the same kind of document looks the same wherever it shows up.
     const FILE_TYPE_GROUPS = {
       pdf: "pdf", docx: "office", odt: "office", pptx: "pptx",
-      csv: "csv", xlsx: "csv", md: "markdown", web: "website", txt: "textarea",
+      csv: "csv", xlsx: "csv", md: "markdown", web: "website",
     };
-
-    function fileTypeKey(extension) {
-      const key = String(extension || "").toLowerCase().replace(/^\./, "");
-      if (!key) return "textarea";
-      return FILE_TYPE_GROUPS[key] || "text";
-    }
 
     // A job carries no file extension of its own (create_job does not store one), so the badge
     // reads it off the filename the way the server does for history entries. No name to read and
@@ -1779,6 +1773,16 @@ let languageData = null;
     // the only thing that tells its badge apart from an actually uploaded .txt file.
     function isTextFieldName(name) {
       return String(name || "").toLowerCase() === "text.txt";
+    }
+
+    // "txt" isn't in FILE_TYPE_GROUPS: an uploaded .txt file falls through to the "text" group
+    // (the TXT File tab's own colour), while the Text Field tab's fixed "text.txt" name keeps
+    // the plainer "textarea" grouping instead.
+    function fileTypeKey(extension, name) {
+      const key = String(extension || "").toLowerCase().replace(/^\./, "");
+      if (!key) return "textarea";
+      if (key === "txt" && isTextFieldName(name)) return "textarea";
+      return FILE_TYPE_GROUPS[key] || "text";
     }
 
     function typeBadgeElement(extension, name) {
@@ -1804,7 +1808,7 @@ let languageData = null;
       const tick = document.createElement("span");
       tick.className = "history-tick";
       tick.textContent = "✓";
-      row.dataset.fileType = fileTypeKey(item.source_extension);
+      row.dataset.fileType = fileTypeKey(item.source_extension, item.original_name);
       const main = document.createElement("div");
       main.className = "history-main";
       const title = document.createElement("div");
