@@ -46,7 +46,6 @@ let languageData = null;
         websiteInvalid: "Enter a public page address starting with http:// or https://",
         textFile: "TXT File",
         markdownFile: "Markdown File",
-        loadFile: "Load File",
         translateInput: "Translate",
         clear: "Clear",
         pause: "Pause",
@@ -110,7 +109,6 @@ let languageData = null;
         tipFilePick: "Select the file to load.",
         tipSheetName: "Optional XLSX sheet name. Leave empty to use the first sheet.",
         tipCsvColumns: "Column names or letters to translate.",
-        tipLoadFile: "Load file content into the text field.",
         tipWebsiteUrl: "Address of the page to translate. Must be publicly reachable, without a login.",
         tipPdfPick: "Select the PDF to translate.",
         tipPageRange: "Optional page range, e.g. 1-3,5. Leave empty to translate all pages.",
@@ -156,7 +154,6 @@ let languageData = null;
         websiteInvalid: "Trage eine öffentlich erreichbare Adresse ein, die mit http:// oder https:// beginnt.",
         textFile: "TXT-Datei",
         markdownFile: "Markdown-Datei",
-        loadFile: "Datei laden",
         translateInput: "Übersetzen",
         clear: "Leeren",
         pause: "Pause",
@@ -220,7 +217,6 @@ let languageData = null;
         tipFilePick: "Zu ladende Datei wählen.",
         tipSheetName: "Optionaler XLSX-Blattname. Leer lassen für das erste Blatt.",
         tipCsvColumns: "Zu uebersetzende Spaltennamen oder -buchstaben.",
-        tipLoadFile: "Dateiinhalt ins Textfeld laden.",
         tipWebsiteUrl: "Adresse der Seite. Muss öffentlich erreichbar sein, ohne Login.",
         tipPdfPick: "Zu uebersetzende PDF wählen.",
         tipPageRange: "Optionaler Seitenbereich, z. B. 1-3,5. Leer übersetzt alle Seiten.",
@@ -266,7 +262,6 @@ let languageData = null;
         websiteInvalid: "Introduce una dirección pública que empiece por http:// o https://",
         textFile: "Archivo TXT",
         markdownFile: "Archivo Markdown",
-        loadFile: "Cargar archivo",
         translateInput: "Traducir",
         clear: "Limpiar",
         pause: "Pausar",
@@ -330,7 +325,6 @@ let languageData = null;
         tipFilePick: "Elegir el archivo a cargar.",
         tipSheetName: "Nombre de hoja XLSX, opcional. Vacío usa la primera hoja.",
         tipCsvColumns: "Nombres o letras de las columnas a traducir.",
-        tipLoadFile: "Cargar el contenido del archivo en el campo de texto.",
         tipWebsiteUrl: "Dirección de la página. Debe ser pública, sin inicio de sesión.",
         tipPdfPick: "Elegir el PDF a traducir.",
         tipPageRange: "Rango de páginas opcional, p. ej. 1-3,5. Vacío traduce todas.",
@@ -376,7 +370,6 @@ let languageData = null;
         websiteInvalid: "Saisis une adresse publique commençant par http:// ou https://",
         textFile: "Fichier TXT",
         markdownFile: "Fichier Markdown",
-        loadFile: "Charger le fichier",
         translateInput: "Traduire",
         clear: "Effacer",
         pause: "Pause",
@@ -440,7 +433,6 @@ let languageData = null;
         tipFilePick: "Choisir le fichier à charger.",
         tipSheetName: "Nom de feuille XLSX, optionnel. Vide pour la première feuille.",
         tipCsvColumns: "Noms ou lettres des colonnes à traduire.",
-        tipLoadFile: "Charger le contenu du fichier dans le champ texte.",
         tipWebsiteUrl: "Adresse de la page. Doit être publique, sans connexion.",
         tipPdfPick: "Choisir le PDF à traduire.",
         tipPageRange: "Plage de pages optionnelle, p. ex. 1-3,5. Vide traduit tout.",
@@ -637,7 +629,6 @@ let languageData = null;
       setText('label[for="text"]', "textField");
       setText('label[for="textResult"]', "textResult");
       setText('label[for="pdf"]', "pdf");
-      setText("#loadTextFile", "loadFile");
       setText("#translate", "translateInput");
       setText("#clearInput", "clear");
       setText("#pauseJob", "pause");
@@ -1107,11 +1098,14 @@ let languageData = null;
       clearStatusRow();
     }
 
+    // Reads the selected file's text into #text so Translate can send it - not a preview step,
+    // #text lives in a different tab-panel that stays hidden while a file tab is active, so
+    // running this on its own left the old "Load File" button doing nothing the user could see.
     async function loadTextFile() {
       const file = document.getElementById("textFile").files[0];
       if (!file) {
         setStatusRow("failed", t("selectFileFirst"));
-        return;
+        return false;
       }
       const lowerName = file.name.toLowerCase();
       const isCsv = lowerName.endsWith(".csv");
@@ -1134,7 +1128,7 @@ let languageData = null;
         const text = await response.text();
         if (!response.ok) {
           setStatusRow("failed", errorTextFromResponse(text));
-          return;
+          return false;
         }
         document.getElementById("text").value = text;
         currentSourceFormat = isCsv || isXlsx || isOfficeFile || isStructuredText ? "md" : currentSourceFormat;
@@ -1146,9 +1140,9 @@ let languageData = null;
       updateCounter();
       setResult("");
       clearStatusRow();
+      return true;
     }
 
-    document.getElementById("loadTextFile").addEventListener("click", loadTextFile);
     document.getElementById("clearInput").addEventListener("click", clearCurrentWork);
 
     function clearOwnJobOnNewFile() {
@@ -1534,11 +1528,12 @@ let languageData = null;
     }
 
     async function startTextJob() {
+      const sourceFile = currentInputTab !== "textarea" ? document.getElementById("textFile").files[0] : null;
+      if (sourceFile && !(await loadTextFile())) return;
       const source = document.getElementById("source").value;
       const target = document.getElementById("target").value;
       const length = document.getElementById("text").value.length;
       const chunks = maxChars > 0 ? Math.max(1, Math.ceil(length / maxChars)) : 1;
-      const sourceFile = currentInputTab !== "textarea" ? document.getElementById("textFile").files[0] : null;
       saveRecent("source", source);
       saveRecent("target", target);
       renderSelect("source", source);
