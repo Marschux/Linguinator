@@ -1830,10 +1830,15 @@ let languageData = null;
       // picking the redundant one.
       // The Text Field tab's own output isn't a document with layout to preserve or reflow,
       // so Markdown and Plain PDF (both meant for structured files) don't apply to it.
+      // An uploaded .txt file has no structure either, so Markdown means nothing for it, and
+      // Plain TXT is byte-for-byte the same content as "Original Format (.txt)" beside it.
+      const isTxtUpload = item.source_extension === "txt" && !isTextFieldName(item.original_name);
       const historyFormats = item.source_extension === "pdf"
         ? ["md", "txt", "doc"]
         : isTextFieldName(item.original_name)
         ? ["txt", "doc"]
+        : isTxtUpload && hasOriginal
+        ? ["pdf", "doc"]
         : ["md", "txt", "pdf", "doc"];
       if (hasOriginal) {
         historyFormats.push("original");
