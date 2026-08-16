@@ -331,7 +331,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.15.0", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.16.0", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -2111,13 +2111,42 @@ def split_markdown_blocks(markdown: str) -> List[Tuple[str, str]]:
 
     The marker has to stay out of the translation: given "## Zweiter Abschnitt" the model
     happily returns a sentence without the "##", and the heading arrives in the finished
-    document as ordinary body text. Same for list bullets and quote marks.
+    document as ordinary body text. Same for list bullets and quote marks. A fenced code block
+    is kept out entirely - the model has no notion of "this is code", so a variable name inside
+    the fence gets "translated" like prose (measured: `code_bleibt_unveraendert()` came back
+    `code_remains_unchanged()`) - by folding each of its lines whole into the marker slot, the
+    same way a marker line already skips translation for having no word in it.
     """
     blocks: List[Tuple[str, str]] = []
+    in_code_fence = False
     for line in markdown.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if line.strip().startswith("```") or line.strip().startswith("~~~"):
+            in_code_fence = not in_code_fence
+            blocks.append(("", line))
+            continue
+        if in_code_fence:
+            blocks.append((line, ""))
+            continue
         match = MARKDOWN_PREFIX.match(line)
         blocks.append((match.group(1), match.group(2)) if match else ("", line))
     return blocks
+
+
+def translate_markdown_document(markdown: str, source: str, target: str, job_id: str) -> Tuple[str, int]:
+    blocks = split_markdown_blocks(markdown)
+    # Only lines with something to translate are sent; the markers, blank lines and any
+    # wordless leftovers (fenced code included) keep their place so the document reassembles
+    # line for line.
+    translatable = [index for index, (_prefix, text) in enumerate(blocks) if has_translatable_text(text)]
+    chunks = [blocks[index][1] for index in translatable]
+    update_job(job_id, total=len(chunks), message=f"Translating 0 / {len(chunks)} chunks")
+    translated_chunks = translate_chunks_batched(chunks, source, target, job_id, PDF_LAYOUT_BATCH_SIZE)
+
+    lines = [prefix + text for prefix, text in blocks]
+    for index, translated in zip(translatable, translated_chunks):
+        prefix, _original = blocks[index]
+        lines[index] = prefix + re.sub(r"\s+", " ", translated).strip()
+    return "\n".join(lines).strip(), len(chunks)
 
 
 def parse_page_range(page_range: str, total_pages: int) -> List[int]:
@@ -5268,19 +5297,7 @@ def run_url_translate_job(job_id: str, url: str, source: str, target: str):
             source = detect_source_language(markdown)
             update_job(job_id, source=source)
 
-        blocks = split_markdown_blocks(markdown)
-        # Only lines with something to translate are sent; the markers, blank lines and any
-        # wordless leftovers keep their place so the document reassembles line for line.
-        translatable = [index for index, (_prefix, text) in enumerate(blocks) if has_translatable_text(text)]
-        chunks = [blocks[index][1] for index in translatable]
-        update_job(job_id, total=len(chunks), message=f"Translating 0 / {len(chunks)} chunks")
-        translated_chunks = translate_chunks_batched(chunks, source, target, job_id, PDF_LAYOUT_BATCH_SIZE)
-
-        lines = [prefix + text for prefix, text in blocks]
-        for index, translated in zip(translatable, translated_chunks):
-            prefix, _original = blocks[index]
-            lines[index] = prefix + re.sub(r"\s+", " ", translated).strip()
-        result = "\n".join(lines).strip()
+        result, chunk_count = translate_markdown_document(markdown, source, target, job_id)
 
         history_id = save_history(
             "translate-url",
@@ -5298,7 +5315,7 @@ def run_url_translate_job(job_id: str, url: str, source: str, target: str):
             job_id,
             status="complete",
             message="Complete",
-            current=len(chunks),
+            current=chunk_count,
             result=result,
             history_id=history_id,
             finished_at=time.time(),
@@ -5324,15 +5341,16 @@ def run_text_job(
         if source == AUTO_SOURCE:
             source = detect_source_language(text)
             update_job(job_id, source=source)
-        chunks = split_long_text(text, MAX_CHARS)
-        update_job(
-            job_id,
-            status="running",
-            message="Model loading or translation running",
-            total=len(chunks),
-            started_at=time.time(),
-        )
-        result = "\n\n".join(translate_chunks(chunks, source, target, job_id))
+        update_job(job_id, status="running", message="Model loading or translation running", started_at=time.time())
+        if source_extension == "md":
+            # A raw upload, not the reader-extracted markdown of the Website tab, but the same
+            # headings/lists/quotes need the same protection - see translate_markdown_document.
+            result, chunk_count = translate_markdown_document(text, source, target, job_id)
+        else:
+            chunks = split_long_text(text, MAX_CHARS)
+            update_job(job_id, total=len(chunks))
+            result = "\n\n".join(translate_chunks(chunks, source, target, job_id))
+            chunk_count = len(chunks)
         history_id = save_history(
             "text",
             result,
@@ -5347,7 +5365,7 @@ def run_text_job(
             job_id,
             status="complete",
             message="Complete",
-            current=len(chunks),
+            current=chunk_count,
             result=result,
             history_id=history_id,
             finished_at=time.time(),
