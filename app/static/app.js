@@ -1092,6 +1092,8 @@ let languageData = null;
     }
 
     function clearCurrentWork() {
+      clearTimeout(autoTranslateTimer);
+      autoTranslatePending = false;
       document.getElementById("text").value = "";
       document.getElementById("textFile").value = "";
       document.getElementById("pdf").value = "";
@@ -1239,6 +1241,41 @@ let languageData = null;
     }
 
     document.getElementById("text").addEventListener("input", updateCounter);
+
+    // Text Field tab: translate automatically after typing pauses, instead of waiting for a
+    // click on Translate. A job already running is left alone (JOB_WORKERS is usually 1) - its
+    // completion re-checks the box below and fires again if the text moved on meanwhile.
+    let autoTranslateTimer = null;
+    let autoTranslatePending = false;
+    const AUTO_TRANSLATE_DELAY_MS = 900;
+
+    function triggerAutoTranslate() {
+      if (currentInputTab !== "textarea") return;
+      const text = document.getElementById("text").value.trim();
+      if (!text) {
+        setResult("");
+        return;
+      }
+      if (activeJobId) {
+        autoTranslatePending = true;
+        return;
+      }
+      startCurrentJob();
+    }
+
+    function scheduleAutoTranslate() {
+      if (currentInputTab !== "textarea") return;
+      clearTimeout(autoTranslateTimer);
+      autoTranslateTimer = setTimeout(triggerAutoTranslate, AUTO_TRANSLATE_DELAY_MS);
+    }
+
+    function resumePendingAutoTranslate() {
+      if (!autoTranslatePending) return;
+      autoTranslatePending = false;
+      triggerAutoTranslate();
+    }
+
+    document.getElementById("text").addEventListener("input", scheduleAutoTranslate);
 
     let audioContext = null;
 
@@ -1497,6 +1534,7 @@ let languageData = null;
           if (token === pollToken) {
             setStatusRow("failed", errorTextFromResponse(text));
             activeJobId = null;
+            resumePendingAutoTranslate();
           }
           return;
         }
@@ -1513,12 +1551,14 @@ let languageData = null;
           loadQueue();
           playNotificationSound();
           activeJobId = null;
+          resumePendingAutoTranslate();
           return;
         }
         if (job.status === "cancelled") {
           setResult("");
           loadQueue();
           activeJobId = null;
+          resumePendingAutoTranslate();
           return;
         }
         if (job.status === "failed") {
@@ -1527,6 +1567,7 @@ let languageData = null;
           loadQueue();
           playNotificationSound();
           activeJobId = null;
+          resumePendingAutoTranslate();
           return;
         }
         await new Promise((resolve) => setTimeout(resolve, 1500));
@@ -1534,6 +1575,7 @@ let languageData = null;
     }
 
     async function startTextJob() {
+      clearTimeout(autoTranslateTimer);
       const source = document.getElementById("source").value;
       const target = document.getElementById("target").value;
       const length = document.getElementById("text").value.length;
