@@ -4337,7 +4337,14 @@ def extract_docx_text_from_bytes(content: bytes) -> str:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read DOCX: {exc}") from exc
 
-    namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    w_ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    namespaces = {"w": w_ns}
+    # A tab stop is its own <w:tab/> element, not part of any <w:t> - a right-aligned line like
+    # "10.2022 bis heute<tab>Stellwerker bei ..." otherwise joins with no separator at all
+    # (measured: "...bis heuteStellwerker bei..."), and the model has no word boundary to work
+    # with. <w:br/>/<w:cr/> are the same story for a manual line break inside one paragraph.
+    docx_text_tags = {f"{{{w_ns}}}t"}
+    docx_space_tags = {f"{{{w_ns}}}tab", f"{{{w_ns}}}br", f"{{{w_ns}}}cr"}
 
     paragraphs = []
     for part, document in documents.items():
@@ -4346,8 +4353,13 @@ def extract_docx_text_from_bytes(content: bytes) -> str:
         except ElementTree.ParseError as exc:
             raise HTTPException(status_code=400, detail=f"Could not parse DOCX XML {part}: {exc}") from exc
         for paragraph in root.findall(".//w:p", namespaces):
-            parts = [node.text or "" for node in paragraph.findall(".//w:t", namespaces)]
-            text = "".join(parts).strip()
+            parts = []
+            for node in paragraph.iter():
+                if node.tag in docx_text_tags:
+                    parts.append(node.text or "")
+                elif node.tag in docx_space_tags:
+                    parts.append(" ")
+            text = re.sub(r"\s+", " ", "".join(parts)).strip()
             if text:
                 paragraphs.append(text)
 
@@ -4465,6 +4477,17 @@ ODT_TEXT_NS = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
 # "paragraph" in the rendered document. Querying only text:p silently dropped every heading
 # (measured: a two-heading test document lost both from the extracted text).
 ODT_PARAGRAPH_TAGS = {f"{{{ODT_TEXT_NS}}}p", f"{{{ODT_TEXT_NS}}}h"}
+# Neither has any .text of its own - a plain itertext() walk contributes nothing for them, gluing
+# the words on either side together the same way <w:tab/> did in DOCX.
+ODT_SPACING_TAGS = {f"{{{ODT_TEXT_NS}}}tab", f"{{{ODT_TEXT_NS}}}line-break"}
+
+
+def odt_paragraph_text(element) -> str:
+    parts = [element.text or ""]
+    for child in element:
+        parts.append(" " if child.tag in ODT_SPACING_TAGS else odt_paragraph_text(child))
+        parts.append(child.tail or "")
+    return "".join(parts)
 
 
 def extract_odt_text_from_bytes(content: bytes) -> str:
@@ -4486,7 +4509,7 @@ def extract_odt_text_from_bytes(content: bytes) -> str:
     for element in root.iter():
         if element.tag not in ODT_PARAGRAPH_TAGS:
             continue
-        text = "".join(element.itertext()).strip()
+        text = re.sub(r"\s+", " ", odt_paragraph_text(element)).strip()
         if text:
             paragraphs.append(text)
 
@@ -4542,7 +4565,12 @@ def extract_pptx_text_from_bytes(content: bytes) -> str:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read PPTX: {exc}") from exc
 
-    namespaces = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+    a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    namespaces = {"a": a_ns}
+    # Same reasoning as extract_docx_text_from_bytes: <a:br/> and <a:tab/> are their own elements,
+    # not part of any <a:t>, and joining just the <a:t> text glues the words on either side.
+    pptx_text_tags = {f"{{{a_ns}}}t"}
+    pptx_space_tags = {f"{{{a_ns}}}br", f"{{{a_ns}}}tab"}
     paragraphs = []
     for part, document in documents.items():
         try:
@@ -4550,7 +4578,13 @@ def extract_pptx_text_from_bytes(content: bytes) -> str:
         except ElementTree.ParseError as exc:
             raise HTTPException(status_code=400, detail=f"Could not parse PPTX XML {part}: {exc}") from exc
         for paragraph in root.findall(".//a:p", namespaces):
-            text = "".join(node.text or "" for node in paragraph.findall(".//a:t", namespaces)).strip()
+            parts = []
+            for node in paragraph.iter():
+                if node.tag in pptx_text_tags:
+                    parts.append(node.text or "")
+                elif node.tag in pptx_space_tags:
+                    parts.append(" ")
+            text = re.sub(r"\s+", " ", "".join(parts)).strip()
             if text:
                 paragraphs.append(text)
 
