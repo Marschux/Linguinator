@@ -37,7 +37,7 @@
           <button class="tab" type="button" data-input-tab="textarea" title="Type text directly into the input field." data-title-key="tipTabTextarea"><span class="tab-label">Text Field</span></button>
           <button class="tab" type="button" data-input-tab="text" title="Load and translate a TXT file, and also HTML, SRT, VTT, JSON, YAML, PO or XLIFF." data-title-key="tipTabText"><span class="tab-label">TXT File</span></button>
           <button class="tab" type="button" data-input-tab="markdown" title="Load and translate a Markdown file." data-title-key="tipTabMarkdown"><span class="tab-label">Markdown</span></button>
-          <button class="tab" type="button" data-input-tab="website" disabled title="Translate a public web page from its address. Built, still to be tested." data-title-key="tipTabWebsite"><span class="tab-label">Website</span></button>
+          <button class="tab" type="button" data-input-tab="website" title="Translate a public web page from its address." data-title-key="tipTabWebsite"><span class="tab-label">Website</span></button>
           <button class="tab" type="button" data-input-tab="office" disabled title="Load and translate a DOCX or ODT file as text." data-title-key="tipTabOffice"><span class="tab-label">DOC File</span></button>
           <button class="tab" type="button" data-input-tab="pptx" disabled title="Load and translate a PowerPoint (PPTX) file as text." data-title-key="tipTabPptx"><span class="tab-label">PPTX File</span></button>
           <button class="tab" type="button" data-input-tab="csv" disabled title="Load and translate selected CSV or XLSX columns." data-title-key="tipTabCsv"><span class="tab-label">CSV File</span></button>
@@ -47,7 +47,7 @@
           <option value="textarea">Text Field</option>
           <option value="text">TXT File</option>
           <option value="markdown">Markdown</option>
-          <option value="website" disabled>Website</option>
+          <option value="website">Website</option>
           <option value="office" disabled>DOC File</option>
           <option value="pptx" disabled>PPTX File</option>
           <option value="csv" disabled>CSV File</option>
@@ -89,7 +89,7 @@
 
     <section id="websitePanel" class="section tab-panel workspace-section">
       <label id="websiteUrlLabel" for="websiteUrl">Website</label>
-      <input id="websiteUrl" type="url" placeholder="https://..." disabled
+      <input id="websiteUrl" type="url" placeholder="https://..."
              title="Address of the page to translate. Must be publicly reachable, without a login." data-title-key="tipWebsiteUrl">
       <p id="websiteHint" class="subtle"></p>
     </section>
