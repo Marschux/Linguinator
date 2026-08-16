@@ -1260,7 +1260,7 @@ let languageData = null;
         autoTranslatePending = true;
         return;
       }
-      startCurrentJob();
+      startCurrentJob(true);
     }
 
     function scheduleAutoTranslate() {
@@ -1574,7 +1574,7 @@ let languageData = null;
       }
     }
 
-    async function startTextJob() {
+    async function startTextJob(auto) {
       clearTimeout(autoTranslateTimer);
       const source = document.getElementById("source").value;
       const target = document.getElementById("target").value;
@@ -1609,7 +1609,8 @@ let languageData = null;
           body: JSON.stringify({
             q: document.getElementById("text").value,
             source: source,
-            target: target
+            target: target,
+            auto: Boolean(auto)
           })
         });
       }
@@ -1627,7 +1628,7 @@ let languageData = null;
       await pollJob(data.job_id, token);
     }
 
-    async function startCurrentJob() {
+    async function startCurrentJob(auto) {
       if (currentInputTab === "website") {
         await postUrlJob();
         return;
@@ -1636,10 +1637,10 @@ let languageData = null;
         await postPdfJob();
         return;
       }
-      await startTextJob();
+      await startTextJob(auto);
     }
 
-    document.getElementById("translate").addEventListener("click", startCurrentJob);
+    document.getElementById("translate").addEventListener("click", () => startCurrentJob(false));
 
     async function postUrlJob() {
       const url = document.getElementById("websiteUrl").value.trim();

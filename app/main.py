@@ -347,6 +347,9 @@ class TranslateRequest(BaseModel):
     q: Union[str, List[str]]
     source: str = DEFAULT_SOURCE
     target: str = DEFAULT_TARGET
+    # Set by the Text Field tab's auto-translate-while-typing pass, so every keystroke pause
+    # doesn't leave its own History entry - only an explicit click on Translate does.
+    auto: bool = False
 
 
 class PdfExportRequest(BaseModel):
@@ -1806,6 +1809,7 @@ def rebuild_runner_for_job(job: Dict[str, Any]) -> Optional[Tuple[Callable[..., 
             source_content,
             job.get("source_extension", ""),
             job.get("source_meta", {}),
+            job.get("save_to_history", True),
         )
     if job.get("kind") == "translate-url":
         # Nothing to restore from disk: the address is the whole input, and it is in the record.
@@ -5319,6 +5323,7 @@ def run_text_job(
     source_content: bytes = b"",
     source_extension: str = "",
     source_meta: Optional[Dict[str, str]] = None,
+    save_to_history: bool = True,
 ):
     try:
         if source == AUTO_SOURCE:
@@ -5342,7 +5347,7 @@ def run_text_job(
             source_content,
             source_extension,
             source_meta,
-        )
+        ) if save_to_history else ""
         update_job(
             job_id,
             status="complete",
@@ -5626,8 +5631,12 @@ def start_translate_job(request: TranslateRequest):
     ensure_queue_workers()
     text = "\n\n".join(str(item) for item in request.q) if isinstance(request.q, list) else str(request.q)
     job_id = create_job("translate", request.source, request.target, "Text.txt")
-    update_job(job_id, text=text, original_name="text.txt", source_extension="txt")
-    register_job_runner(job_id, run_text_job, (job_id, text, request.source, request.target, "text.txt", b"", "txt"))
+    save_to_history = not request.auto
+    update_job(job_id, text=text, original_name="text.txt", source_extension="txt", save_to_history=save_to_history)
+    register_job_runner(
+        job_id, run_text_job,
+        (job_id, text, request.source, request.target, "text.txt", b"", "txt", None, save_to_history),
+    )
     return {"job_id": job_id}
 
 
