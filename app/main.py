@@ -626,6 +626,33 @@ def token_count(tokenizer, text: str) -> int:
 # failure this whole function exists to avoid, just self-inflicted for every CJK document.
 SENTENCE_END = re.compile(r"[.!?…][\"'”’)\]]*\s+|[。！？][\"'”』】)\]]*")
 
+# A period after one of these does not end the sentence - measured: "zzgl. MwSt. – Versand ist
+# kostenlos." split at "MwSt." and came back "plus VAT. VAT – Shipping is free of charge.", the
+# abbreviation translated twice because the splitter treated its period as a sentence end. Lower-
+# case, without the trailing period. Not exhaustive or per-source-language (the source language of
+# a chunk isn't known here) - covers the common German/English/French/Spanish cases; an
+# abbreviation missing from this list just gets its ordinary period-then-space treatment back,
+# same as before this list existed.
+SENTENCE_END_ABBREVIATIONS = {
+    # German
+    "mwst", "zzgl", "inkl", "bzw", "ca", "etc", "usw", "z.b", "d.h", "u.a", "geb", "gest",
+    "str", "nr", "tel", "dr", "prof", "hr", "fr", "sog", "ggf", "u.u", "z.zt", "evtl",
+    # English
+    "mr", "mrs", "ms", "st", "vs", "e.g", "i.e", "no", "vol", "fig", "approx", "dept",
+    # French
+    "mme", "mlle", "cf", "env",
+    # Spanish
+    "sr", "sra", "srta", "ud", "uds",
+}
+SENTENCE_END_LAST_WORD = re.compile(r"(\S+)$")
+
+
+def ends_with_abbreviation(text_before_period: str) -> bool:
+    match = SENTENCE_END_LAST_WORD.search(text_before_period)
+    if not match:
+        return False
+    return match.group(1).strip(".,;:!?\"'()[]“”„»«").lower() in SENTENCE_END_ABBREVIATIONS
+
 
 def split_to_sentences(tokenizer, text: str) -> List[str]:
     """Split text into one sentence per model call.
@@ -640,10 +667,14 @@ def split_to_sentences(tokenizer, text: str) -> List[str]:
     if not text.strip():
         return [text]
     # Cut *after* each sentence-ending match rather than splitting on it, so closing quotes and
-    # brackets stay with their sentence instead of being eaten as part of the separator.
+    # brackets stay with their sentence instead of being eaten as part of the separator. A match
+    # right after a known abbreviation is skipped - the word before the period decides, not the
+    # match itself, since "MwSt." and "Freitag." use the exact same punctuation.
     sentences: List[str] = []
     start = 0
     for match in SENTENCE_END.finditer(text):
+        if ends_with_abbreviation(text[:match.start()]):
+            continue
         sentences.append(text[start:match.end()])
         start = match.end()
     if start < len(text):
