@@ -4516,11 +4516,19 @@ def export_docx_with_translated_text(content: bytes, translated_text: str) -> by
                 # ahead of its tab stops and dropped the font size the real content run carried.
                 # Target the first run that actually has a word in it instead, and leave
                 # whitespace-only runs untouched.
+                original = "".join(node.text or "" for node in text_nodes)
                 content_indices = [index for index, node in enumerate(text_nodes) if (node.text or "").strip()]
                 target_index = content_indices[0] if content_indices else 0
+                # A segment boundary triggered by a formatting change (not a tab) has no other
+                # separator - "wird dann " and "fett und wichtig" ran together as
+                # "wird dannfett und wichtig" once each segment's own translation was stripped for
+                # the model. Putting back whatever leading/trailing space the original run had
+                # keeps the same visual join the untranslated document had.
+                leading = original[:len(original) - len(original.lstrip())]
+                trailing = original[len(original.rstrip()):]
                 for node_index, node in enumerate(text_nodes):
                     if node_index == target_index:
-                        node.text = blocks[block_index]
+                        node.text = leading + blocks[block_index] + trailing
                     elif node_index in content_indices:
                         node.text = ""
                 block_index += 1
@@ -4738,12 +4746,17 @@ def export_pptx_with_translated_text(content: bytes, translated_text: str) -> by
                     break
                 # Same reasoning as export_docx_with_translated_text: skip whitespace-only runs
                 # when choosing where the translation goes, so alignment padding and the real
-                # content run's formatting both survive.
+                # content run's formatting both survive - and restore whatever leading/trailing
+                # space the original had, since a formatting-triggered segment boundary has no
+                # tab to keep the words visually apart on its own.
+                original = "".join(node.text or "" for node in text_nodes)
                 content_indices = [index for index, node in enumerate(text_nodes) if (node.text or "").strip()]
                 target_index = content_indices[0] if content_indices else 0
+                leading = original[:len(original) - len(original.lstrip())]
+                trailing = original[len(original.rstrip()):]
                 for node_index, node in enumerate(text_nodes):
                     if node_index == target_index:
-                        node.text = blocks[block_index]
+                        node.text = leading + blocks[block_index] + trailing
                     elif node_index in content_indices:
                         node.text = ""
                 block_index += 1
