@@ -5167,10 +5167,18 @@ def run_text_job(
             # translate_markdown_document.
             result, chunk_count = translate_markdown_document(text, source, target, job_id)
         else:
-            chunks = split_long_text(text, MAX_CHARS)
-            update_job(job_id, total=len(chunks))
-            result = "\n\n".join(translate_chunks(chunks, source, target, job_id))
-            chunk_count = len(chunks)
+            # One paragraph per translate_batch entry, not the whole text in one translate_one
+            # call: translate_one/translate_batch sentence-split internally and rejoin with a
+            # single space, so a multi-paragraph text translated as one blob comes back with every
+            # blank line gone. Harmless for the Text Field's own output, but every original-format
+            # export (export_docx_with_translated_text and its siblings) maps translated_blocks()
+            # back onto the source by splitting on blank lines - measured on a 6-paragraph DOCX:
+            # the whole translation landed in paragraph 1, the other five kept their German text
+            # verbatim, since translated_blocks() saw only one block once the breaks were gone.
+            paragraphs = [part for part in re.split(r"\n\s*\n", text.strip()) if part.strip()] or [text]
+            update_job(job_id, total=len(paragraphs), message=f"Translating 0 / {len(paragraphs)} paragraphs")
+            result = "\n\n".join(translate_chunks_batched(paragraphs, source, target, job_id, PDF_LAYOUT_BATCH_SIZE))
+            chunk_count = len(paragraphs)
         history_id = save_history(
             "text",
             result,
