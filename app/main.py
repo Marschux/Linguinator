@@ -4438,8 +4438,19 @@ def export_docx_with_translated_text(content: bytes, translated_text: str) -> by
                 continue
             if block_index >= len(blocks):
                 break
+            # A run that is only spaces or tabs is usually alignment padding before a tab stop
+            # (a right-aligned signature line splits into a run of leading spaces, tab runs
+            # outside <w:t> entirely, then the name in its own run) - dumping the translation into
+            # whichever run happens to sit at index 0 moved translated text ahead of its tab stops
+            # and dropped the font size the real content run carried. Target the first run that
+            # actually has a word in it instead, and leave whitespace-only runs untouched.
+            content_indices = [index for index, node in enumerate(text_nodes) if (node.text or "").strip()]
+            target_index = content_indices[0] if content_indices else 0
             for node_index, node in enumerate(text_nodes):
-                node.text = blocks[block_index] if node_index == 0 else ""
+                if node_index == target_index:
+                    node.text = blocks[block_index]
+                elif node_index in content_indices:
+                    node.text = ""
             block_index += 1
             changed = True
         if changed:
@@ -4574,8 +4585,16 @@ def export_pptx_with_translated_text(content: bytes, translated_text: str) -> by
                 continue
             if block_index >= len(blocks):
                 break
+            # Same reasoning as export_docx_with_translated_text: skip whitespace-only runs when
+            # choosing where the translation goes, so alignment padding and the real content
+            # run's formatting both survive.
+            content_indices = [index for index, node in enumerate(text_nodes) if (node.text or "").strip()]
+            target_index = content_indices[0] if content_indices else 0
             for node_index, node in enumerate(text_nodes):
-                node.text = blocks[block_index] if node_index == 0 else ""
+                if node_index == target_index:
+                    node.text = blocks[block_index]
+                elif node_index in content_indices:
+                    node.text = ""
             block_index += 1
             changed = True
         if changed:
