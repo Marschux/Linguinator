@@ -3708,12 +3708,15 @@ class MainTests(unittest.TestCase):
 
         text = main.extract_csv_text_from_bytes(content, "title, description")
 
-        self.assertEqual(text, "Hello | World\n\nSecond | Row")
+        # One block per cell, not one block per row joined with " | " - the model doesn't
+        # reliably keep a literal separator character through translation (measured: dropped
+        # entirely), which silently misaligned every column after the first.
+        self.assertEqual(text, "Hello\n\nWorld\n\nSecond\n\nRow")
 
     def test_csv_export_replaces_selected_columns(self):
         content = b"title,description,ignore\nHello,World,Nope\nSecond,Row,Skip\n"
 
-        updated = main.export_csv_with_translated_text(content, "title, description", "Hallo | Welt\n\nZweite | Zeile")
+        updated = main.export_csv_with_translated_text(content, "title, description", "Hallo\n\nWelt\n\nZweite\n\nZeile")
 
         self.assertIn(b"Hallo,Welt,Nope", updated)
         self.assertIn(b"Zweite,Zeile,Skip", updated)
@@ -3730,13 +3733,14 @@ class MainTests(unittest.TestCase):
     def test_xlsx_extraction_uses_selected_columns(self):
         text = main.extract_xlsx_text_from_bytes(minimal_xlsx(), "Sheet1", "title,description")
 
-        self.assertEqual(text, "Hello | World")
+        # One block per cell - see the CSV version of this test for why.
+        self.assertEqual(text, "Hello\n\nWorld")
 
     def test_xlsx_export_replaces_selected_columns(self):
-        updated = main.export_xlsx_with_translated_text(minimal_xlsx(), "Sheet1", "title,description", "Hallo | Welt")
+        updated = main.export_xlsx_with_translated_text(minimal_xlsx(), "Sheet1", "title,description", "Hallo\n\nWelt")
 
         text = main.extract_xlsx_text_from_bytes(updated, "Sheet1", "title,description")
-        self.assertEqual(text, "Hallo | Welt")
+        self.assertEqual(text, "Hallo\n\nWelt")
 
     def test_xlsx_export_preserves_formula_and_updates_cached_value(self):
         updated = main.export_xlsx_with_translated_text(xlsx_with_formula_cell(), "Sheet1", "description", "Welt")

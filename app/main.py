@@ -4873,10 +4873,10 @@ def extract_csv_text_from_bytes(content: bytes, columns: str) -> str:
 
     rows = []
     for row in reader:
-        values = [row.get(column, "").strip() for column in selected_columns]
-        line = " | ".join(value for value in values if value)
-        if line:
-            rows.append(line)
+        for column in selected_columns:
+            value = row.get(column, "").strip()
+            if value:
+                rows.append(value)
 
     result = "\n\n".join(rows).strip()
     if not result:
@@ -4901,10 +4901,16 @@ def export_csv_with_translated_text(content: bytes, columns: str, translated_tex
 
     rows = list(reader)
     blocks = translated_blocks(translated_text)
-    for row, block in zip(rows, blocks):
-        values = [value.strip() for value in block.split(" | ")]
-        for column, value in zip(selected_columns, values):
-            row[column] = value
+    # One block per non-empty cell, in the same row-major, column order extraction produced -
+    # not one block per row split back apart on " | ". Measured: the model dropped that
+    # separator entirely ("Blauer Stuhl | Ein bequemer..." came back "Blue chair A comfortable
+    # ..."), which silently misaligned every column after the first.
+    block_index = 0
+    for row in rows:
+        for column in selected_columns:
+            if row.get(column, "").strip() and block_index < len(blocks):
+                row[column] = blocks[block_index]
+                block_index += 1
 
     output = StringIO()
     writer = csv.DictWriter(output, fieldnames=reader.fieldnames, lineterminator="\n")
@@ -5043,10 +5049,10 @@ def extract_xlsx_text_from_bytes(content: bytes, sheet_name: str, columns: str) 
 
     output_rows = []
     for row in rows[1:]:
-        values = [row["values"].get(column, "").strip() for column in resolved_columns]
-        line = " | ".join(value for value in values if value)
-        if line:
-            output_rows.append(line)
+        for column in resolved_columns:
+            value = row["values"].get(column, "").strip()
+            if value:
+                output_rows.append(value)
 
     result = "\n\n".join(output_rows).strip()
     if not result:
@@ -5100,12 +5106,19 @@ def export_xlsx_with_translated_text(content: bytes, sheet_name: str, columns: s
     rows = xlsx_rows_with_values(root, shared, namespace)
     resolved_columns = resolve_xlsx_columns(rows, selected_columns)
     blocks = translated_blocks(translated_text)
-    for row_info, block in zip(rows[1:], blocks):
-        values = [value.strip() for value in block.split(" | ")]
-        for column, value in zip(resolved_columns, values):
+    # Same reasoning as export_csv_with_translated_text: one block per non-empty cell, not one
+    # block per row split back apart on a separator the model doesn't reliably keep.
+    block_index = 0
+    for row_info in rows[1:]:
+        for column in resolved_columns:
+            if not row_info["values"].get(column, "").strip():
+                continue
+            if block_index >= len(blocks):
+                break
             cell = row_info["cells"].get(column)
             if cell is not None:
-                xlsx_set_cell_text(cell, value)
+                xlsx_set_cell_text(cell, blocks[block_index])
+            block_index += 1
 
     return write_zip_with_replacement(content, {sheet_path: ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)})
 
