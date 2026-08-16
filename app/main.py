@@ -4449,6 +4449,13 @@ def export_docx_with_translated_text(content: bytes, translated_text: str) -> by
     return write_zip_with_replacement(content, replacements)
 
 
+ODT_TEXT_NS = "urn:oasis:names:tc:opendocument:xmlns:text:1.0"
+# text:p is a body paragraph, text:h a heading - two different tags for what looks like the same
+# "paragraph" in the rendered document. Querying only text:p silently dropped every heading
+# (measured: a two-heading test document lost both from the extracted text).
+ODT_PARAGRAPH_TAGS = {f"{{{ODT_TEXT_NS}}}p", f"{{{ODT_TEXT_NS}}}h"}
+
+
 def extract_odt_text_from_bytes(content: bytes) -> str:
     try:
         with zipfile.ZipFile(BytesIO(content)) as odt:
@@ -4459,15 +4466,16 @@ def extract_odt_text_from_bytes(content: bytes) -> str:
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read ODT: {exc}") from exc
 
-    namespaces = {"text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0"}
     try:
         root = ElementTree.fromstring(document)
     except ElementTree.ParseError as exc:
         raise HTTPException(status_code=400, detail=f"Could not parse ODT XML: {exc}") from exc
 
     paragraphs = []
-    for paragraph in root.findall(".//text:p", namespaces):
-        text = "".join(paragraph.itertext()).strip()
+    for element in root.iter():
+        if element.tag not in ODT_PARAGRAPH_TAGS:
+            continue
+        text = "".join(element.itertext()).strip()
         if text:
             paragraphs.append(text)
 
@@ -4490,15 +4498,16 @@ def export_odt_with_translated_text(content: bytes, translated_text: str) -> byt
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read ODT: {exc}") from exc
 
-    namespaces = {"text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0"}
     root = ElementTree.fromstring(document)
     block_index = 0
-    for paragraph in root.findall(".//text:p", namespaces):
-        if not "".join(paragraph.itertext()).strip():
+    for element in root.iter():
+        if element.tag not in ODT_PARAGRAPH_TAGS:
+            continue
+        if not "".join(element.itertext()).strip():
             continue
         if block_index >= len(blocks):
             break
-        replace_text_preserving_markup(paragraph, blocks[block_index])
+        replace_text_preserving_markup(element, blocks[block_index])
         block_index += 1
     return write_zip_with_replacement(content, {"content.xml": ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)})
 
