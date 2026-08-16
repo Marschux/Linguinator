@@ -2145,7 +2145,13 @@ def translate_markdown_document(markdown: str, source: str, target: str, job_id:
     lines = [prefix + text for prefix, text in blocks]
     for index, translated in zip(translatable, translated_chunks):
         prefix, _original = blocks[index]
-        lines[index] = prefix + re.sub(r"\s+", " ", translated).strip()
+        translated = re.sub(r"\s+", " ", translated).strip()
+        # The model treats "](url)" as ordinary prose and habitually adds the space it would put
+        # before any other parenthetical, splitting "[Link](url)" into "[Link] (url)" - not a
+        # link in any Markdown renderer. Only translated text passes through here, so this can't
+        # touch a source line that was never sent to the model.
+        translated = re.sub(r"\]\s+\(", "](", translated)
+        lines[index] = prefix + translated
     return "\n".join(lines).strip(), len(chunks)
 
 
