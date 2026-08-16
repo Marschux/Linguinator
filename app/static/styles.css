@@ -489,9 +489,8 @@
 
     .tab {
       align-items: center;
-      background: transparent;
-      border-color: rgba(var(--tab-rgb), .45);
-      box-shadow: 0 0 9px -3px rgba(var(--tab-rgb), .9);
+      background: rgba(var(--tab-rgb), .06);
+      border-color: rgba(var(--tab-rgb), .4);
       color: var(--muted);
       display: flex;
       min-height: 3.6rem;
