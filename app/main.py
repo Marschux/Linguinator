@@ -4339,12 +4339,6 @@ def extract_docx_text_from_bytes(content: bytes) -> str:
 
     w_ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
     namespaces = {"w": w_ns}
-    # A tab stop is its own <w:tab/> element, not part of any <w:t> - a right-aligned line like
-    # "10.2022 bis heute<tab>Stellwerker bei ..." otherwise joins with no separator at all
-    # (measured: "...bis heuteStellwerker bei..."), and the model has no word boundary to work
-    # with. <w:br/>/<w:cr/> are the same story for a manual line break inside one paragraph.
-    docx_text_tags = {f"{{{w_ns}}}t"}
-    docx_space_tags = {f"{{{w_ns}}}tab", f"{{{w_ns}}}br", f"{{{w_ns}}}cr"}
 
     paragraphs = []
     for part, document in documents.items():
@@ -4353,20 +4347,42 @@ def extract_docx_text_from_bytes(content: bytes) -> str:
         except ElementTree.ParseError as exc:
             raise HTTPException(status_code=400, detail=f"Could not parse DOCX XML {part}: {exc}") from exc
         for paragraph in root.findall(".//w:p", namespaces):
-            parts = []
-            for node in paragraph.iter():
-                if node.tag in docx_text_tags:
-                    parts.append(node.text or "")
-                elif node.tag in docx_space_tags:
-                    parts.append(" ")
-            text = re.sub(r"\s+", " ", "".join(parts)).strip()
-            if text:
-                paragraphs.append(text)
+            for segment in docx_paragraph_run_segments(paragraph, w_ns):
+                text = re.sub(r"\s+", " ", "".join(node.text or "" for node in segment)).strip()
+                if text:
+                    paragraphs.append(text)
 
     result = "\n\n".join(paragraphs).strip()
     if not result:
         raise HTTPException(status_code=422, detail="No text found in DOCX")
     return result
+
+
+def docx_paragraph_run_segments(paragraph, w_ns: str) -> List[List[Any]]:
+    """Group a paragraph's <w:t> nodes into segments split at tab/line-break marks.
+
+    A tab-aligned "label<tab>value" line (a resume's "10.2022 bis heute<tab>Stellwerker bei
+    ...") needs its two sides translated, and reinjected, independently - treating the whole
+    line as one translatable block put the entire translation into the label's run and blanked
+    the value's, so the original tab stops jumped to nothing. <w:tab/>/<w:br/>/<w:cr/> carry no
+    text of their own and never being part of a <w:t> list, so it's their position among the
+    <w:t> nodes - not their own presence - that has to end a segment. A tab/break with no
+    accumulated content yet (leading padding, or two tabs in a row) does not start a new segment;
+    see the same "leave whitespace-only content where it is" reasoning in the export below.
+    """
+    text_tag = f"{{{w_ns}}}t"
+    space_tags = {f"{{{w_ns}}}tab", f"{{{w_ns}}}br", f"{{{w_ns}}}cr"}
+    segments: List[List[Any]] = []
+    current: List[Any] = []
+    for node in paragraph.iter():
+        if node.tag == text_tag:
+            current.append(node)
+        elif node.tag in space_tags and any((n.text or "").strip() for n in current):
+            segments.append(current)
+            current = []
+    if any((n.text or "").strip() for n in current):
+        segments.append(current)
+    return segments
 
 
 def translated_blocks(text: str) -> List[str]:
@@ -4438,33 +4454,35 @@ def export_docx_with_translated_text(content: bytes, translated_text: str) -> by
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read DOCX: {exc}") from exc
 
-    namespaces = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+    w_ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    namespaces = {"w": w_ns}
     replacements = {}
     block_index = 0
     for part, document in documents.items():
         root = ElementTree.fromstring(document)
         changed = False
         for paragraph in root.findall(".//w:p", namespaces):
-            text_nodes = paragraph.findall(".//w:t", namespaces)
-            if not "".join(node.text or "" for node in text_nodes).strip():
-                continue
+            for text_nodes in docx_paragraph_run_segments(paragraph, w_ns):
+                if block_index >= len(blocks):
+                    break
+                # A run that is only spaces or tabs is usually alignment padding before a tab
+                # stop (a right-aligned signature line splits into a run of leading spaces, tab
+                # runs outside <w:t> entirely, then the name in its own run) - dumping the
+                # translation into whichever run happens to sit at index 0 moved translated text
+                # ahead of its tab stops and dropped the font size the real content run carried.
+                # Target the first run that actually has a word in it instead, and leave
+                # whitespace-only runs untouched.
+                content_indices = [index for index, node in enumerate(text_nodes) if (node.text or "").strip()]
+                target_index = content_indices[0] if content_indices else 0
+                for node_index, node in enumerate(text_nodes):
+                    if node_index == target_index:
+                        node.text = blocks[block_index]
+                    elif node_index in content_indices:
+                        node.text = ""
+                block_index += 1
+                changed = True
             if block_index >= len(blocks):
                 break
-            # A run that is only spaces or tabs is usually alignment padding before a tab stop
-            # (a right-aligned signature line splits into a run of leading spaces, tab runs
-            # outside <w:t> entirely, then the name in its own run) - dumping the translation into
-            # whichever run happens to sit at index 0 moved translated text ahead of its tab stops
-            # and dropped the font size the real content run carried. Target the first run that
-            # actually has a word in it instead, and leave whitespace-only runs untouched.
-            content_indices = [index for index, node in enumerate(text_nodes) if (node.text or "").strip()]
-            target_index = content_indices[0] if content_indices else 0
-            for node_index, node in enumerate(text_nodes):
-                if node_index == target_index:
-                    node.text = blocks[block_index]
-                elif node_index in content_indices:
-                    node.text = ""
-            block_index += 1
-            changed = True
         if changed:
             replacements[part] = ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
         if block_index >= len(blocks):
