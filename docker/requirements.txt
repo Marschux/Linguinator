@@ -8,6 +8,4 @@ pymupdf==1.28.2
 # Not imported directly any more, but pymupdf's subset_fonts() needs it.
 fonttools==4.63.0
 python-multipart==0.0.20
-httpx==0.28.1
 tzdata==2025.2
-trafilatura==2.2.0

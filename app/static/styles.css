@@ -482,8 +482,6 @@
     [data-file-type="pptx"] { --tab-color: #fb923c; --tab-rgb: 251, 146, 60; }
     .tab[data-input-tab="csv"],
     [data-file-type="csv"] { --tab-color: #4ade80; --tab-rgb: 74, 222, 128; }
-    .tab[data-input-tab="website"],
-    [data-file-type="website"] { --tab-color: #facc15; --tab-rgb: 250, 204, 21; }
     .tab[data-input-tab="pdf"],
     [data-file-type="pdf"] { --tab-color: #f87171; --tab-rgb: 248, 113, 113; }
 
@@ -519,7 +517,7 @@
     .tab-panel { display: none; }
     .tab-panel.active { display: block; }
     /* Only the Text Field tab's own textareas need a reserved height to avoid layout jumping
-       between tabs - the file/website/pdf panels are a handful of inputs and should hug them. */
+       between tabs - the file/pdf panels are a handful of inputs and should hug them. */
     #textareaPanel.active { min-height: 18.25rem; }
     .section.tab-panel { margin-top: 1rem; }
     .file-extra { display: none; }

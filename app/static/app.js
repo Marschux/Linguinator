@@ -40,10 +40,6 @@ let languageData = null;
         pptxFile: "PPTX File",
         csvFile: "CSV File",
         pdf: "PDF",
-        website: "Website",
-        websiteHint: "Reads the article out of a public page - no login, no paywall - and translates it. Download as PDF, Word or text.",
-        fetchingPage: "Fetching page...",
-        websiteInvalid: "Enter a public page address starting with http:// or https://",
         textFile: "TXT File",
         markdownFile: "Markdown File",
         translateInput: "Translate",
@@ -95,7 +91,6 @@ let languageData = null;
         tipTabTextarea: "Type text directly into the input field.",
         tipTabText: "Load and translate a TXT file, and also HTML, SRT, VTT, JSON, YAML, PO or XLIFF.",
         tipTabMarkdown: "Load and translate a Markdown file.",
-        tipTabWebsite: "Translate a public web page from its address.",
         tipTabOffice: "Load and translate a DOCX or ODT file as text.",
         tipTabPptx: "Load and translate a PowerPoint (PPTX) file as text.",
         tipTabCsv: "Load and translate selected CSV or XLSX columns.",
@@ -109,7 +104,6 @@ let languageData = null;
         tipFilePick: "Select the file to load.",
         tipSheetName: "Optional XLSX sheet name. Leave empty to use the first sheet.",
         tipCsvColumns: "Column names or letters to translate.",
-        tipWebsiteUrl: "Address of the page to translate. Must be publicly reachable, without a login.",
         tipPdfPick: "Select the PDF to translate.",
         tipPageRange: "Optional page range, e.g. 1-3,5. Leave empty to translate all pages.",
         tipTranslate: "Start a new translation for the current input.",
@@ -148,10 +142,6 @@ let languageData = null;
         pptxFile: "PPTX-Datei",
         csvFile: "CSV-Datei",
         pdf: "PDF",
-        website: "Webseite",
-        websiteHint: "Holt den Artikel aus einer öffentlich erreichbaren Seite - ohne Login, ohne Paywall - und übersetzt ihn. Download als PDF, Word oder Text.",
-        fetchingPage: "Hole Seite...",
-        websiteInvalid: "Trage eine öffentlich erreichbare Adresse ein, die mit http:// oder https:// beginnt.",
         textFile: "TXT-Datei",
         markdownFile: "Markdown-Datei",
         translateInput: "Übersetzen",
@@ -203,7 +193,6 @@ let languageData = null;
         tipTabTextarea: "Text direkt ins Eingabefeld tippen.",
         tipTabText: "TXT-Datei laden und übersetzen, ebenso HTML, SRT, VTT, JSON, YAML, PO oder XLIFF.",
         tipTabMarkdown: "Markdown-Datei laden und übersetzen.",
-        tipTabWebsite: "Öffentlich erreichbare Webseite über ihre Adresse übersetzen.",
         tipTabOffice: "DOCX- oder ODT-Datei als Text laden und übersetzen.",
         tipTabPptx: "PowerPoint-Datei (PPTX) als Text laden und übersetzen.",
         tipTabCsv: "Ausgewählte CSV- oder XLSX-Spalten laden und übersetzen.",
@@ -217,7 +206,6 @@ let languageData = null;
         tipFilePick: "Zu ladende Datei wählen.",
         tipSheetName: "Optionaler XLSX-Blattname. Leer lassen für das erste Blatt.",
         tipCsvColumns: "Zu uebersetzende Spaltennamen oder -buchstaben.",
-        tipWebsiteUrl: "Adresse der Seite. Muss öffentlich erreichbar sein, ohne Login.",
         tipPdfPick: "Zu uebersetzende PDF wählen.",
         tipPageRange: "Optionaler Seitenbereich, z. B. 1-3,5. Leer übersetzt alle Seiten.",
         tipTranslate: "Neue Übersetzung für die aktuelle Eingabe starten.",
@@ -256,10 +244,6 @@ let languageData = null;
         pptxFile: "Archivo PPTX",
         csvFile: "Archivo CSV",
         pdf: "PDF",
-        website: "Sitio web",
-        websiteHint: "Extrae el artículo de una página pública - sin inicio de sesión ni muro de pago - y lo traduce. Descarga en PDF, Word o texto.",
-        fetchingPage: "Obteniendo página...",
-        websiteInvalid: "Introduce una dirección pública que empiece por http:// o https://",
         textFile: "Archivo TXT",
         markdownFile: "Archivo Markdown",
         translateInput: "Traducir",
@@ -311,7 +295,6 @@ let languageData = null;
         tipTabTextarea: "Escribir texto directamente en el campo.",
         tipTabText: "Cargar y traducir un archivo TXT, también HTML, SRT, VTT, JSON, YAML, PO o XLIFF.",
         tipTabMarkdown: "Cargar y traducir un archivo Markdown.",
-        tipTabWebsite: "Traducir una página web pública desde su dirección.",
         tipTabOffice: "Cargar y traducir un archivo DOCX u ODT como texto.",
         tipTabPptx: "Cargar y traducir un archivo PowerPoint (PPTX) como texto.",
         tipTabCsv: "Cargar y traducir columnas CSV o XLSX seleccionadas.",
@@ -325,7 +308,6 @@ let languageData = null;
         tipFilePick: "Elegir el archivo a cargar.",
         tipSheetName: "Nombre de hoja XLSX, opcional. Vacío usa la primera hoja.",
         tipCsvColumns: "Nombres o letras de las columnas a traducir.",
-        tipWebsiteUrl: "Dirección de la página. Debe ser pública, sin inicio de sesión.",
         tipPdfPick: "Elegir el PDF a traducir.",
         tipPageRange: "Rango de páginas opcional, p. ej. 1-3,5. Vacío traduce todas.",
         tipTranslate: "Iniciar una traducción para la entrada actual.",
@@ -364,10 +346,6 @@ let languageData = null;
         pptxFile: "Fichier PPTX",
         csvFile: "Fichier CSV",
         pdf: "PDF",
-        website: "Site web",
-        websiteHint: "Récupère l'article d'une page publique - sans connexion ni paywall - et le traduit. Téléchargement en PDF, Word ou texte.",
-        fetchingPage: "Récupération de la page...",
-        websiteInvalid: "Saisis une adresse publique commençant par http:// ou https://",
         textFile: "Fichier TXT",
         markdownFile: "Fichier Markdown",
         translateInput: "Traduire",
@@ -419,7 +397,6 @@ let languageData = null;
         tipTabTextarea: "Saisir le texte directement dans le champ.",
         tipTabText: "Charger et traduire un fichier TXT, ainsi que HTML, SRT, VTT, JSON, YAML, PO ou XLIFF.",
         tipTabMarkdown: "Charger et traduire un fichier Markdown.",
-        tipTabWebsite: "Traduire une page web publique à partir de son adresse.",
         tipTabOffice: "Charger et traduire un fichier DOCX ou ODT comme texte.",
         tipTabPptx: "Charger et traduire un fichier PowerPoint (PPTX) comme texte.",
         tipTabCsv: "Charger et traduire des colonnes CSV ou XLSX choisies.",
@@ -433,7 +410,6 @@ let languageData = null;
         tipFilePick: "Choisir le fichier à charger.",
         tipSheetName: "Nom de feuille XLSX, optionnel. Vide pour la première feuille.",
         tipCsvColumns: "Noms ou lettres des colonnes à traduire.",
-        tipWebsiteUrl: "Adresse de la page. Doit être publique, sans connexion.",
         tipPdfPick: "Choisir le PDF à traduire.",
         tipPageRange: "Plage de pages optionnelle, p. ex. 1-3,5. Vide traduit tout.",
         tipTranslate: "Lancer une traduction pour l'entrée actuelle.",
@@ -622,10 +598,7 @@ let languageData = null;
       setText('[data-input-tab="office"] .tab-label', "officeDoc");
       setText('[data-input-tab="pptx"] .tab-label', "pptxFile");
       setText('[data-input-tab="csv"] .tab-label', "csvFile");
-      setText('[data-input-tab="website"] .tab-label', "website");
       setText('[data-input-tab="pdf"] .tab-label', "pdf");
-      setText("#websiteUrlLabel", "website");
-      setText("#websiteHint", "websiteHint");
       setText('label[for="text"]', "textField");
       setText('label[for="textResult"]', "textResult");
       setText('label[for="pdf"]', "pdf");
@@ -793,12 +766,6 @@ let languageData = null;
         panel: "filePanel",
         accept: ".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         labelKey: "csvFile",
-        sourceFormat: "md"
-      },
-      website: {
-        panel: "websitePanel",
-        accept: "",
-        labelKey: "website",
         sourceFormat: "md"
       },
       pdf: {
@@ -1581,10 +1548,6 @@ let languageData = null;
     }
 
     async function startCurrentJob() {
-      if (currentInputTab === "website") {
-        await postUrlJob();
-        return;
-      }
       if (currentInputTab === "pdf") {
         await postPdfJob();
         return;
@@ -1593,41 +1556,6 @@ let languageData = null;
     }
 
     document.getElementById("translate").addEventListener("click", startCurrentJob);
-
-    async function postUrlJob() {
-      const url = document.getElementById("websiteUrl").value.trim();
-      if (!/^https?:\/\/\S+$/i.test(url)) {
-        setStatusRow("failed", t("websiteInvalid"));
-        return;
-      }
-      const source = document.getElementById("source").value;
-      const target = document.getElementById("target").value;
-      saveRecent("source", source);
-      saveRecent("target", target);
-      renderSelect("source", source);
-      renderSelect("target", target);
-      currentSourceFormat = "md";
-      const form = new FormData();
-      form.append("url", url);
-      form.append("source", source);
-      form.append("target", target);
-      setResult("");
-      lastCompletedJob = null;
-      setStatusRow("extracting", t("fetchingPage"));
-      const response = await fetch("jobs/translate-url", {method: "POST", body: form});
-      if (!response.ok) {
-        const text = await response.text();
-        setStatusRow("failed", errorTextFromResponse(text));
-        setResult("");
-        return;
-      }
-      const data = await response.json();
-      ensureAudioContext();
-      activeJobId = data.job_id;
-      const token = ++pollToken;
-      loadQueue();
-      await pollJob(data.job_id, token);
-    }
 
     async function postPdfJob() {
       const file = document.getElementById("pdf").files[0];
@@ -1749,16 +1677,13 @@ let languageData = null;
     // the same kind of document looks the same wherever it shows up.
     const FILE_TYPE_GROUPS = {
       pdf: "pdf", docx: "office", odt: "office", pptx: "pptx",
-      csv: "csv", xlsx: "csv", md: "markdown", web: "website",
+      csv: "csv", xlsx: "csv", md: "markdown",
     };
 
     // A job carries no file extension of its own (create_job does not store one), so the badge
     // reads it off the filename the way the server does for history entries. No name to read and
-    // no PDF or web job behind it means no badge at all - "TXT" on a PDF was worse than nothing.
+    // no PDF job behind it means no badge at all - "TXT" on a PDF was worse than nothing.
     function jobExtension(job) {
-      // The kind decides first: a web job is labelled with its host, and "example.com" would
-      // otherwise be read as a file named .com.
-      if (job.kind === "translate-url") return "web";
       if (String(job.kind || "").startsWith("translate-pdf")) return "pdf";
       const named = /\.([A-Za-z0-9]{1,12})$/.exec(job.label || "");
       return named ? named[1].toLowerCase() : "";

@@ -1,12 +1,10 @@
 # ... existing imports and setup code ...
 import base64
 import gc
-import ipaddress
 import math
 import os
 import re
 import secrets
-import socket
 import csv
 import json
 import shutil
@@ -25,10 +23,8 @@ from html.parser import HTMLParser
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
-from urllib.parse import urljoin, urlparse
 from xml.etree import ElementTree
 
-import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -331,7 +327,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.17.0", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.17.1", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -1838,14 +1834,6 @@ def rebuild_runner_for_job(job: Dict[str, Any]) -> Optional[Tuple[Callable[..., 
             job.get("source_extension", ""),
             job.get("source_meta", {}),
         )
-    if job.get("kind") == "translate-url":
-        # Nothing to restore from disk: the address is the whole input, and it is in the record.
-        return run_url_translate_job, (
-            job_id,
-            job.get("url", ""),
-            job.get("source", DEFAULT_SOURCE),
-            job.get("target", DEFAULT_TARGET),
-        )
     if job.get("kind") == "translate-pdf":
         payload_path = job.get("payload_path")
         if not payload_path or not Path(payload_path).exists():
@@ -1968,170 +1956,6 @@ def translate_chunks_batched(chunks: List[str], source: str, target: str, job_id
         translated.extend(translate_batch(group, source, target))
         update_job(job_id, current=start + len(group))
     return translated
-
-
-# The web scraper reaches out to the open internet, which is the one place this otherwise local
-# tool talks to a stranger. Constants rather than env vars on purpose: nothing here is worth
-# tuning per install, and the address rules are a safety property, not a preference.
-SCRAPER_TIMEOUT_SECONDS = 15.0
-SCRAPER_MAX_REDIRECTS = 5
-# Identifies the tool and points at the project, which is what sites like Wikipedia ask of any
-# non-browser client; a bare product name gets a 403 there.
-SCRAPER_USER_AGENT = (
-    "Mozilla/5.0 (compatible; Linguinator/1.0; +https://gitlab.com/uncoded-bytes/Linguinator) "
-    "user-initiated single-page fetch"
-)
-# Shorter than this is not an article: a page that redirects with JavaScript leaves a stub that
-# extracts to a couple of dozen characters, and shipping that as a "translation" is worse than
-# saying it did not work.
-SCRAPER_MIN_CHARS = 200
-SCRAPER_HTML_TYPES = ("text/html", "application/xhtml+xml")
-# Link-local covers 169.254.0.0/16 and with it the cloud metadata address 169.254.169.254.
-SCRAPER_BLOCKED_HOST_SUFFIXES = (".local", ".internal", ".localhost")
-
-
-def ensure_public_url(url: str) -> str:
-    """Reject anything that is not a public http(s) address, and say why.
-
-    Whoever can reach the UI can make the container fetch an address of their choosing. Without
-    this, that means everything the container can reach: the router's web interface, a sibling
-    container on proxy-net, the app's own /health - and the answer comes back as a neat PDF.
-    Every address the hostname resolves to is checked, not just the first, since a name can
-    return both a public and a private one.
-    """
-    parsed = urlparse(url.strip())
-    if parsed.scheme not in ("http", "https"):
-        raise HTTPException(status_code=400, detail="Only http:// and https:// addresses can be fetched")
-    host = parsed.hostname
-    if not host:
-        raise HTTPException(status_code=400, detail="That address has no host name")
-    lowered = host.lower()
-    if lowered == "localhost" or lowered.endswith(SCRAPER_BLOCKED_HOST_SUFFIXES):
-        raise HTTPException(status_code=400, detail=f"{host} is a local address, only public pages can be fetched")
-    try:
-        resolved = socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80))
-    except socket.gaierror as exc:
-        raise HTTPException(status_code=400, detail=f"Could not look up {host}: {exc}") from exc
-    for entry in resolved:
-        address = ipaddress.ip_address(entry[4][0])
-        if (address.is_private or address.is_loopback or address.is_link_local
-                or address.is_reserved or address.is_multicast or address.is_unspecified):
-            raise HTTPException(
-                status_code=400,
-                detail=f"{host} resolves to {address}, an address inside your own network. "
-                       f"Only pages on the public internet can be fetched.",
-            )
-    return url.strip()
-
-
-def fetch_web_page(url: str) -> Tuple[bytes, str]:
-    """Fetch a page as HTML, following redirects one at a time, and return it with its final URL.
-
-    Redirects are followed by hand rather than by httpx so every hop goes through
-    ensure_public_url: a redirect to an internal address is the ordinary way past a check that
-    only looks at the address the user typed.
-
-    Known limit: this does not defend against DNS rebinding, where a name resolves to a public
-    address for the check and a private one for the connection a moment later. Closing that
-    would mean connecting to the vetted IP and setting the Host header by hand, which is more
-    machinery than a tool on a home network warrants.
-    """
-    current = ensure_public_url(url)
-    with httpx.Client(follow_redirects=False, timeout=SCRAPER_TIMEOUT_SECONDS) as client:
-        for _hop in range(SCRAPER_MAX_REDIRECTS + 1):
-            try:
-                with client.stream("GET", current, headers={"User-Agent": SCRAPER_USER_AGENT}) as response:
-                    if response.is_redirect:
-                        location = response.headers.get("location")
-                        if not location:
-                            raise HTTPException(status_code=502, detail="The page redirected without saying where")
-                        current = ensure_public_url(urljoin(current, location))
-                        continue
-                    if response.status_code >= 400:
-                        raise HTTPException(
-                            status_code=502,
-                            detail=f"The page answered with HTTP {response.status_code}",
-                        )
-                    content_type = response.headers.get("content-type", "").split(";")[0].strip().lower()
-                    if content_type and content_type not in SCRAPER_HTML_TYPES:
-                        raise HTTPException(
-                            status_code=415,
-                            detail=f"That address serves {content_type}, not a web page. "
-                                   f"Files can be translated through the other tabs.",
-                        )
-                    chunks: List[bytes] = []
-                    size = 0
-                    for chunk in response.iter_bytes():
-                        size += len(chunk)
-                        if size > MAX_FILE_BYTES:
-                            raise HTTPException(status_code=413, detail=f"Page exceeds {MAX_FILE_MB} MB")
-                        chunks.append(chunk)
-                    return b"".join(chunks), current
-            except httpx.HTTPError as exc:
-                raise HTTPException(status_code=502, detail=f"Could not fetch the page: {exc}") from exc
-    raise HTTPException(status_code=502, detail=f"The page redirected more than {SCRAPER_MAX_REDIRECTS} times")
-
-
-def extract_web_page_markdown(html: bytes, url: str) -> Tuple[str, str]:
-    """Pull the readable part of a page out as Markdown, with its title.
-
-    trafilatura does what a browser's reader view does - drop navigation, banners and footers,
-    keep the article - and hands back Markdown, whose headings and lists the PDF and DOCX
-    writers already understand (see pdf_render_lines).
-    """
-    import trafilatura
-
-    try:
-        decoded = html.decode("utf-8", errors="replace")
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Could not read the page: {exc}") from exc
-
-    body = trafilatura.extract(
-        decoded,
-        output_format="markdown",
-        include_comments=False,
-        include_tables=True,
-        # Formatting stays on for the headings and lists that carry the document's structure.
-        # include_formatting=False would drop them to plain lines, which is the whole shape of
-        # the finished PDF gone.
-        include_formatting=True,
-        favor_precision=True,
-        url=url,
-    )
-    body = (body or "").strip()
-    if body:
-        # The reader output leaves some raw HTML behind (Wikipedia footnotes come through as
-        # <sup>[1]</sup>) and carries inline bold/italic markers. Both hurt: the tags print
-        # verbatim in the PDF, and the markers do not survive translation - "**Reproducible
-        # builds**" came back as "*Reproduzierbare Builds**". Headings and bullets hold the
-        # structure; inline emphasis is expendable.
-        body = re.sub(r"<[^>]+>", "", body)
-        body = re.sub(r"(\*{1,3}|_{2})(\S.*?)\1", r"\2", body)
-        body = re.sub(r"[ \t]+\n", "\n", body).strip()
-    if len(body) < SCRAPER_MIN_CHARS:
-        # Not just "empty": a page that redirects with JavaScript leaves a stub behind, and a
-        # near-empty document would look like a translation that lost everything.
-        raise HTTPException(
-            status_code=422,
-            detail="No readable text found on that page. It most likely builds its content or "
-                   "redirects with JavaScript, which this fetcher does not run. Open the page in "
-                   "your browser, save it as a PDF, and translate that instead.",
-        )
-
-    title = ""
-    try:
-        metadata = trafilatura.extract_metadata(decoded)
-        title = (metadata.title or "").strip() if metadata else ""
-    except Exception:
-        title = ""
-    if not title:
-        title = (urlparse(url).hostname or "Website").strip()
-
-    body = body.strip()
-    # Only add the title when the extract does not already open with it as its heading.
-    if not body.startswith("#") or title.lower() not in body.splitlines()[0].lower():
-        body = f"# {title}\n\n{body}"
-    return body, title
 
 
 MARKDOWN_PREFIX = re.compile(r"^(\s*(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s*)?)(.*)$")
@@ -5323,47 +5147,6 @@ async def extract_pdf_markdown(file: UploadFile, page_range: str = "", source: s
     return extract_pdf_markdown_from_bytes(content, file.content_type or "application/pdf", page_range, source)
 
 
-def run_url_translate_job(job_id: str, url: str, source: str, target: str):
-    try:
-        update_job(job_id, status="running", message="Fetching page", started_at=time.time())
-        html, final_url = fetch_web_page(url)
-        markdown, title = extract_web_page_markdown(html, final_url)
-        wait_if_paused_or_cancelled(job_id)
-
-        if source == AUTO_SOURCE:
-            source = detect_source_language(markdown)
-            update_job(job_id, source=source)
-
-        result, chunk_count = translate_markdown_document(markdown, source, target, job_id)
-
-        history_id = save_history(
-            "translate-url",
-            result,
-            source,
-            target,
-            f"{history_safe_name(title)}.md",
-            b"",
-            # No source file: re-exporting the original HTML would mean writing the translation
-            # back into it, and the reader extract's blocks do not line up with the page's own.
-            "",
-            {"url": final_url},
-        )
-        update_job(
-            job_id,
-            status="complete",
-            message="Complete",
-            current=chunk_count,
-            result=result,
-            history_id=history_id,
-            finished_at=time.time(),
-        )
-    except Exception as exc:
-        if str(exc) == "Job stopped by user":
-            update_job(job_id, status="cancelled", message="Cancelled", error=None, finished_at=time.time())
-        else:
-            update_job(job_id, status="failed", message="Failed", error=exception_message(exc), finished_at=time.time())
-
-
 def run_text_job(
     job_id: str,
     text: str,
@@ -5380,8 +5163,8 @@ def run_text_job(
             update_job(job_id, source=source)
         update_job(job_id, status="running", message="Model loading or translation running", started_at=time.time())
         if source_extension == "md":
-            # A raw upload, not the reader-extracted markdown of the Website tab, but the same
-            # headings/lists/quotes need the same protection - see translate_markdown_document.
+            # Headings/lists/quotes need their markers kept out of what the model sees - see
+            # translate_markdown_document.
             result, chunk_count = translate_markdown_document(text, source, target, job_id)
         else:
             chunks = split_long_text(text, MAX_CHARS)
@@ -5683,24 +5466,6 @@ def start_translate_job(request: TranslateRequest):
     job_id = create_job("translate", request.source, request.target, "Text.txt")
     update_job(job_id, text=text, original_name="text.txt", source_extension="txt")
     register_job_runner(job_id, run_text_job, (job_id, text, request.source, request.target, "text.txt", b"", "txt"))
-    return {"job_id": job_id}
-
-
-@app.post("/jobs/translate-url")
-def start_translate_url_job(
-    url: str = Form(...),
-    source: str = Form(DEFAULT_SOURCE),
-    target: str = Form(DEFAULT_TARGET),
-):
-    ensure_known_language(source, allow_auto=True)
-    ensure_known_language(target)
-    ensure_queue_workers()
-    # Checked here as well as in the runner so a bad address is rejected while the user is still
-    # looking at the form, instead of turning into a failed job in the queue.
-    ensure_public_url(url)
-    job_id = create_job("translate-url", source, target, urlparse(url.strip()).hostname or "Website")
-    update_job(job_id, url=url.strip())
-    register_job_runner(job_id, run_url_translate_job, (job_id, url.strip(), source, target))
     return {"job_id": job_id}
 
 
