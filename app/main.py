@@ -4585,10 +4585,6 @@ def extract_pptx_text_from_bytes(content: bytes) -> str:
 
     a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
     namespaces = {"a": a_ns}
-    # Same reasoning as extract_docx_text_from_bytes: <a:br/> and <a:tab/> are their own elements,
-    # not part of any <a:t>, and joining just the <a:t> text glues the words on either side.
-    pptx_text_tags = {f"{{{a_ns}}}t"}
-    pptx_space_tags = {f"{{{a_ns}}}br", f"{{{a_ns}}}tab"}
     paragraphs = []
     for part, document in documents.items():
         try:
@@ -4596,20 +4592,33 @@ def extract_pptx_text_from_bytes(content: bytes) -> str:
         except ElementTree.ParseError as exc:
             raise HTTPException(status_code=400, detail=f"Could not parse PPTX XML {part}: {exc}") from exc
         for paragraph in root.findall(".//a:p", namespaces):
-            parts = []
-            for node in paragraph.iter():
-                if node.tag in pptx_text_tags:
-                    parts.append(node.text or "")
-                elif node.tag in pptx_space_tags:
-                    parts.append(" ")
-            text = re.sub(r"\s+", " ", "".join(parts)).strip()
-            if text:
-                paragraphs.append(text)
+            for segment in pptx_paragraph_run_segments(paragraph, a_ns):
+                text = re.sub(r"\s+", " ", "".join(node.text or "" for node in segment)).strip()
+                if text:
+                    paragraphs.append(text)
 
     result = "\n\n".join(paragraphs).strip()
     if not result:
         raise HTTPException(status_code=422, detail="No text found in PPTX")
     return result
+
+
+def pptx_paragraph_run_segments(paragraph, a_ns: str) -> List[List[Any]]:
+    """Same idea as docx_paragraph_run_segments: split at <a:br/>/<a:tab/> marks so a tab- or
+    line-break-separated line translates (and reinjects) each side independently."""
+    text_tag = f"{{{a_ns}}}t"
+    space_tags = {f"{{{a_ns}}}br", f"{{{a_ns}}}tab"}
+    segments: List[List[Any]] = []
+    current: List[Any] = []
+    for node in paragraph.iter():
+        if node.tag == text_tag:
+            current.append(node)
+        elif node.tag in space_tags and any((n.text or "").strip() for n in current):
+            segments.append(current)
+            current = []
+    if any((n.text or "").strip() for n in current):
+        segments.append(current)
+    return segments
 
 
 def export_pptx_with_translated_text(content: bytes, translated_text: str) -> bytes:
@@ -4625,30 +4634,31 @@ def export_pptx_with_translated_text(content: bytes, translated_text: str) -> by
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read PPTX: {exc}") from exc
 
-    namespaces = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+    a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    namespaces = {"a": a_ns}
     replacements = {}
     block_index = 0
     for part, document in documents.items():
         root = ElementTree.fromstring(document)
         changed = False
         for paragraph in root.findall(".//a:p", namespaces):
-            text_nodes = paragraph.findall(".//a:t", namespaces)
-            if not "".join(node.text or "" for node in text_nodes).strip():
-                continue
+            for text_nodes in pptx_paragraph_run_segments(paragraph, a_ns):
+                if block_index >= len(blocks):
+                    break
+                # Same reasoning as export_docx_with_translated_text: skip whitespace-only runs
+                # when choosing where the translation goes, so alignment padding and the real
+                # content run's formatting both survive.
+                content_indices = [index for index, node in enumerate(text_nodes) if (node.text or "").strip()]
+                target_index = content_indices[0] if content_indices else 0
+                for node_index, node in enumerate(text_nodes):
+                    if node_index == target_index:
+                        node.text = blocks[block_index]
+                    elif node_index in content_indices:
+                        node.text = ""
+                block_index += 1
+                changed = True
             if block_index >= len(blocks):
                 break
-            # Same reasoning as export_docx_with_translated_text: skip whitespace-only runs when
-            # choosing where the translation goes, so alignment padding and the real content
-            # run's formatting both survive.
-            content_indices = [index for index, node in enumerate(text_nodes) if (node.text or "").strip()]
-            target_index = content_indices[0] if content_indices else 0
-            for node_index, node in enumerate(text_nodes):
-                if node_index == target_index:
-                    node.text = blocks[block_index]
-                elif node_index in content_indices:
-                    node.text = ""
-            block_index += 1
-            changed = True
         if changed:
             replacements[part] = ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
         if block_index >= len(blocks):
