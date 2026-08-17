@@ -17,6 +17,10 @@ let languageData = null;
     let historyTimezone = "UTC";
     let timeFormat = "24h";
     const seenCompletedJobIds = new Set();
+    // Job id -> its queue-row element, reused across polls so a row already on screen keeps its
+    // node identity (and DOM listeners) instead of the whole list tearing down and rebuilding
+    // every 3s just because one job's percentage changed.
+    const queueRowElements = new Map();
     const HISTORY_PAGE_SIZE = 5;
     const baseTitle = document.title || "Linguinator";
     const outputFormatKeys = {txt: "formatTxt", md: "formatMarkdown", pdf: "formatPdf", doc: "formatDoc", original: "formatOriginal"};
@@ -848,8 +852,10 @@ let languageData = null;
       updateModelQualityHint();
     }
 
+    const modelQualityHintElement = document.getElementById("modelQualityHint");
+
     function updateModelQualityHint() {
-      const hint = document.getElementById("modelQualityHint");
+      const hint = modelQualityHintElement;
       if (!hint) return;
       const pairs = (languageData && languageData.dedicated_pairs) || [];
       const source = document.getElementById("source").value;
@@ -1280,23 +1286,7 @@ let languageData = null;
       return job;
     }
 
-    function queueActionButton(job, action, label, enabledStatuses) {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "secondary";
-      button.textContent = label;
-      button.title = label;
-      button.disabled = !enabledStatuses.includes(job.status);
-      button.addEventListener("click", async () => {
-        const updated = await controlJob(job.id, action);
-        if (updated && activeJobId === job.id) {
-          updateDocumentTitle(updated);
-        }
-      });
-      return button;
-    }
-
-    function queueRing(job) {
+function queueRing(job) {
       const ring = document.createElement("div");
       const failed = job.status === "failed";
       // Nothing to count yet: the file is still being read or uploaded, so the ring turns
@@ -1364,9 +1354,85 @@ let languageData = null;
       renderQueueRows();
     }
 
+    // Builds a job row's fixed skeleton and listeners once. Both only ever read the row's own
+    // dataset.jobId, not the `job` this ran with, so the row can be reused for the same job's
+    // every later poll without rebinding either one.
+    function createQueueRow(job) {
+      const row = document.createElement("div");
+      row.dataset.jobId = job.id;
+      row.addEventListener("click", (event) => {
+        if (event.target.closest(".queue-actions")) return;
+        watchJob(row.dataset.jobId);
+      });
+      const main = document.createElement("div");
+      main.appendChild(document.createElement("div")).className = "queue-title";
+      main.appendChild(document.createElement("div")).className = "queue-meta";
+      main.appendChild(document.createElement("div")).className = "queue-progress";
+      row.appendChild(document.createElement("div")); // ring placeholder, replaced in updateQueueRow
+      row.appendChild(main);
+      const actions = document.createElement("div");
+      actions.className = "queue-actions";
+      const cancelButton = document.createElement("button");
+      cancelButton.type = "button";
+      cancelButton.className = "secondary";
+      cancelButton.addEventListener("click", async () => {
+        const updated = await controlJob(row.dataset.jobId, "cancel");
+        if (updated && activeJobId === row.dataset.jobId) updateDocumentTitle(updated);
+      });
+      actions.appendChild(cancelButton);
+      row.appendChild(actions);
+      return row;
+    }
+
+    // Fills in everything about a row that can change between polls - a fresh row from
+    // createQueueRow and a reused one from a previous render both land here.
+    function updateQueueRow(row, job) {
+      row.className = "queue-row status-" + job.status;
+      // The row's own background is the progress bar: it fills up to here.
+      if (job.status === "running") {
+        row.style.setProperty("--fill", Math.max(0, Math.min(100, Number(job.percent) || 0)) + "%");
+      } else {
+        row.style.removeProperty("--fill");
+      }
+      row.firstChild.replaceWith(queueRing(job));
+      const title = row.querySelector(".queue-title");
+      title.innerHTML = "";
+      const extension = jobExtension(job);
+      row.dataset.fileType = fileTypeKey(extension, job.label);
+      appendTypeBadge(title, extension, job.label);
+      const position = job.position ? "#" + job.position + " " : "";
+      title.appendChild(document.createTextNode(
+        position + (job.label || job.kind) + " - " + translateStatus(job.status)));
+      const meta = row.querySelector(".queue-meta");
+      meta.textContent = "";
+      const languages = [job.source, job.target].filter(Boolean).map(formatLanguageLabel).join(" -> ");
+      const started = job.started_at ? t("started") + " " + formatJobTime(job.started_at) : t("queued") + " " + formatJobTime(job.queued_at);
+      meta.appendChild(document.createTextNode([languages, started].filter(Boolean).join(" | ")));
+      const progress = row.querySelector(".queue-progress");
+      const progressLabel = job.status === "queued" && job.position
+        ? t("queuePosition", {position: job.position})
+        : (job.percent || 0) + "%";
+      // eta_seconds is 0 once every chunk is translated, even while a PDF job still has to
+      // render the result - "ETA 0s" next to "99%" and "Rendering PDF" reads as finished
+      // when it is not, so this only shows a real countdown, not the leftover zero.
+      const eta = job.status === "running" && job.eta_seconds
+        ? "ETA " + formatEta(job.eta_seconds) : "";
+      progress.textContent = [
+        progressLabel,
+        (job.current || 0) + " / " + (job.total || 0) + " " + t("chunks"),
+        eta,
+        job.message || "",
+      ].filter(Boolean).join(" | ");
+      const cancelButton = row.querySelector(".queue-actions button");
+      cancelButton.textContent = t("cancel");
+      cancelButton.title = t("cancel");
+      cancelButton.disabled = !["queued", "running", "paused"].includes(job.status);
+      row.classList.toggle("watched", job.id === activeJobId);
+      row.title = t("watchJob");
+    }
+
     function renderQueueRows() {
       const queue = document.getElementById("queue");
-      queue.innerHTML = "";
       // A finished job leaves the queue at once: it is in the history right below, marked
       // green there, and standing in both lists at the same time read as a duplicate.
       const activeItems = queueItems.filter((job) => !["complete", "failed", "cancelled"].includes(job.status));
@@ -1375,70 +1441,44 @@ let languageData = null;
       // make the panel impossible to close while a job runs.
       if (activeItems.length && !hadActiveJobs) openJobsPanel();
       hadActiveJobs = activeItems.length > 0;
-      if (statusRow) queue.appendChild(statusRowElement());
+
+      const activeIds = new Set(activeItems.map((job) => job.id));
+      for (const id of queueRowElements.keys()) {
+        if (!activeIds.has(id)) queueRowElements.delete(id);
+      }
+
+      // The rows and dividers this render wants, in order - reusing each job's existing row node
+      // (and its listeners) rather than tearing every row down and rebuilding it every 3s poll.
+      const wanted = [];
+      if (statusRow) wanted.push(statusRowElement());
+      let previousWasQueued = false;
       for (const job of activeItems) {
         // A rule where the work stops and the waiting starts, but only if something stands
         // above it - a queue whose first row is already waiting has nothing to divide.
-        if (job.status === "queued" && queue.lastElementChild
-            && !queue.lastElementChild.classList.contains("status-queued")) {
-          queue.appendChild(queueDivider());
+        if (job.status === "queued" && wanted.length && !previousWasQueued) {
+          wanted.push(queueDivider());
         }
-        const row = document.createElement("div");
-        row.className = "queue-row status-" + job.status;
-        // The row's own background is the progress bar: it fills up to here.
-        if (job.status === "running") {
-          row.style.setProperty("--fill", Math.max(0, Math.min(100, Number(job.percent) || 0)) + "%");
+        let row = queueRowElements.get(job.id);
+        if (!row) {
+          row = createQueueRow(job);
+          queueRowElements.set(job.id, row);
         }
-        const main = document.createElement("div");
-        const title = document.createElement("div");
-        title.className = "queue-title";
-        const extension = jobExtension(job);
-        row.dataset.fileType = fileTypeKey(extension, job.label);
-        appendTypeBadge(title, extension, job.label);
-        const position = job.position ? "#" + job.position + " " : "";
-        title.appendChild(document.createTextNode(
-          position + (job.label || job.kind) + " - " + translateStatus(job.status)));
-        const meta = document.createElement("div");
-        meta.className = "queue-meta";
-        const languages = [job.source, job.target].filter(Boolean).map(formatLanguageLabel).join(" -> ");
-        const started = job.started_at ? t("started") + " " + formatJobTime(job.started_at) : t("queued") + " " + formatJobTime(job.queued_at);
-        meta.appendChild(document.createTextNode([languages, started].filter(Boolean).join(" | ")));
-        const progress = document.createElement("div");
-        progress.className = "queue-progress";
-        const progressLabel = job.status === "queued" && job.position
-          ? t("queuePosition", {position: job.position})
-          : (job.percent || 0) + "%";
-        // eta_seconds is 0 once every chunk is translated, even while a PDF job still has to
-        // render the result - "ETA 0s" next to "99%" and "Rendering PDF" reads as finished
-        // when it is not, so this only shows a real countdown, not the leftover zero.
-        const eta = job.status === "running" && job.eta_seconds
-          ? "ETA " + formatEta(job.eta_seconds) : "";
-        progress.textContent = [
-          progressLabel,
-          (job.current || 0) + " / " + (job.total || 0) + " " + t("chunks"),
-          eta,
-          job.message || "",
-        ].filter(Boolean).join(" | ");
-        main.appendChild(title);
-        main.appendChild(meta);
-        main.appendChild(progress);
-        row.appendChild(queueRing(job));
-        row.appendChild(main);
-        const actions = document.createElement("div");
-        actions.className = "queue-actions";
-        actions.appendChild(queueActionButton(job, "cancel", t("cancel"), ["queued", "running", "paused"]));
-        row.appendChild(actions);
-        row.classList.toggle("watched", job.id === activeJobId);
-        row.title = t("watchJob");
-        row.addEventListener("click", (event) => {
-          if (event.target.closest(".queue-actions")) return;
-          watchJob(job.id);
-        });
-        queue.appendChild(row);
+        updateQueueRow(row, job);
+        wanted.push(row);
+        previousWasQueued = job.status === "queued";
       }
       // And one where the queue ends and the finished translations begin, so the two groups stay
       // apart even once nothing is waiting any more.
-      if (queue.lastElementChild && historyItems.length) queue.appendChild(queueDivider());
+      if (wanted.length && historyItems.length) wanted.push(queueDivider());
+
+      for (let index = 0; index < wanted.length; index++) {
+        if (queue.children[index] !== wanted[index]) {
+          queue.insertBefore(wanted[index], queue.children[index] || null);
+        }
+      }
+      while (queue.children.length > wanted.length) {
+        queue.lastElementChild.remove();
+      }
     }
 
     const QUEUE_CONTROL_STATUSES = {
@@ -1447,10 +1487,14 @@ let languageData = null;
       cancel: ["queued", "running", "paused"],
     };
 
+    const pauseJobButton = document.getElementById("pauseJob");
+    const resumeJobButton = document.getElementById("resumeJob");
+    const stopJobButton = document.getElementById("stopJob");
+
     function updateQueueControlButtons(items) {
-      document.getElementById("pauseJob").disabled = !items.some((job) => QUEUE_CONTROL_STATUSES.pause.includes(job.status));
-      document.getElementById("resumeJob").disabled = !items.some((job) => QUEUE_CONTROL_STATUSES.resume.includes(job.status));
-      document.getElementById("stopJob").disabled = !items.some((job) => QUEUE_CONTROL_STATUSES.cancel.includes(job.status));
+      pauseJobButton.disabled = !items.some((job) => QUEUE_CONTROL_STATUSES.pause.includes(job.status));
+      resumeJobButton.disabled = !items.some((job) => QUEUE_CONTROL_STATUSES.resume.includes(job.status));
+      stopJobButton.disabled = !items.some((job) => QUEUE_CONTROL_STATUSES.cancel.includes(job.status));
     }
 
     let pollToken = 0;
@@ -1997,9 +2041,9 @@ let languageData = null;
 
     setTheme(localStorage.getItem("linguinator_theme") || "dark");
 
-    document.getElementById("pauseJob").addEventListener("click", () => controlQueue("pause"));
-    document.getElementById("resumeJob").addEventListener("click", () => controlQueue("resume"));
-    document.getElementById("stopJob").addEventListener("click", () => controlQueue("cancel"));
+    pauseJobButton.addEventListener("click", () => controlQueue("pause"));
+    resumeJobButton.addEventListener("click", () => controlQueue("resume"));
+    stopJobButton.addEventListener("click", () => controlQueue("cancel"));
 
     setupUiLanguagePicker();
     loadLanguages().catch((error) => {
