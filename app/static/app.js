@@ -43,7 +43,6 @@ let languageData = null;
         textFile: "TXT File",
         markdownFile: "Markdown File",
         translateInput: "Translate",
-        clear: "Clear",
         pause: "Pause",
         resume: "Resume",
         stop: "Stop",
@@ -107,7 +106,6 @@ let languageData = null;
         tipPdfPick: "Select the PDF to translate.",
         tipPageRange: "Optional page range, e.g. 1-3,5. Leave empty to translate all pages.",
         tipTranslate: "Start a new translation for the current input.",
-        tipClear: "Clear the current input and result.",
         tipPause: "Pause the entire queue.",
         tipResume: "Resume the entire queue.",
         tipStop: "Cancel the entire queue.",
@@ -145,7 +143,6 @@ let languageData = null;
         textFile: "TXT-Datei",
         markdownFile: "Markdown-Datei",
         translateInput: "Übersetzen",
-        clear: "Leeren",
         pause: "Pause",
         resume: "Fortsetzen",
         stop: "Stoppen",
@@ -209,7 +206,6 @@ let languageData = null;
         tipPdfPick: "Zu uebersetzende PDF wählen.",
         tipPageRange: "Optionaler Seitenbereich, z. B. 1-3,5. Leer übersetzt alle Seiten.",
         tipTranslate: "Neue Übersetzung für die aktuelle Eingabe starten.",
-        tipClear: "Aktuelle Eingabe und Ergebnis leeren.",
         tipPause: "Gesamte Warteschlange pausieren.",
         tipResume: "Gesamte Warteschlange fortsetzen.",
         tipStop: "Gesamte Warteschlange abbrechen.",
@@ -247,7 +243,6 @@ let languageData = null;
         textFile: "Archivo TXT",
         markdownFile: "Archivo Markdown",
         translateInput: "Traducir",
-        clear: "Limpiar",
         pause: "Pausar",
         resume: "Continuar",
         stop: "Detener",
@@ -311,7 +306,6 @@ let languageData = null;
         tipPdfPick: "Elegir el PDF a traducir.",
         tipPageRange: "Rango de páginas opcional, p. ej. 1-3,5. Vacío traduce todas.",
         tipTranslate: "Iniciar una traducción para la entrada actual.",
-        tipClear: "Limpiar la entrada y el resultado actuales.",
         tipPause: "Pausar toda la cola.",
         tipResume: "Continuar toda la cola.",
         tipStop: "Cancelar toda la cola.",
@@ -349,7 +343,6 @@ let languageData = null;
         textFile: "Fichier TXT",
         markdownFile: "Fichier Markdown",
         translateInput: "Traduire",
-        clear: "Effacer",
         pause: "Pause",
         resume: "Reprendre",
         stop: "Arrêter",
@@ -413,7 +406,6 @@ let languageData = null;
         tipPdfPick: "Choisir le PDF à traduire.",
         tipPageRange: "Plage de pages optionnelle, p. ex. 1-3,5. Vide traduit tout.",
         tipTranslate: "Lancer une traduction pour l'entrée actuelle.",
-        tipClear: "Effacer l'entrée et le resultat actuels.",
         tipPause: "Mettre toute la file en pause.",
         tipResume: "Reprendre toute la file.",
         tipStop: "Annuler toute la file.",
@@ -603,7 +595,6 @@ let languageData = null;
       setText('label[for="textResult"]', "textResult");
       setText('label[for="pdf"]', "pdf");
       setText("#translate", "translateInput");
-      setText("#clearInput", "clear");
       setText("#pauseJob", "pause");
       setText("#resumeJob", "resume");
       setText("#stopJob", "stop");
@@ -1049,22 +1040,6 @@ let languageData = null;
       if (box) box.value = text;
     }
 
-    function clearCurrentWork() {
-      document.getElementById("text").value = "";
-      document.getElementById("textFile").value = "";
-      document.getElementById("pdf").value = "";
-      document.getElementById("pageRange").value = "";
-      document.getElementById("sheetName").value = "";
-      document.getElementById("csvColumns").value = "";
-      currentSourceFormat = (inputTabs[currentInputTab] || inputTabs.textarea).sourceFormat;
-      currentOriginalExtension = currentSourceFormat;
-      updateCounter();
-      setResult("");
-      lastCompletedJob = null;
-      renderHistory();
-      clearStatusRow();
-    }
-
     // Reads the selected file's text into #text so Translate can send it - not a preview step,
     // #text lives in a different tab-panel that stays hidden while a file tab is active, so
     // running this on its own left the old "Load File" button doing nothing the user could see.
@@ -1110,7 +1085,6 @@ let languageData = null;
       return true;
     }
 
-    document.getElementById("clearInput").addEventListener("click", clearCurrentWork);
 
     function clearOwnJobOnNewFile() {
       // Drops the green marking off the previous job's history row: a new file means the last
