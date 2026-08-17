@@ -81,8 +81,8 @@
     <section id="filePanel" class="section tab-panel workspace-section">
       <label id="textFileLabel" for="textFile">TXT File</label>
       <input id="textFile" type="file" accept=".txt,text/plain" title="Select the file to load." data-title-key="tipFilePick">
-      <input id="sheetName" class="file-extra" type="text" placeholder="XLSX sheet name, optional" title="Optional XLSX sheet name. Leave empty to use the first sheet." data-title-key="tipSheetName">
-      <input id="csvColumns" class="file-extra" type="text" placeholder="CSV/XLSX columns, e.g. title,description or A,B" title="Column names or letters to translate." data-title-key="tipCsvColumns">
+      <input id="sheetName" class="file-extra" type="text" placeholder="XLSX sheet name, optional" title="Optional XLSX sheet name. Leave empty to use the first sheet, or leave empty and list sheets in the columns field below to translate several at once." data-title-key="tipSheetName">
+      <textarea id="csvColumns" class="file-extra" rows="1" placeholder="CSV/XLSX columns, e.g. title,description or A,B - or, for several XLSX sheets at once, one &quot;Sheet: columns&quot; line per sheet" title="Column names or letters to translate. For several XLSX sheets at once, one &quot;Sheet: columns&quot; line per sheet." data-title-key="tipCsvColumns"></textarea>
     </section>
 
     <section id="pdfPanel" class="section tab-panel workspace-section">

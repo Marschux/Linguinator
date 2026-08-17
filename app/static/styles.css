@@ -522,6 +522,13 @@
     .section.tab-panel { margin-top: 1rem; }
     .file-extra { display: none; }
     .file-extra.visible { display: block; }
+    /* #csvColumns is a textarea only so it can hold several "Sheet: columns" lines - it isn't
+       the Text Field's big input and shouldn't look like it. */
+    textarea.file-extra {
+      min-height: 0;
+      padding: .7rem .8rem;
+      resize: vertical;
+    }
     .section-heading {
       align-items: center;
       display: flex;

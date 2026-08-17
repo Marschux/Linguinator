@@ -5143,6 +5143,83 @@ def export_xlsx_with_translated_text(content: bytes, sheet_name: str, columns: s
     return write_zip_with_replacement(content, {sheet_path: ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)})
 
 
+def xlsx_is_multi_sheet_spec(columns: str) -> bool:
+    """A "Sheet: col1,col2" line looks nothing like a plain column list ("title,description" or
+    "A,B") - the colon is the tell, checked per line since a single-sheet column name could
+    itself contain no colon at all."""
+    return any(":" in line for line in columns.splitlines() if line.strip())
+
+
+def parse_xlsx_sheet_columns(spec: str) -> List[Tuple[str, str]]:
+    pairs = []
+    for line in spec.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if ":" not in line:
+            raise HTTPException(status_code=400, detail=f'Each line must be "Sheet: columns" - got: {line}')
+        sheet_name, columns = line.split(":", 1)
+        sheet_name, columns = sheet_name.strip(), columns.strip()
+        if not sheet_name or not columns:
+            raise HTTPException(status_code=400, detail=f'Each line must be "Sheet: columns" - got: {line}')
+        pairs.append((sheet_name, columns))
+    if not pairs:
+        raise HTTPException(status_code=400, detail="No sheet/column lines given")
+    return pairs
+
+
+def extract_xlsx_multi_sheet_text_from_bytes(content: bytes, spec: str) -> str:
+    """Extract several sheets in one pass, each with its own column selection - a hand-built
+    workbook's sheets rarely share a header row (measured: "Hostname,Kategorie,IP" on one sheet,
+    "Name,Beschreibung" on another), so a single shared column list can't cover more than one.
+    A sheet with nothing to translate for its columns is skipped rather than failing the whole
+    request - some sheets in a real multi-sheet selection legitimately have no matching rows.
+    """
+    parts = []
+    for sheet_name, columns in parse_xlsx_sheet_columns(spec):
+        try:
+            parts.append(extract_xlsx_text_from_bytes(content, sheet_name, columns))
+        except HTTPException as exc:
+            if exc.status_code == 422:
+                continue
+            raise
+    result = "\n\n".join(parts).strip()
+    if not result:
+        raise HTTPException(status_code=422, detail="No text found in any selected sheet/column")
+    return result
+
+
+def export_xlsx_multi_sheet_with_translated_text(content: bytes, spec: str, translated_text: str) -> bytes:
+    """Write translated blocks back across several sheets, in the same order
+    extract_xlsx_multi_sheet_text_from_bytes produced them in.
+
+    Each sheet's own block count is recomputed from the original content rather than persisted
+    anywhere - re-running the same extraction is deterministic and exactly mirrors what was
+    counted the first time, so there's nothing to keep in sync. export_xlsx_with_translated_text
+    is then chained sheet by sheet: each call's output (all sheets untouched except the one just
+    written) becomes the next call's input, since every sheet lives in its own XML part inside
+    the archive and never touches another sheet's part.
+    """
+    blocks = translated_blocks(translated_text)
+    block_index = 0
+    current_content = content
+    for sheet_name, columns in parse_xlsx_sheet_columns(spec):
+        try:
+            sheet_text = extract_xlsx_text_from_bytes(content, sheet_name, columns)
+        except HTTPException as exc:
+            if exc.status_code == 422:
+                continue
+            raise
+        count = len(translated_blocks(sheet_text))
+        sheet_blocks = blocks[block_index:block_index + count]
+        block_index += count
+        if sheet_blocks:
+            current_content = export_xlsx_with_translated_text(
+                current_content, sheet_name, columns, "\n\n".join(sheet_blocks)
+            )
+    return current_content
+
+
 class TranslatableHtmlParser(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=False)
@@ -5905,7 +5982,10 @@ def export_original_history_content(extension: str, content: bytes, text: str, s
     if extension == "csv":
         return export_csv_with_translated_text(content, source_meta.get("columns", ""), text)
     if extension == "xlsx":
-        return export_xlsx_with_translated_text(content, source_meta.get("sheet_name", ""), source_meta.get("columns", ""), text)
+        columns = source_meta.get("columns", "")
+        if xlsx_is_multi_sheet_spec(columns):
+            return export_xlsx_multi_sheet_with_translated_text(content, columns, text)
+        return export_xlsx_with_translated_text(content, source_meta.get("sheet_name", ""), columns, text)
     if extension in ("html", "htm"):
         return export_html_with_translated_text(content, text)
     if extension in ("srt", "vtt"):
@@ -6075,8 +6155,13 @@ async def export_xlsx(
     columns: str = Form(""),
 ):
     content = await read_upload_bytes(file, "XLSX")
+    exported = (
+        export_xlsx_multi_sheet_with_translated_text(content, columns, text)
+        if xlsx_is_multi_sheet_spec(columns)
+        else export_xlsx_with_translated_text(content, sheet_name, columns, text)
+    )
     return Response(
-        export_xlsx_with_translated_text(content, sheet_name, columns, text),
+        exported,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": 'attachment; filename="linguinator-translation.xlsx"'},
     )
@@ -6213,6 +6298,8 @@ async def extract_xlsx(
     columns: str = Form(""),
 ):
     content = await read_upload_bytes(file, "XLSX")
+    if xlsx_is_multi_sheet_spec(columns):
+        return extract_xlsx_multi_sheet_text_from_bytes(content, columns)
     return extract_xlsx_text_from_bytes(content, sheet_name, columns)
 
 
