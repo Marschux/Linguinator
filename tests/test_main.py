@@ -3749,8 +3749,8 @@ class MainTests(unittest.TestCase):
         self.assertEqual(text, "Welt")
         with zipfile.ZipFile(BytesIO(updated)) as xlsx:
             sheet = xlsx.read("xl/worksheets/sheet1.xml")
-        self.assertIn(b"<s:f>CONCAT(A2)</s:f>", sheet)
-        self.assertIn(b"<s:v>Welt</s:v>", sheet)
+        self.assertIn(b"<f>CONCAT(A2)</f>", sheet)
+        self.assertIn(b"<v>Welt</v>", sheet)
 
     def test_xlsx_extraction_resolves_absolute_sheet_target(self):
         text = main.extract_xlsx_text_from_bytes(minimal_xlsx("/xl/worksheets/sheet1.xml"), "Sheet1", "title")
@@ -3836,7 +3836,10 @@ class MainTests(unittest.TestCase):
 
         updated = main.export_xliff_with_translated_text(content, "Hallo")
 
-        self.assertIn(b"<xlf:target>Hallo</xlf:target>", updated)
+        # The source document declares its namespace as the default (unprefixed) one, so the
+        # newly-created <target> inherits it unprefixed too - lxml preserves the original
+        # document's own prefix choice on round-trip rather than inventing a new one.
+        self.assertIn(b"<target>Hallo</target>", updated)
 
 
 if __name__ == "__main__":

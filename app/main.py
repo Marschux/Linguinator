@@ -23,7 +23,14 @@ from html.parser import HTMLParser
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
-from xml.etree import ElementTree
+# lxml, not the stdlib xml.etree.ElementTree it's a drop-in replacement for here: a real
+# Office-authored file's mc:Ignorable="x14ac xr xr2 xr3" names namespace prefixes by that literal
+# string, and stdlib ElementTree renames every prefix to its own ns0/ns1/... on serialization,
+# leaving mc:Ignorable pointing at prefixes that no longer exist - Excel refuses to open the
+# result ("file is damaged"), measured on a real spreadsheet round-tripped through export. lxml
+# preserves the original prefixes, so the reference stays valid. lxml.etree.ParseError is a base
+# class of its XMLSyntaxError, so every existing `except ElementTree.ParseError` still catches it.
+from lxml import etree as ElementTree
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse, Response
