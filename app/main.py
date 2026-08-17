@@ -4919,8 +4919,86 @@ def export_csv_with_translated_text(content: bytes, columns: str, translated_tex
     return output.getvalue().encode("utf-8")
 
 
+def extract_csv_auto_text_from_bytes(content: bytes) -> str:
+    """No columns given at all: translate every cell that looks like real text, across every
+    column, rather than requiring the user to name one - see spreadsheet_value_looks_translatable
+    for what gets skipped."""
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not decode CSV as UTF-8: {exc}") from exc
+    reader = csv.DictReader(StringIO(text))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=422, detail="CSV has no header row")
+
+    blocks = []
+    for row in reader:
+        for column in reader.fieldnames:
+            value = row.get(column, "").strip()
+            if spreadsheet_value_looks_translatable(value):
+                blocks.append(value)
+
+    result = "\n\n".join(blocks).strip()
+    if not result:
+        raise HTTPException(status_code=422, detail="No translatable text found in this CSV")
+    return result
+
+
+def export_csv_auto_with_translated_text(content: bytes, translated_text: str) -> bytes:
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not decode CSV as UTF-8: {exc}") from exc
+    reader = csv.DictReader(StringIO(text))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=422, detail="CSV has no header row")
+
+    rows = list(reader)
+    blocks = translated_blocks(translated_text)
+    block_index = 0
+    for row in rows:
+        for column in reader.fieldnames:
+            value = row.get(column, "").strip()
+            if spreadsheet_value_looks_translatable(value) and block_index < len(blocks):
+                row[column] = blocks[block_index]
+                block_index += 1
+
+    output = StringIO()
+    writer = csv.DictWriter(output, fieldnames=reader.fieldnames, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return output.getvalue().encode("utf-8")
+
+
 def xlsx_column_name(cell_ref: str) -> str:
     return re.sub(r"[^A-Z]", "", cell_ref.upper())
+
+
+def xlsx_column_index(name: str) -> int:
+    """B < Z < AA < AB - a plain alphabetical sort puts "AA" before "B" instead of after."""
+    index = 0
+    for char in name:
+        index = index * 26 + (ord(char) - ord("A") + 1)
+    return index
+
+
+# Cells a "translate the whole document" pass should leave alone even though they're non-empty:
+# an IP, a MAC address, a plain number or an IP range read as prose come back mangled or renamed
+# (an address is not a sentence), and none of them need translating in the first place. Not
+# exhaustive - anything not matching one of these is assumed to be real text and gets translated.
+SPREADSHEET_SKIP_PATTERNS = [
+    re.compile(r"^-?\d+([.,]\d+)?$"),  # a plain number, e.g. 49.99 or 199,99 or a port/VLAN id
+    re.compile(r"^(\d{1,3}\.){3}\d{1,3}(/\d{1,2})?$"),  # IPv4 address or CIDR block
+    re.compile(r"^(\d{1,3}\.){3}\d{1,3}\s*-\s*(\d{1,3}\.){3}\d{1,3}$"),  # IPv4 range
+    re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$"),  # MAC address
+]
+
+
+def spreadsheet_value_looks_translatable(value: str) -> bool:
+    value = value.strip()
+    if not value:
+        return False
+    return not any(pattern.match(value) for pattern in SPREADSHEET_SKIP_PATTERNS)
 
 
 def xlsx_shared_strings(workbook: zipfile.ZipFile) -> List[str]:
@@ -4945,7 +5023,8 @@ def xlsx_relationship_target(target: str) -> str:
     return "xl/" + normalized
 
 
-def xlsx_sheet_path(workbook: zipfile.ZipFile, sheet_name: str) -> str:
+def xlsx_all_sheets(workbook: zipfile.ZipFile) -> List[Tuple[str, str]]:
+    """Every sheet's (name, part path), in workbook order."""
     namespace = {
         "m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
         "r": "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
@@ -4961,21 +5040,24 @@ def xlsx_sheet_path(workbook: zipfile.ZipFile, sheet_name: str) -> str:
     if not sheets:
         raise HTTPException(status_code=422, detail="XLSX has no sheets")
 
-    selected = None
-    if sheet_name.strip():
-        for sheet in sheets:
-            if sheet.attrib.get("name") == sheet_name.strip():
-                selected = sheet
-                break
-        if selected is None:
-            raise HTTPException(status_code=400, detail=f"XLSX sheet not found: {sheet_name}")
-    else:
-        selected = sheets[0]
+    result = []
+    for sheet in sheets:
+        rid = sheet.attrib.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id")
+        target = rels.get(rid)
+        if not target:
+            continue
+        result.append((sheet.attrib.get("name", ""), xlsx_relationship_target(target)))
+    return result
 
-    target = rels.get(selected.attrib["{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"])
-    if not target:
-        raise HTTPException(status_code=400, detail="Could not resolve XLSX sheet")
-    return xlsx_relationship_target(target)
+
+def xlsx_sheet_path(workbook: zipfile.ZipFile, sheet_name: str) -> str:
+    sheets = xlsx_all_sheets(workbook)
+    if sheet_name.strip():
+        for name, path in sheets:
+            if name == sheet_name.strip():
+                return path
+        raise HTTPException(status_code=400, detail=f"XLSX sheet not found: {sheet_name}")
+    return sheets[0][1]
 
 
 def xlsx_cell_text(cell, shared: List[str], namespace: Dict[str, str]) -> str:
@@ -5218,6 +5300,76 @@ def export_xlsx_multi_sheet_with_translated_text(content: bytes, spec: str, tran
                 current_content, sheet_name, columns, "\n\n".join(sheet_blocks)
             )
     return current_content
+
+
+def extract_xlsx_auto_text_from_bytes(content: bytes) -> str:
+    """No sheet or columns given at all: translate every cell across every sheet that looks like
+    real text - see spreadsheet_value_looks_translatable for what gets skipped. Unlike the named-
+    column paths, this doesn't try to single out a header row first (there's no requested column
+    name to search for) - a header label like "Hostname" is itself just more text to translate.
+    """
+    try:
+        workbook = zipfile.ZipFile(BytesIO(content))
+        ensure_zip_size(workbook)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read XLSX: {exc}") from exc
+
+    namespace = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    blocks = []
+    try:
+        with workbook:
+            shared = xlsx_shared_strings(workbook)
+            for _sheet_name, sheet_path in xlsx_all_sheets(workbook):
+                root = ElementTree.fromstring(workbook.read(sheet_path))
+                for row in xlsx_rows_with_values(root, shared, namespace):
+                    for column in sorted(row["values"], key=xlsx_column_index):
+                        if spreadsheet_value_looks_translatable(row["values"][column]):
+                            blocks.append(row["values"][column].strip())
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not parse XLSX: {exc}") from exc
+
+    result = "\n\n".join(blocks).strip()
+    if not result:
+        raise HTTPException(status_code=422, detail="No translatable text found in this workbook")
+    return result
+
+
+def export_xlsx_auto_with_translated_text(content: bytes, translated_text: str) -> bytes:
+    blocks = translated_blocks(translated_text)
+    try:
+        workbook = zipfile.ZipFile(BytesIO(content))
+        ensure_zip_size(workbook)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read XLSX: {exc}") from exc
+
+    namespace = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    replacements = {}
+    block_index = 0
+    with workbook:
+        shared = xlsx_shared_strings(workbook)
+        for _sheet_name, sheet_path in xlsx_all_sheets(workbook):
+            root = ElementTree.fromstring(workbook.read(sheet_path))
+            changed = False
+            for row in xlsx_rows_with_values(root, shared, namespace):
+                for column in sorted(row["values"], key=xlsx_column_index):
+                    if not spreadsheet_value_looks_translatable(row["values"][column]):
+                        continue
+                    if block_index >= len(blocks):
+                        continue
+                    cell = row["cells"].get(column)
+                    if cell is not None:
+                        xlsx_set_cell_text(cell, blocks[block_index])
+                    block_index += 1
+                    changed = True
+            if changed:
+                replacements[sheet_path] = ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
+    return write_zip_with_replacement(content, replacements)
 
 
 class TranslatableHtmlParser(HTMLParser):
@@ -5980,9 +6132,14 @@ def export_original_history_content(extension: str, content: bytes, text: str, s
     if extension == "pptx":
         return export_pptx_with_translated_text(content, text)
     if extension == "csv":
-        return export_csv_with_translated_text(content, source_meta.get("columns", ""), text)
+        columns = source_meta.get("columns", "")
+        if not columns.strip():
+            return export_csv_auto_with_translated_text(content, text)
+        return export_csv_with_translated_text(content, columns, text)
     if extension == "xlsx":
         columns = source_meta.get("columns", "")
+        if not columns.strip():
+            return export_xlsx_auto_with_translated_text(content, text)
         if xlsx_is_multi_sheet_spec(columns):
             return export_xlsx_multi_sheet_with_translated_text(content, columns, text)
         return export_xlsx_with_translated_text(content, source_meta.get("sheet_name", ""), columns, text)
@@ -6140,8 +6297,13 @@ async def export_csv(
     columns: str = Form(""),
 ):
     content = await read_upload_bytes(file, "CSV")
+    exported = (
+        export_csv_auto_with_translated_text(content, text)
+        if not columns.strip()
+        else export_csv_with_translated_text(content, columns, text)
+    )
     return Response(
-        export_csv_with_translated_text(content, columns, text),
+        exported,
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="linguinator-translation.csv"'},
     )
@@ -6155,11 +6317,12 @@ async def export_xlsx(
     columns: str = Form(""),
 ):
     content = await read_upload_bytes(file, "XLSX")
-    exported = (
-        export_xlsx_multi_sheet_with_translated_text(content, columns, text)
-        if xlsx_is_multi_sheet_spec(columns)
-        else export_xlsx_with_translated_text(content, sheet_name, columns, text)
-    )
+    if not columns.strip():
+        exported = export_xlsx_auto_with_translated_text(content, text)
+    elif xlsx_is_multi_sheet_spec(columns):
+        exported = export_xlsx_multi_sheet_with_translated_text(content, columns, text)
+    else:
+        exported = export_xlsx_with_translated_text(content, sheet_name, columns, text)
     return Response(
         exported,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -6288,6 +6451,8 @@ async def extract_pptx(file: UploadFile = File(...)):
 @app.post("/extract-csv", response_class=PlainTextResponse)
 async def extract_csv(file: UploadFile = File(...), columns: str = Form("")):
     content = await read_upload_bytes(file, "CSV")
+    if not columns.strip():
+        return extract_csv_auto_text_from_bytes(content)
     return extract_csv_text_from_bytes(content, columns)
 
 
@@ -6298,6 +6463,8 @@ async def extract_xlsx(
     columns: str = Form(""),
 ):
     content = await read_upload_bytes(file, "XLSX")
+    if not columns.strip():
+        return extract_xlsx_auto_text_from_bytes(content)
     if xlsx_is_multi_sheet_spec(columns):
         return extract_xlsx_multi_sheet_text_from_bytes(content, columns)
     return extract_xlsx_text_from_bytes(content, sheet_name, columns)
