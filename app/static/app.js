@@ -1788,6 +1788,8 @@ let languageData = null;
       const isPlainTextUpload = ["txt", "md"].includes(item.source_extension) && !isTextFieldName(item.original_name);
       const historyFormats = item.source_extension === "pdf"
         ? ["md", "txt", "doc"]
+        : item.source_extension === "docx"
+        ? ["txt"]
         : isTextFieldName(item.original_name)
         ? ["txt", "doc"]
         : isPlainTextUpload && hasOriginal
