@@ -81,10 +81,12 @@
     <section id="filePanel" class="section tab-panel workspace-section">
       <label id="textFileLabel" for="textFile">TXT File</label>
       <input id="textFile" type="file" accept=".txt,text/plain" title="Select the file to load." data-title-key="tipFilePick">
-      <label for="sheetName" class="file-extra">XLSX Sheet</label>
-      <input id="sheetName" class="file-extra" type="text" placeholder="Optional, first sheet if empty" title="Which sheet to use in an XLSX file. Leave empty for the first sheet. Not used for CSV files, and not used if the columns field below lists its own sheets." data-title-key="tipSheetName">
+      <label for="sheetName" class="file-extra xlsx-only">XLSX Sheet</label>
+      <input id="sheetName" class="file-extra xlsx-only" type="text" placeholder="Optional, first sheet if empty" title="Which sheet to use in an XLSX file. Leave empty for the first sheet. Not used for CSV files, and not used if the columns field below lists its own sheets." data-title-key="tipSheetName">
       <label for="csvColumns" class="file-extra">Columns to translate</label>
       <textarea id="csvColumns" class="file-extra" rows="1" placeholder="Optional, e.g. title,description or A,B" title="Column names or letters to translate. Leave empty to translate every cell (numbers, IP and MAC addresses are skipped automatically). For several XLSX sheets at once, one &quot;Sheet: columns&quot; line per sheet, overriding the sheet field above." data-title-key="tipCsvColumns"></textarea>
+      <label for="docPageRange" class="file-extra docx-only">Pages</label>
+      <input id="docPageRange" class="file-extra docx-only" type="text" placeholder="Optional, e.g. 1-3,5" title="Optional page range, e.g. 1-3,5. Only counts manual page breaks (Ctrl+Enter); a document without any has one page. Leave empty to translate all pages." data-title-key="tipDocPageRange">
     </section>
 
     <section id="pdfPanel" class="section tab-panel workspace-section">

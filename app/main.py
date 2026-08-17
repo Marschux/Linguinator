@@ -323,6 +323,8 @@ ElementTree.register_namespace("text", "urn:oasis:names:tc:opendocument:xmlns:te
 ElementTree.register_namespace("s", "http://schemas.openxmlformats.org/spreadsheetml/2006/main")
 ElementTree.register_namespace("a", "http://schemas.openxmlformats.org/drawingml/2006/main")
 ElementTree.register_namespace("xlf", "urn:oasis:names:tc:xliff:document:1.2")
+ElementTree.register_namespace("style", "urn:oasis:names:tc:opendocument:xmlns:style:1.0")
+ElementTree.register_namespace("fo", "urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0")
 
 APP_DIR = Path(__file__).resolve().parent
 
@@ -4348,7 +4350,35 @@ def exception_message(exc: Exception) -> str:
     return str(exc)
 
 
-def extract_docx_text_from_bytes(content: bytes) -> str:
+def docx_paragraph_page_numbers(paragraphs, w_ns: str) -> List[int]:
+    """Page number (1-based) each word/document.xml body paragraph falls on, counting only manual
+    page breaks (<w:br w:type="page"/>) - the only page boundary actually recorded in the file.
+    A page's natural, layout-driven breaks exist only once Word or a printer renders the document
+    with a particular page size, margins and fonts, none of which the file itself commits to.
+    """
+    br_tag, type_attr = f"{{{w_ns}}}br", f"{{{w_ns}}}type"
+    pages = []
+    page = 1
+    for paragraph in paragraphs:
+        pages.append(page)
+        page += sum(1 for br in paragraph.iter(br_tag) if br.get(type_attr) == "page")
+    return pages
+
+
+def docx_paragraphs_in_range(root, w_ns: str, namespaces: Dict[str, str], page_range: str):
+    """Body paragraphs of word/document.xml, filtered to page_range's manual-break pages. Returns
+    every paragraph unfiltered when page_range is empty or this isn't the main document part -
+    headers, footers, footnotes and comments repeat across pages rather than belonging to one."""
+    paragraphs = root.findall(".//w:p", namespaces)
+    if not page_range.strip():
+        return paragraphs
+    page_numbers = docx_paragraph_page_numbers(paragraphs, w_ns)
+    total_pages = page_numbers[-1] if page_numbers else 1
+    selected = set(parse_page_range(page_range, total_pages))
+    return [paragraph for paragraph, page in zip(paragraphs, page_numbers) if page in selected]
+
+
+def extract_docx_text_from_bytes(content: bytes, page_range: str = "") -> str:
     try:
         with zipfile.ZipFile(BytesIO(content)) as docx:
             ensure_zip_size(docx)
@@ -4368,7 +4398,9 @@ def extract_docx_text_from_bytes(content: bytes) -> str:
             root = ElementTree.fromstring(document)
         except ElementTree.ParseError as exc:
             raise HTTPException(status_code=400, detail=f"Could not parse DOCX XML {part}: {exc}") from exc
-        for paragraph in root.findall(".//w:p", namespaces):
+        body_paragraphs = docx_paragraphs_in_range(
+            root, w_ns, namespaces, page_range if part == "word/document.xml" else "")
+        for paragraph in body_paragraphs:
             for segment in docx_paragraph_run_segments(paragraph, w_ns):
                 text = re.sub(r"\s+", " ", "".join(node.text or "" for node in segment)).strip()
                 if text:
@@ -4507,7 +4539,7 @@ def docx_text_part_names(docx: zipfile.ZipFile) -> List[str]:
     )
 
 
-def export_docx_with_translated_text(content: bytes, translated_text: str) -> bytes:
+def export_docx_with_translated_text(content: bytes, translated_text: str, page_range: str = "") -> bytes:
     blocks = translated_blocks(translated_text)
     if not blocks:
         raise HTTPException(status_code=400, detail="No translated text to export")
@@ -4527,7 +4559,8 @@ def export_docx_with_translated_text(content: bytes, translated_text: str) -> by
     for part, document in documents.items():
         root = ElementTree.fromstring(document)
         changed = False
-        for paragraph in root.findall(".//w:p", namespaces):
+        for paragraph in docx_paragraphs_in_range(
+                root, w_ns, namespaces, page_range if part == "word/document.xml" else ""):
             for text_nodes in docx_paragraph_run_segments(paragraph, w_ns):
                 if block_index >= len(blocks):
                     break
@@ -4573,6 +4606,17 @@ ODT_PARAGRAPH_TAGS = {f"{{{ODT_TEXT_NS}}}p", f"{{{ODT_TEXT_NS}}}h"}
 # gluing the words on either side together the same way <w:tab/> did in DOCX.
 ODT_SPACING_TAGS = {f"{{{ODT_TEXT_NS}}}tab", f"{{{ODT_TEXT_NS}}}line-break"}
 ODT_LINK_TAG = f"{{{ODT_TEXT_NS}}}a"
+ODT_STYLE_NS = "urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+# fo: in an ODF file is this compatibility namespace, not real XSL-FO - a manual page break
+# (Ctrl+Enter in Writer) has no inline marker the way DOCX's <w:br w:type="page"/> does; it sets
+# fo:break-before="page" on a paragraph style instead, referenced by the paragraph's own
+# text:style-name rather than carried on the paragraph itself.
+ODT_FO_NS = "urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"
+ODT_STYLE_TAG = f"{{{ODT_STYLE_NS}}}style"
+ODT_STYLE_NAME_ATTR = f"{{{ODT_STYLE_NS}}}name"
+ODT_PARAGRAPH_PROPERTIES_TAG = f"{{{ODT_STYLE_NS}}}paragraph-properties"
+ODT_BREAK_BEFORE_ATTR = f"{{{ODT_FO_NS}}}break-before"
+ODT_PARAGRAPH_STYLE_ATTR = f"{{{ODT_TEXT_NS}}}style-name"
 
 
 def odt_run_entries(element):
@@ -4629,7 +4673,40 @@ def odt_paragraph_run_segments(element) -> List[List[Tuple[Any, str]]]:
     return segments
 
 
-def extract_odt_text_from_bytes(content: bytes) -> str:
+def odt_page_break_style_names(root) -> Set[str]:
+    """Names of paragraph styles carrying a manual page break, so odt_paragraphs_in_range can
+    tell which paragraphs start a new page from their text:style-name alone."""
+    names = set()
+    for style in root.iter(ODT_STYLE_TAG):
+        properties = style.find(ODT_PARAGRAPH_PROPERTIES_TAG)
+        if properties is not None and properties.get(ODT_BREAK_BEFORE_ATTR) == "page":
+            name = style.get(ODT_STYLE_NAME_ATTR)
+            if name:
+                names.add(name)
+    return names
+
+
+def odt_paragraph_page_numbers(paragraphs, break_style_names: Set[str]) -> List[int]:
+    pages = []
+    page = 1
+    for paragraph in paragraphs:
+        if paragraph.get(ODT_PARAGRAPH_STYLE_ATTR) in break_style_names:
+            page += 1
+        pages.append(page)
+    return pages
+
+
+def odt_paragraphs_in_range(root, page_range: str) -> List[Any]:
+    paragraphs = [element for element in root.iter() if element.tag in ODT_PARAGRAPH_TAGS]
+    if not page_range.strip():
+        return paragraphs
+    page_numbers = odt_paragraph_page_numbers(paragraphs, odt_page_break_style_names(root))
+    total_pages = page_numbers[-1] if page_numbers else 1
+    selected = set(parse_page_range(page_range, total_pages))
+    return [paragraph for paragraph, page in zip(paragraphs, page_numbers) if page in selected]
+
+
+def extract_odt_text_from_bytes(content: bytes, page_range: str = "") -> str:
     try:
         with zipfile.ZipFile(BytesIO(content)) as odt:
             ensure_zip_size(odt)
@@ -4645,9 +4722,7 @@ def extract_odt_text_from_bytes(content: bytes) -> str:
         raise HTTPException(status_code=400, detail=f"Could not parse ODT XML: {exc}") from exc
 
     paragraphs = []
-    for element in root.iter():
-        if element.tag not in ODT_PARAGRAPH_TAGS:
-            continue
+    for element in odt_paragraphs_in_range(root, page_range):
         for segment in odt_paragraph_run_segments(element):
             text = re.sub(r"\s+", " ", "".join(getattr(el, attr) or "" for el, attr in segment)).strip()
             if text:
@@ -4659,7 +4734,7 @@ def extract_odt_text_from_bytes(content: bytes) -> str:
     return result
 
 
-def export_odt_with_translated_text(content: bytes, translated_text: str) -> bytes:
+def export_odt_with_translated_text(content: bytes, translated_text: str, page_range: str = "") -> bytes:
     blocks = translated_blocks(translated_text)
     if not blocks:
         raise HTTPException(status_code=400, detail="No translated text to export")
@@ -4674,9 +4749,7 @@ def export_odt_with_translated_text(content: bytes, translated_text: str) -> byt
 
     root = ElementTree.fromstring(document)
     block_index = 0
-    for element in root.iter():
-        if element.tag not in ODT_PARAGRAPH_TAGS:
-            continue
+    for element in odt_paragraphs_in_range(root, page_range):
         for segment in odt_paragraph_run_segments(element):
             if block_index >= len(blocks):
                 break
@@ -6004,6 +6077,7 @@ async def start_translate_file_job(
     target: str = Form(DEFAULT_TARGET),
     columns: str = Form(""),
     sheet_name: str = Form(""),
+    page_range: str = Form(""),
 ):
     ensure_known_language(source, allow_auto=True)
     ensure_known_language(target)
@@ -6015,7 +6089,7 @@ async def start_translate_file_job(
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
     source_payload_path = job_payload_path(job_id).with_suffix(".source")
     source_payload_path.write_bytes(content)
-    source_meta = {"columns": columns, "sheet_name": sheet_name}
+    source_meta = {"columns": columns, "sheet_name": sheet_name, "page_range": page_range}
     update_job(
         job_id,
         text=text,
@@ -6127,9 +6201,9 @@ def original_export_media_type(extension: str) -> str:
 
 def export_original_history_content(extension: str, content: bytes, text: str, source_meta: Dict[str, str]) -> bytes:
     if extension == "docx":
-        return export_docx_with_translated_text(content, text)
+        return export_docx_with_translated_text(content, text, source_meta.get("page_range", ""))
     if extension == "odt":
-        return export_odt_with_translated_text(content, text)
+        return export_odt_with_translated_text(content, text, source_meta.get("page_range", ""))
     if extension == "pptx":
         return export_pptx_with_translated_text(content, text)
     if extension == "csv":
@@ -6445,15 +6519,15 @@ async def extract_pdf(
 
 
 @app.post("/extract-docx", response_class=PlainTextResponse)
-async def extract_docx(file: UploadFile = File(...)):
+async def extract_docx(file: UploadFile = File(...), page_range: str = Form("")):
     content = await read_upload_bytes(file, "DOCX")
-    return extract_docx_text_from_bytes(content)
+    return extract_docx_text_from_bytes(content, page_range)
 
 
 @app.post("/extract-odt", response_class=PlainTextResponse)
-async def extract_odt(file: UploadFile = File(...)):
+async def extract_odt(file: UploadFile = File(...), page_range: str = Form("")):
     content = await read_upload_bytes(file, "ODT")
-    return extract_odt_text_from_bytes(content)
+    return extract_odt_text_from_bytes(content, page_range)
 
 
 @app.post("/extract-pptx", response_class=PlainTextResponse)

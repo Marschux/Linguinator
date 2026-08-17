@@ -85,6 +85,8 @@ let languageData = null;
         pageRangeHint: "Pages, e.g. 1-3,5",
         sheetNameLabel: "XLSX Sheet",
         sheetNameHint: "Optional, first sheet if empty",
+        docPageRangeLabel: "Pages",
+        docPageRangeHint: "Optional, e.g. 1-3,5",
         csvColumnsLabel: "Columns to translate",
         csvColumnsHint: "Optional, e.g. title,description or A,B",
         historyFilterHint: "Filter history...",
@@ -106,6 +108,7 @@ let languageData = null;
         tipTextResult: "The translation, once the job completes.",
         tipFilePick: "Select the file to load.",
         tipSheetName: "Which sheet to use in an XLSX file. Leave empty for the first sheet. Not used for CSV files, and not used if the columns field below lists its own sheets.",
+        tipDocPageRange: "Optional page range, e.g. 1-3,5. Only counts manual page breaks (Ctrl+Enter); a document without any has one page. Leave empty to translate all pages.",
         tipCsvColumns: "Column names or letters to translate. Leave empty to translate every cell (numbers, IP and MAC addresses are skipped automatically). For several XLSX sheets at once, one \"Sheet: columns\" line per sheet, overriding the sheet field above.",
         tipPdfPick: "Select the PDF to translate.",
         tipPageRange: "Optional page range, e.g. 1-3,5. Leave empty to translate all pages.",
@@ -188,6 +191,8 @@ let languageData = null;
         pageRangeHint: "Seiten, z. B. 1-3,5",
         sheetNameLabel: "XLSX-Blatt",
         sheetNameHint: "Optional, ohne Angabe erstes Blatt",
+        docPageRangeLabel: "Seiten",
+        docPageRangeHint: "Optional, z. B. 1-3,5",
         csvColumnsLabel: "Zu übersetzende Spalten",
         csvColumnsHint: "Optional, z. B. titel,beschreibung oder A,B",
         historyFilterHint: "Verlauf filtern...",
@@ -209,6 +214,7 @@ let languageData = null;
         tipTextResult: "Die Übersetzung, sobald der Job abgeschlossen ist.",
         tipFilePick: "Zu ladende Datei wählen.",
         tipSheetName: "Welches Blatt einer XLSX-Datei verwendet wird. Leer lassen für das erste Blatt. Wird bei CSV-Dateien nicht verwendet, und nicht, wenn das Spalten-Feld unten eigene Blätter angibt.",
+        tipDocPageRange: "Optionaler Seitenbereich, z. B. 1-3,5. Zählt nur manuelle Seitenumbrüche (Strg+Enter); ein Dokument ohne solche hat eine Seite. Leer übersetzt alle Seiten.",
         tipCsvColumns: "Zu übersetzende Spaltennamen oder -buchstaben. Leer lassen, um jede Zelle zu übersetzen (Zahlen, IP- und MAC-Adressen werden automatisch übersprungen). Für mehrere XLSX-Blätter auf einmal: pro Blatt eine Zeile \"Blatt: Spalten\", das ersetzt das Blatt-Feld oben.",
         tipPdfPick: "Zu uebersetzende PDF wählen.",
         tipPageRange: "Optionaler Seitenbereich, z. B. 1-3,5. Leer übersetzt alle Seiten.",
@@ -291,6 +297,8 @@ let languageData = null;
         pageRangeHint: "Páginas, p. ej. 1-3,5",
         sheetNameLabel: "Hoja XLSX",
         sheetNameHint: "Opcional, primera hoja si está vacío",
+        docPageRangeLabel: "Páginas",
+        docPageRangeHint: "Opcional, p. ej. 1-3,5",
         csvColumnsLabel: "Columnas a traducir",
         csvColumnsHint: "Opcional, p. ej. título,descripción o A,B",
         historyFilterHint: "Filtrar historial...",
@@ -312,6 +320,7 @@ let languageData = null;
         tipTextResult: "La traducción, una vez que el trabajo se complete.",
         tipFilePick: "Elegir el archivo a cargar.",
         tipSheetName: "Qué hoja usar en un archivo XLSX. Vacío para la primera hoja. No se usa en archivos CSV, ni si el campo de columnas de abajo indica sus propias hojas.",
+        tipDocPageRange: "Rango de páginas opcional, p. ej. 1-3,5. Solo cuenta saltos de página manuales (Ctrl+Intro); un documento sin ninguno tiene una página. Vacío traduce todas las páginas.",
         tipCsvColumns: "Nombres o letras de las columnas a traducir. Déjalo vacío para traducir cada celda (los números y las direcciones IP/MAC se omiten automáticamente). Para varias hojas XLSX a la vez: una línea \"Hoja: columnas\" por hoja, que sustituye al campo de hoja de arriba.",
         tipPdfPick: "Elegir el PDF a traducir.",
         tipPageRange: "Rango de páginas opcional, p. ej. 1-3,5. Vacío traduce todas.",
@@ -394,6 +403,8 @@ let languageData = null;
         pageRangeHint: "Pages, p. ex. 1-3,5",
         sheetNameLabel: "Feuille XLSX",
         sheetNameHint: "Optionnel, première feuille si vide",
+        docPageRangeLabel: "Pages",
+        docPageRangeHint: "Optionnel, p. ex. 1-3,5",
         csvColumnsLabel: "Colonnes à traduire",
         csvColumnsHint: "Optionnel, p. ex. titre,description ou A,B",
         historyFilterHint: "Filtrer l'historique...",
@@ -415,6 +426,7 @@ let languageData = null;
         tipTextResult: "La traduction, une fois le travail terminé.",
         tipFilePick: "Choisir le fichier à charger.",
         tipSheetName: "Quelle feuille utiliser dans un fichier XLSX. Vide pour la première feuille. Pas utilisé pour les fichiers CSV, ni si le champ colonnes ci-dessous indique ses propres feuilles.",
+        tipDocPageRange: "Plage de pages optionnelle, p. ex. 1-3,5. Ne compte que les sauts de page manuels (Ctrl+Entrée) ; un document sans saut a une seule page. Vide traduit toutes les pages.",
         tipCsvColumns: "Noms ou lettres des colonnes à traduire. Laisser vide pour traduire chaque cellule (nombres, adresses IP et MAC ignorés automatiquement). Pour plusieurs feuilles XLSX à la fois : une ligne \"Feuille : colonnes\" par feuille, qui remplace le champ feuille ci-dessus.",
         tipPdfPick: "Choisir le PDF à traduire.",
         tipPageRange: "Plage de pages optionnelle, p. ex. 1-3,5. Vide traduit tout.",
@@ -619,9 +631,11 @@ let languageData = null;
       }
       setText('label[for="sheetName"]', "sheetNameLabel");
       setText('label[for="csvColumns"]', "csvColumnsLabel");
+      setText('label[for="docPageRange"]', "docPageRangeLabel");
       setPlaceholder("#pageRange", "pageRangeHint");
       setPlaceholder("#sheetName", "sheetNameHint");
       setPlaceholder("#csvColumns", "csvColumnsHint");
+      setPlaceholder("#docPageRange", "docPageRangeHint");
       setPlaceholder("#historyFilter", "historyFilterHint");
       refreshInputLabels();
       refreshInputTabSelectLabels();
@@ -1034,9 +1048,23 @@ let languageData = null;
         fileInput.value = "";
         document.getElementById("textFileLabel").textContent = t(config.labelKey);
       }
-      const showSheet = tab === "csv";
-      document.querySelectorAll(".file-extra").forEach((input) => {
-        input.classList.toggle("visible", showSheet);
+      const showColumns = tab === "csv";
+      document.querySelectorAll(".file-extra:not(.xlsx-only):not(.docx-only)").forEach((input) => {
+        input.classList.toggle("visible", showColumns);
+      });
+      document.querySelectorAll(".docx-only").forEach((input) => {
+        input.classList.toggle("visible", tab === "office");
+      });
+      updateSheetFieldVisibility();
+    }
+
+    // The sheet field only means anything for an XLSX upload - showing it for every CSV
+    // tab file (most of which are plain .csv) just adds a field that does nothing.
+    function updateSheetFieldVisibility() {
+      const file = document.getElementById("textFile").files[0];
+      const isXlsx = currentInputTab === "csv" && file && file.name.toLowerCase().endsWith(".xlsx");
+      document.querySelectorAll(".xlsx-only").forEach((el) => {
+        el.classList.toggle("visible", isXlsx);
       });
     }
 
@@ -1066,7 +1094,8 @@ let languageData = null;
       const lowerName = file.name.toLowerCase();
       const isCsv = lowerName.endsWith(".csv");
       const isXlsx = lowerName.endsWith(".xlsx");
-      const isOfficeFile = lowerName.endsWith(".docx") || lowerName.endsWith(".odt") || lowerName.endsWith(".pptx");
+      const isDocOrOdt = lowerName.endsWith(".docx") || lowerName.endsWith(".odt");
+      const isOfficeFile = isDocOrOdt || lowerName.endsWith(".pptx");
       const isStructuredText = [".html", ".htm", ".srt", ".vtt", ".json", ".yaml", ".yml", ".po", ".xlf", ".xliff"].some((extension) => lowerName.endsWith(extension));
       currentOriginalExtension = lowerName.split(".").pop() || currentOriginalExtension;
       if (isCsv || isXlsx || isOfficeFile || isStructuredText) {
@@ -1077,6 +1106,9 @@ let languageData = null;
         }
         if (isXlsx) {
           form.append("sheet_name", document.getElementById("sheetName").value);
+        }
+        if (isDocOrOdt) {
+          form.append("page_range", document.getElementById("docPageRange").value);
         }
         const path = extractionPathForFile(lowerName);
         setStatusRow("extracting", t("extracting") + " " + lowerName.split(".").pop().toUpperCase() + "...");
@@ -1107,6 +1139,7 @@ let languageData = null;
       renderHistory();
     }
     document.getElementById("textFile").addEventListener("change", clearOwnJobOnNewFile);
+    document.getElementById("textFile").addEventListener("change", updateSheetFieldVisibility);
     document.getElementById("pdf").addEventListener("change", clearOwnJobOnNewFile);
 
     function errorTextFromResponse(text) {
@@ -1512,6 +1545,7 @@ let languageData = null;
         form.append("target", target);
         form.append("columns", document.getElementById("csvColumns").value);
         form.append("sheet_name", document.getElementById("sheetName").value);
+        form.append("page_range", document.getElementById("docPageRange").value);
         response = await fetch("jobs/translate-file", {method: "POST", body: form});
       } else {
         response = await fetch("jobs/translate", {

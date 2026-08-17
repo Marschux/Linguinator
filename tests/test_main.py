@@ -314,6 +314,52 @@ def odt_with_span():
     return buffer.getvalue()
 
 
+def docx_with_page_break(paragraphs):
+    """paragraphs is a list of lists, one inner list of paragraph texts per page - a manual
+    <w:br w:type="page"/> paragraph is inserted between each page's paragraphs."""
+    pages = []
+    for page in paragraphs:
+        pages.append("".join("<w:p><w:r><w:t>" + text + "</w:t></w:r></w:p>" for text in page))
+    body = ('<w:p><w:r><w:br w:type="page"/></w:r></w:p>').join(pages)
+    document = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        "<w:body>" + body + "</w:body></w:document>"
+    )
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as docx:
+        docx.writestr("word/document.xml", document)
+    return buffer.getvalue()
+
+
+def odt_with_page_break(paragraphs):
+    """paragraphs is a list of lists, one inner list of paragraph texts per page - the first
+    paragraph of every page after the first carries a style with fo:break-before="page"."""
+    pages = []
+    for index, page in enumerate(paragraphs):
+        for position, text in enumerate(page):
+            style = ' text:style-name="PageBreak"' if index > 0 and position == 0 else ""
+            pages.append(f"<text:p{style}>{text}</text:p>")
+    document = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<office:document-content '
+        'xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" '
+        'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
+        'xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" '
+        'xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0">'
+        '<office:automatic-styles>'
+        '<style:style style:name="PageBreak" style:family="paragraph">'
+        '<style:paragraph-properties fo:break-before="page"/>'
+        "</style:style></office:automatic-styles>"
+        "<office:body><office:text>" + "".join(pages) + "</office:text></office:body>"
+        "</office:document-content>"
+    )
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w") as odt:
+        odt.writestr("content.xml", document)
+    return buffer.getvalue()
+
+
 def minimal_xlsx(target="worksheets/sheet1.xml", sheet_cell_type="inlineStr", sheet_value=None):
     if sheet_cell_type == "s":
         first_value = f'<c r="A1" t="s"><v>{sheet_value or "99"}</v></c>'
@@ -1342,8 +1388,14 @@ class MainTests(unittest.TestCase):
         with patch.object(main, "export_docx_with_translated_text", return_value=b"translated docx") as export_mock:
             result = main.export_original_history_content("docx", b"source docx", "translated text", {})
 
-        export_mock.assert_called_once_with(b"source docx", "translated text")
+        export_mock.assert_called_once_with(b"source docx", "translated text", "")
         self.assertEqual(result, b"translated docx")
+
+    def test_export_original_history_content_passes_docx_page_range_through(self):
+        with patch.object(main, "export_docx_with_translated_text", return_value=b"translated docx") as export_mock:
+            main.export_original_history_content("docx", b"source docx", "translated text", {"page_range": "2-3"})
+
+        export_mock.assert_called_once_with(b"source docx", "translated text", "2-3")
 
     def test_export_original_history_content_uses_layout_overlay_when_marked(self):
         with patch.object(main, "export_pdf_layout_with_translated_text", return_value=b"overlay pdf") as overlay_mock:
@@ -3653,6 +3705,43 @@ class MainTests(unittest.TestCase):
             "Body neu\n\nHeader neu\n\nFooter neu\n\nFootnote neu\n\nComment neu",
         )
 
+    def test_docx_extraction_filters_by_manual_page_break(self):
+        content = docx_with_page_break([["Page one"], ["Page two"]])
+
+        self.assertEqual(main.extract_docx_text_from_bytes(content, "1"), "Page one")
+        self.assertEqual(main.extract_docx_text_from_bytes(content, "2"), "Page two")
+        self.assertEqual(main.extract_docx_text_from_bytes(content), "Page one\n\nPage two")
+
+    def test_docx_export_leaves_paragraphs_outside_the_page_range_untouched(self):
+        content = docx_with_page_break([["Page one"], ["Page two"]])
+
+        updated = main.export_docx_with_translated_text(content, "Seite eins", "1")
+
+        self.assertEqual(main.extract_docx_text_from_bytes(updated), "Seite eins\n\nPage two")
+
+    def test_docx_page_range_ignores_headers_and_footnotes(self):
+        # A header or footnote is not owned by any one page - it repeats across every page the
+        # document has, so filtering it out with the body's page range would just delete it.
+        content = docx_with_extra_text_parts()
+
+        self.assertEqual(
+            main.extract_docx_text_from_bytes(content, "1"),
+            "Body\n\nHeader\n\nFooter\n\nFootnote\n\nComment",
+        )
+
+    def test_extract_docx_route_passes_page_range_through(self):
+        content = docx_with_page_break([["Page one"], ["Page two"]])
+        client = TestClient(main.app)
+
+        response = client.post(
+            "/extract-docx",
+            files={"file": ("test.docx", content, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+            data={"page_range": "2"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.text, "Page two")
+
     def test_zip_size_limit_rejects_large_uncompressed_archives(self):
         content = minimal_docx(["First paragraph"])
 
@@ -3686,6 +3775,20 @@ class MainTests(unittest.TestCase):
         updated = main.export_odt_with_translated_text(content, "Erster Absatz\n\nZweiter Absatz")
 
         self.assertEqual(main.extract_odt_text_from_bytes(updated), "Erster Absatz\n\nZweiter Absatz")
+
+    def test_odt_extraction_filters_by_manual_page_break(self):
+        content = odt_with_page_break([["Page one"], ["Page two"]])
+
+        self.assertEqual(main.extract_odt_text_from_bytes(content, "1"), "Page one")
+        self.assertEqual(main.extract_odt_text_from_bytes(content, "2"), "Page two")
+        self.assertEqual(main.extract_odt_text_from_bytes(content), "Page one\n\nPage two")
+
+    def test_odt_export_leaves_paragraphs_outside_the_page_range_untouched(self):
+        content = odt_with_page_break([["Page one"], ["Page two"]])
+
+        updated = main.export_odt_with_translated_text(content, "Seite eins", "1")
+
+        self.assertEqual(main.extract_odt_text_from_bytes(updated), "Seite eins\n\nPage two")
 
     def test_odt_export_preserves_inline_span_structure(self):
         content = odt_with_span()
