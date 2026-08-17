@@ -103,12 +103,11 @@
         </button>
         <div class="actions actions-right">
           <div class="reset-history">
-            <button id="resetHistory" class="secondary" type="button" title="Delete old history entries, keeping a number you choose." data-title-key="tipHistoryReset">Reset</button>
-            <div id="resetHistoryPanel" class="reset-history-panel invisible">
-              <label for="resetHistoryKeep" id="resetHistoryKeepLabel">Keep</label>
-              <input id="resetHistoryKeep" type="number" min="0" step="1" class="reset-history-input">
-              <button id="resetHistoryConfirm" type="button" title="Confirm." data-title-key="tipHistoryResetConfirm">&#10003;</button>
-            </div>
+            <label id="historySelectAllLabel" class="history-select-all invisible">
+              <input id="historySelectAll" type="checkbox">
+              <span data-title-key="historySelectAll">Select all</span>
+            </label>
+            <button id="resetHistory" class="secondary" type="button" title="Select history entries to delete." data-title-key="tipHistoryReset">Select</button>
           </div>
           <button id="pauseJob" class="secondary" disabled title="Pause the entire queue." data-title-key="tipPause">Pause</button>
           <button id="resumeJob" class="secondary" disabled title="Resume the entire queue." data-title-key="tipResume">Resume</button>

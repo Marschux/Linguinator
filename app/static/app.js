@@ -47,7 +47,9 @@ let languageData = null;
         resume: "Resume",
         stop: "Stop",
         cancel: "Cancel",
-        historyReset: "Reset",
+        historySelect: "Select",
+        historySelectAll: "Select all",
+        historyDeleteCount: "Delete ({count})",
         history: "History",
         noHistory: "No saved translations yet.",
         noHistoryMatch: "No history entries match this filter.",
@@ -83,7 +85,6 @@ let languageData = null;
         sheetNameHint: "XLSX sheet name, optional",
         csvColumnsHint: "Leave empty to translate the whole file, or e.g. title,description or A,B - or one \"Sheet: columns\" line per XLSX sheet",
         historyFilterHint: "Filter history...",
-        historyResetKeepLabel: "Keep",
         tipReload: "Reload Linguinator.",
         tipUiLanguage: "Select the interface language.",
         tipTheme: "Toggle light/dark mode.",
@@ -109,8 +110,7 @@ let languageData = null;
         tipPause: "Pause the entire queue.",
         tipResume: "Resume the entire queue.",
         tipStop: "Cancel the entire queue.",
-        tipHistoryReset: "Delete old history entries, keeping a number you choose.",
-        tipHistoryResetConfirm: "Delete everything past that number.",
+        tipHistoryReset: "Select history entries to delete.",
         tipHistoryToggle: "Show or hide the history list.",
         tipHistoryFilter: "Filter history by filename or languages.",
         tipPrevPage: "Previous page.",
@@ -147,7 +147,9 @@ let languageData = null;
         resume: "Fortsetzen",
         stop: "Stoppen",
         cancel: "Abbrechen",
-        historyReset: "Zurücksetzen",
+        historySelect: "Auswählen",
+        historySelectAll: "Alle auswählen",
+        historyDeleteCount: "Löschen ({count})",
         history: "Verlauf",
         noHistory: "Noch keine gespeicherten Übersetzungen.",
         noHistoryMatch: "Kein Verlaufseintrag passt zu diesem Filter.",
@@ -183,7 +185,6 @@ let languageData = null;
         sheetNameHint: "XLSX-Blattname, optional",
         csvColumnsHint: "Leer lassen für die ganze Datei, oder z. B. titel,beschreibung oder A,B - oder je Blatt eine Zeile \"Blatt: Spalten\"",
         historyFilterHint: "Verlauf filtern...",
-        historyResetKeepLabel: "Behalten",
         tipReload: "Linguinator neu laden.",
         tipUiLanguage: "Sprache der Oberfläche wählen.",
         tipTheme: "Zwischen hell und dunkel wechseln.",
@@ -209,8 +210,7 @@ let languageData = null;
         tipPause: "Gesamte Warteschlange pausieren.",
         tipResume: "Gesamte Warteschlange fortsetzen.",
         tipStop: "Gesamte Warteschlange abbrechen.",
-        tipHistoryReset: "Alte Verlaufseinträge löschen, eine wählbare Anzahl bleibt erhalten.",
-        tipHistoryResetConfirm: "Alles über dieser Zahl löschen.",
+        tipHistoryReset: "Verlaufseinträge zum Löschen auswählen.",
         tipHistoryToggle: "Verlauf ein- oder ausklappen.",
         tipHistoryFilter: "Verlauf nach Dateiname oder Sprachen filtern.",
         tipPrevPage: "Vorherige Seite.",
@@ -247,7 +247,9 @@ let languageData = null;
         resume: "Continuar",
         stop: "Detener",
         cancel: "Cancelar",
-        historyReset: "Restablecer",
+        historySelect: "Seleccionar",
+        historySelectAll: "Seleccionar todo",
+        historyDeleteCount: "Eliminar ({count})",
         history: "Historial",
         noHistory: "Aún no hay traducciones guardadas.",
         noHistoryMatch: "Ningún elemento del historial coincide con este filtro.",
@@ -283,7 +285,6 @@ let languageData = null;
         sheetNameHint: "Nombre de hoja XLSX, opcional",
         csvColumnsHint: "Vacío para traducir todo el archivo, o p. ej. título,descripción o A,B - o una línea \"Hoja: columnas\" por hoja",
         historyFilterHint: "Filtrar historial...",
-        historyResetKeepLabel: "Conservar",
         tipReload: "Recargar Linguinator.",
         tipUiLanguage: "Elegir el idioma de la interfaz.",
         tipTheme: "Cambiar entre modo claro y oscuro.",
@@ -309,8 +310,7 @@ let languageData = null;
         tipPause: "Pausar toda la cola.",
         tipResume: "Continuar toda la cola.",
         tipStop: "Cancelar toda la cola.",
-        tipHistoryReset: "Eliminar entradas antiguas del historial, conservando la cantidad que elijas.",
-        tipHistoryResetConfirm: "Eliminar todo a partir de ese número.",
+        tipHistoryReset: "Selecciona entradas del historial para eliminar.",
         tipHistoryToggle: "Mostrar u ocultar el historial.",
         tipHistoryFilter: "Filtrar el historial por nombre o idiomas.",
         tipPrevPage: "Página anterior.",
@@ -347,7 +347,9 @@ let languageData = null;
         resume: "Reprendre",
         stop: "Arrêter",
         cancel: "Annuler",
-        historyReset: "Réinitialiser",
+        historySelect: "Sélectionner",
+        historySelectAll: "Tout sélectionner",
+        historyDeleteCount: "Supprimer ({count})",
         history: "Historique",
         noHistory: "Aucune traduction enregistrée.",
         noHistoryMatch: "Aucun élément de l'historique ne correspond à ce filtre.",
@@ -383,7 +385,6 @@ let languageData = null;
         sheetNameHint: "Nom de feuille XLSX, optionnel",
         csvColumnsHint: "Vide pour traduire tout le fichier, ou p. ex. titre,description ou A,B - ou une ligne \"Feuille : colonnes\" par feuille",
         historyFilterHint: "Filtrer l'historique...",
-        historyResetKeepLabel: "Conserver",
         tipReload: "Recharger Linguinator.",
         tipUiLanguage: "Choisir la langue de l'interface.",
         tipTheme: "Basculer entre mode clair et sombre.",
@@ -409,8 +410,7 @@ let languageData = null;
         tipPause: "Mettre toute la file en pause.",
         tipResume: "Reprendre toute la file.",
         tipStop: "Annuler toute la file.",
-        tipHistoryReset: "Supprimer les anciennes entrées de l'historique, en conservant un nombre au choix.",
-        tipHistoryResetConfirm: "Supprimer tout au-delà de ce nombre.",
+        tipHistoryReset: "Sélectionner des entrées de l'historique à supprimer.",
         tipHistoryToggle: "Afficher ou masquer l'historique.",
         tipHistoryFilter: "Filtrer l'historique par nom ou langues.",
         tipPrevPage: "Page précédente.",
@@ -598,8 +598,8 @@ let languageData = null;
       setText("#pauseJob", "pause");
       setText("#resumeJob", "resume");
       setText("#stopJob", "stop");
-      setText("#resetHistory", "historyReset");
-      setText("#resetHistoryKeepLabel", "historyResetKeepLabel");
+      updateHistoryDeleteButton();
+      setText("#historySelectAllLabel span", "historySelectAll");
       setText('label[for="history"]', "history");
       setTitle("#uiLanguage", "uiLanguage");
       for (const element of document.querySelectorAll("[data-title-key]")) {
@@ -1611,25 +1611,70 @@ let languageData = null;
       return (bytes / 1024 / 1024).toFixed(1) + " MB";
     }
 
-    function openResetHistoryPanel() {
-      const input = document.getElementById("resetHistoryKeep");
-      input.value = String(historyItems.length);
-      document.getElementById("resetHistoryPanel").classList.remove("invisible");
-      input.focus();
-      input.select();
+    // Picking entries to delete, rather than "keep the N most recent": the button doubles as the
+    // mode switch (Select -> Delete (N) / Cancel) so there is no separate popover to open, close
+    // or click outside of.
+    let historySelecting = false;
+    let selectedHistoryIds = new Set();
+
+    function updateHistoryDeleteButton() {
+      const button = document.getElementById("resetHistory");
+      const selectAllLabel = document.getElementById("historySelectAllLabel");
+      if (!historySelecting) {
+        button.textContent = t("historySelect");
+        selectAllLabel.classList.add("invisible");
+        return;
+      }
+      selectAllLabel.classList.remove("invisible");
+      button.textContent = selectedHistoryIds.size
+        ? t("historyDeleteCount", {count: selectedHistoryIds.size})
+        : t("cancel");
+      const allIds = filteredHistoryItems().map((item) => item.id);
+      document.getElementById("historySelectAll").checked =
+        allIds.length > 0 && allIds.every((id) => selectedHistoryIds.has(id));
     }
 
-    function closeResetHistoryPanel() {
-      document.getElementById("resetHistoryPanel").classList.add("invisible");
+    function toggleHistorySelection(id) {
+      if (selectedHistoryIds.has(id)) selectedHistoryIds.delete(id);
+      else selectedHistoryIds.add(id);
+      updateHistoryDeleteButton();
     }
 
-    async function confirmResetHistory() {
-      const keep = parseInt(document.getElementById("resetHistoryKeep").value, 10);
-      closeResetHistoryPanel();
-      if (isNaN(keep) || keep < 0) return;
-      await fetch("history?keep=" + keep, {method: "DELETE"});
+    function exitHistorySelection() {
+      historySelecting = false;
+      selectedHistoryIds.clear();
+      document.getElementById("history").classList.remove("selecting");
+      updateHistoryDeleteButton();
+    }
+
+    document.getElementById("historySelectAll").addEventListener("change", (event) => {
+      if (event.target.checked) {
+        for (const item of filteredHistoryItems()) selectedHistoryIds.add(item.id);
+      } else {
+        selectedHistoryIds.clear();
+      }
+      updateHistoryDeleteButton();
+      renderHistory();
+    });
+
+    document.getElementById("resetHistory").addEventListener("click", async () => {
+      if (!historySelecting) {
+        historySelecting = true;
+        document.getElementById("history").classList.add("selecting");
+        updateHistoryDeleteButton();
+        renderHistory();
+        return;
+      }
+      if (!selectedHistoryIds.size) {
+        exitHistorySelection();
+        renderHistory();
+        return;
+      }
+      const ids = [...selectedHistoryIds];
+      await Promise.all(ids.map((id) => fetch("history/" + encodeURIComponent(id), {method: "DELETE"})));
+      exitHistorySelection();
       await loadHistory();
-    }
+    });
 
     async function loadHistory() {
       const response = await fetch("history");
@@ -1698,10 +1743,19 @@ let languageData = null;
       if (lastCompletedJob && lastCompletedJob.history_id === item.id) {
         row.classList.add("history-row-own-current");
       }
-      // Same left column as the queue rows above, where a finished job carries the same tick.
+      // Same left column as the queue rows above, where a finished job carries the same tick -
+      // swapped for a checkbox in the same slot while deleting is in progress.
       const tick = document.createElement("span");
       tick.className = "history-tick";
       tick.textContent = "✓";
+      const select = document.createElement("input");
+      select.type = "checkbox";
+      select.className = "history-select";
+      select.checked = selectedHistoryIds.has(item.id);
+      select.addEventListener("click", (event) => {
+        event.stopPropagation();
+        toggleHistorySelection(item.id);
+      });
       row.dataset.fileType = fileTypeKey(item.source_extension, item.original_name);
       const main = document.createElement("div");
       main.className = "history-main";
@@ -1777,14 +1831,21 @@ let languageData = null;
       actions.appendChild(format);
       actions.appendChild(download);
       row.appendChild(tick);
+      row.appendChild(select);
       row.appendChild(main);
       row.appendChild(actions);
       // Clicking a running job in the list above attaches it to this browser's tab title;
       // clicking a finished one here lets go of it again. The marking on the row stays, it says
-      // who started the job, not what the tab is showing.
-      row.title = t("unwatchJob");
+      // who started the job, not what the tab is showing. While deleting is in progress, a row
+      // click toggles its checkbox instead - the whole row is the easier target to hit.
+      row.title = historySelecting ? "" : t("unwatchJob");
       row.addEventListener("click", (event) => {
         if (event.target.closest(".history-actions") || event.target.closest("a")) return;
+        if (historySelecting) {
+          toggleHistorySelection(item.id);
+          renderHistory();
+          return;
+        }
         unwatchJob();
       });
       return row;
@@ -1884,25 +1945,6 @@ let languageData = null;
     document.getElementById("pauseJob").addEventListener("click", () => controlQueue("pause"));
     document.getElementById("resumeJob").addEventListener("click", () => controlQueue("resume"));
     document.getElementById("stopJob").addEventListener("click", () => controlQueue("cancel"));
-    document.getElementById("resetHistory").addEventListener("click", () => {
-      const panel = document.getElementById("resetHistoryPanel");
-      if (panel.classList.contains("invisible")) openResetHistoryPanel();
-      else closeResetHistoryPanel();
-    });
-    document.getElementById("resetHistoryConfirm").addEventListener("click", () => confirmResetHistory());
-    document.getElementById("resetHistoryKeep").addEventListener("keydown", (event) => {
-      if (event.key === "Enter") confirmResetHistory();
-      if (event.key === "Escape") closeResetHistoryPanel();
-    });
-    // Anywhere else in the document closes it, the same way a native <select> or the language
-    // picker's own dropdown already behaves - a popover that only closes via its own button is
-    // the thing that reads as stuck open.
-    document.addEventListener("click", (event) => {
-      const panel = document.getElementById("resetHistoryPanel");
-      if (panel.classList.contains("invisible")) return;
-      if (event.target.closest(".reset-history")) return;
-      closeResetHistoryPanel();
-    });
 
     setupUiLanguagePicker();
     loadLanguages().catch((error) => {
