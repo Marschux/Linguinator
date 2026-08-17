@@ -60,6 +60,9 @@ class FakeDocument:
     def __getitem__(self, index):
         return self.pages[index]
 
+    def close(self):
+        pass
+
 
 def fold(text):
     """NFKC, so a letter and the presentation form of it compare equal."""

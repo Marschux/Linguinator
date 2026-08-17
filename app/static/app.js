@@ -63,6 +63,9 @@ let languageData = null;
         unwatchJob: "Click to stop following it; the tab title goes back to plain Linguinator.",
         started: "Started",
         chunks: "chunks",
+        etaCalculating: "calculating",
+        etaSeconds: "{seconds}s",
+        etaMinutesSeconds: "{minutes}m {seconds}s",
         jobFailed: "Job failed.",
         selectFileFirst: "Select a supported text, document, table, subtitle, or localization file first.",
         selectPdfFirst: "Select a PDF first.",
@@ -163,6 +166,9 @@ let languageData = null;
         unwatchJob: "Klicken, um die Verfolgung zu beenden; der Tab-Titel zeigt wieder nur Linguinator.",
         started: "Gestartet",
         chunks: "Chunks",
+        etaCalculating: "wird berechnet",
+        etaSeconds: "{seconds}s",
+        etaMinutesSeconds: "{minutes}m {seconds}s",
         jobFailed: "Job fehlgeschlagen.",
         selectFileFirst: "Wähle zuerst eine unterstützte Text-, Dokument-, Tabellen-, Untertitel- oder Lokalisierungsdatei.",
         selectPdfFirst: "Wähle zuerst eine PDF aus.",
@@ -263,6 +269,9 @@ let languageData = null;
         unwatchJob: "Haz clic para dejar de seguirlo; el título vuelve a ser solo Linguinator.",
         started: "Iniciado",
         chunks: "fragmentos",
+        etaCalculating: "calculando",
+        etaSeconds: "{seconds}s",
+        etaMinutesSeconds: "{minutes}m {seconds}s",
         jobFailed: "El trabajo falló.",
         selectFileFirst: "Selecciona primero un archivo compatible de texto, documento, tabla, subtítulos o localización.",
         selectPdfFirst: "Selecciona primero un PDF.",
@@ -363,6 +372,9 @@ let languageData = null;
         unwatchJob: "Cliquer pour ne plus le suivre ; le titre revient à Linguinator seul.",
         started: "Démarré",
         chunks: "segments",
+        etaCalculating: "calcul en cours",
+        etaSeconds: "{seconds}s",
+        etaMinutesSeconds: "{minutes}m {seconds}s",
         jobFailed: "Le job a échoué.",
         selectFileFirst: "Sélectionne d'abord un fichier compatible texte, document, tableau, sous-titres ou localisation.",
         selectPdfFirst: "Sélectionne d'abord un PDF.",
@@ -1206,11 +1218,11 @@ let languageData = null;
     }
 
     function formatEta(seconds) {
-      if (seconds === null || seconds === undefined) return "calculating";
-      if (seconds < 60) return seconds + "s";
+      if (seconds === null || seconds === undefined) return t("etaCalculating");
+      if (seconds < 60) return t("etaSeconds", {seconds});
       const minutes = Math.floor(seconds / 60);
       const rest = seconds % 60;
-      return minutes + "m " + rest + "s";
+      return t("etaMinutesSeconds", {minutes, seconds: rest});
     }
 
     function hour12Option() {
@@ -1299,10 +1311,14 @@ let languageData = null;
       return row;
     }
 
+    let queueLoadToken = 0;
+
     async function loadQueue() {
+      const token = ++queueLoadToken;
       const response = await fetch("jobs");
-      if (!response.ok) return;
+      if (!response.ok || token !== queueLoadToken) return;
       const data = await response.json();
+      if (token !== queueLoadToken) return;
       queueItems = data.items;
       let hasNewlyCompleted = false;
       for (const job of data.items) {

@@ -1317,66 +1317,66 @@ def create_pdf_from_pages(pages: List[Dict[str, Any]]) -> bytes:
     The lines are collected before any of them is drawn, so that each font can be subset to the
     characters this document actually uses (see subset_font) before it is handed to MuPDF.
     """
-    document = pymupdf.open()
-    # (page index, text, x, y, face, size, color, page height, edge to justify to). The index
-    # rather than the page:
-    # adding a page invalidates the page objects handed out before it.
-    lines: List[Tuple[Any, ...]] = []
-    # (page index, image dict) - drawn in its own pass after every page exists, same reason.
-    images: List[Tuple[int, Dict[str, Any]]] = []
-    for output_page_number, page_data in enumerate(pages, start=1):
-        width = page_data.get("width", PDF_PAGE_WIDTH)
-        height = page_data.get("height", PDF_PAGE_HEIGHT)
-        margin = page_data.get("margin", PDF_MARGIN)
-        document.new_page(width=width, height=height)
-        index = output_page_number - 1
-        for image in page_data.get("images") or []:
-            images.append((index, image, height))
-        y = height - margin
-        if page_data["source_page"]:
-            heading = "Page " + page_data["source_page"]
-            if page_data["continuation"]:
-                heading += " continued"
-            lines.append((index, heading, margin, y, "F2", PDF_HEADING_FONT_SIZE, 0, height, None))
-            y -= 24
-        for line in page_data["lines"]:
-            if line["text"]:
-                lines.append((index, line["text"], line.get("x", margin), line.get("y", y),
-                              line["font"], line["size"], line.get("color", 0), height,
-                              line.get("justify_to")))
-            y -= line["line_height"]
-        if page_data.get("footer", True):
-            lines.append((index, f"{output_page_number}", width - margin, margin // 2,
-                          "F1", PDF_FOOTER_FONT_SIZE, 0, height, None))
+    with pymupdf.open() as document:
+        # (page index, text, x, y, face, size, color, page height, edge to justify to). The index
+        # rather than the page:
+        # adding a page invalidates the page objects handed out before it.
+        lines: List[Tuple[Any, ...]] = []
+        # (page index, image dict) - drawn in its own pass after every page exists, same reason.
+        images: List[Tuple[int, Dict[str, Any]]] = []
+        for output_page_number, page_data in enumerate(pages, start=1):
+            width = page_data.get("width", PDF_PAGE_WIDTH)
+            height = page_data.get("height", PDF_PAGE_HEIGHT)
+            margin = page_data.get("margin", PDF_MARGIN)
+            document.new_page(width=width, height=height)
+            index = output_page_number - 1
+            for image in page_data.get("images") or []:
+                images.append((index, image, height))
+            y = height - margin
+            if page_data["source_page"]:
+                heading = "Page " + page_data["source_page"]
+                if page_data["continuation"]:
+                    heading += " continued"
+                lines.append((index, heading, margin, y, "F2", PDF_HEADING_FONT_SIZE, 0, height, None))
+                y -= 24
+            for line in page_data["lines"]:
+                if line["text"]:
+                    lines.append((index, line["text"], line.get("x", margin), line.get("y", y),
+                                  line["font"], line["size"], line.get("color", 0), height,
+                                  line.get("justify_to")))
+                y -= line["line_height"]
+            if page_data.get("footer", True):
+                lines.append((index, f"{output_page_number}", width - margin, margin // 2,
+                              "F1", PDF_FOOTER_FONT_SIZE, 0, height, None))
 
-    codepoints: Dict[Tuple[bool, str, bool, bool], Set[int]] = {}
-    for _, text, _, _, face, _, _, _, _ in lines:
-        codepoints.setdefault(pdf_font_key(text, face), set()).update(map(ord, text))
-    fonts = {key: subset_font(*key, points) for key, points in codepoints.items()}
-    for index, image, height in images:
-        # y-up (bottom counted from the page's own bottom, like every other PDF coordinate this
-        # module works in), flipped to MuPDF's y-down insert_image space here - the same flip
-        # draw_pdf_line does for text.
-        rect = pymupdf.Rect(image["x"], height - image["top"],
-                            image["right"], height - image["bottom"])
+        codepoints: Dict[Tuple[bool, str, bool, bool], Set[int]] = {}
+        for _, text, _, _, face, _, _, _, _ in lines:
+            codepoints.setdefault(pdf_font_key(text, face), set()).update(map(ord, text))
+        fonts = {key: subset_font(*key, points) for key, points in codepoints.items()}
+        for index, image, height in images:
+            # y-up (bottom counted from the page's own bottom, like every other PDF coordinate this
+            # module works in), flipped to MuPDF's y-down insert_image space here - the same flip
+            # draw_pdf_line does for text.
+            rect = pymupdf.Rect(image["x"], height - image["top"],
+                                image["right"], height - image["bottom"])
+            try:
+                document[index].insert_image(rect, stream=image["bytes"])
+            except Exception:
+                pass
+        for index, *line in lines:
+            draw_pdf_line(document[index], *line, fonts)
+
+        # Second pass over MuPDF's own doing: for a character none of our fonts covers it silently
+        # falls back to a built-in face and embeds that one whole (3.5 MB of Droid Sans Fallback for
+        # one Korean word). subset_fonts cuts those down; it is no help with the fonts we picked
+        # ourselves, see subset_font.
         try:
-            document[index].insert_image(rect, stream=image["bytes"])
+            document.subset_fonts(verbose=False)
         except Exception:
+            # A fat PDF is still a readable one.
             pass
-    for index, *line in lines:
-        draw_pdf_line(document[index], *line, fonts)
-
-    # Second pass over MuPDF's own doing: for a character none of our fonts covers it silently
-    # falls back to a built-in face and embeds that one whole (3.5 MB of Droid Sans Fallback for
-    # one Korean word). subset_fonts cuts those down; it is no help with the fonts we picked
-    # ourselves, see subset_font.
-    try:
-        document.subset_fonts(verbose=False)
-    except Exception:
-        # A fat PDF is still a readable one.
-        pass
-    fix_pdf_space_mapping(document)
-    return document.tobytes(garbage=3, deflate=True)
+        fix_pdf_space_mapping(document)
+        return document.tobytes(garbage=3, deflate=True)
 
 
 def create_text_pdf(text: str, source_content: bytes = b"") -> bytes:
@@ -2253,15 +2253,16 @@ def render_pdf_region(content: bytes, page_number: int, box: Tuple[int, int, int
     pixmap-crop constructor left, and rasterising the region directly is both sharper and one
     step shorter.
     """
-    page = pymupdf.open(stream=content, filetype="pdf")[page_number - 1]
-    left, top, right, bottom = box
-    clip = pymupdf.Rect(
-        left - OCR_REGION_PADDING, top - OCR_REGION_PADDING,
-        right + OCR_REGION_PADDING, bottom + OCR_REGION_PADDING,
-    ) * (72.0 / OCR_DPI)
-    path = Path(temp_dir) / f"{name}.png"
-    page.get_pixmap(dpi=OCR_DPI, clip=clip & page.rect).save(str(path))
-    return path
+    with pymupdf.open(stream=content, filetype="pdf") as document:
+        page = document[page_number - 1]
+        left, top, right, bottom = box
+        clip = pymupdf.Rect(
+            left - OCR_REGION_PADDING, top - OCR_REGION_PADDING,
+            right + OCR_REGION_PADDING, bottom + OCR_REGION_PADDING,
+        ) * (72.0 / OCR_DPI)
+        path = Path(temp_dir) / f"{name}.png"
+        page.get_pixmap(dpi=OCR_DPI, clip=clip & page.rect).save(str(path))
+        return path
 
 
 # Character ranges per script, named the way OSD names them so the two can be compared.
@@ -2455,37 +2456,40 @@ def extract_pdf_markdown_from_bytes(
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read PDF: {exc}") from exc
 
-    if not document.page_count:
-        raise HTTPException(status_code=422, detail="PDF has no pages")
+    try:
+        if not document.page_count:
+            raise HTTPException(status_code=422, detail="PDF has no pages")
 
-    selected_pages = parse_page_range(page_range, document.page_count)
-    pages = []
-    pages_with_text = 0
-    # Checked once on the first page that has one, not per page: a text layer is written by one
-    # producer for the whole file, and the check costs a render plus an OSD call.
-    trust_text_layer = None
-    for index in selected_pages:
-        text = document[index - 1].get_text() or ""
-        text = re.sub(r"[ \t]+\n", "\n", text).strip()
-        needs_ocr = not text or len(text) < PDF_LOW_TEXT_CHARS
-        if not needs_ocr:
-            if trust_text_layer is None:
-                trust_text_layer = text_layer_is_trustworthy(content, index, text)
-            needs_ocr = not trust_text_layer
-        if needs_ocr:
-            ocr_text = ocr_pdf_page(content, index, source)
-            if ocr_text:
-                text = ocr_text
-                if source == AUTO_SOURCE:
-                    # Keep what the first scanned page turned out to be: the pages after it then
-                    # read in one pass instead of probing the same document over and over.
-                    source = detect_source_language(ocr_text)
+        selected_pages = parse_page_range(page_range, document.page_count)
+        pages = []
+        pages_with_text = 0
+        # Checked once on the first page that has one, not per page: a text layer is written by one
+        # producer for the whole file, and the check costs a render plus an OSD call.
+        trust_text_layer = None
+        for index in selected_pages:
+            text = document[index - 1].get_text() or ""
+            text = re.sub(r"[ \t]+\n", "\n", text).strip()
+            needs_ocr = not text or len(text) < PDF_LOW_TEXT_CHARS
+            if not needs_ocr:
+                if trust_text_layer is None:
+                    trust_text_layer = text_layer_is_trustworthy(content, index, text)
+                needs_ocr = not trust_text_layer
+            if needs_ocr:
+                ocr_text = ocr_pdf_page(content, index, source)
+                if ocr_text:
+                    text = ocr_text
+                    if source == AUTO_SOURCE:
+                        # Keep what the first scanned page turned out to be: the pages after it then
+                        # read in one pass instead of probing the same document over and over.
+                        source = detect_source_language(ocr_text)
 
-        if text:
-            pages_with_text += 1
-            pages.append(f"# Page {index}\n\n{text}".strip())
-        else:
-            pages.append(f"# Page {index}\n\n> No extractable text found on this page. It may need OCR.")
+            if text:
+                pages_with_text += 1
+                pages.append(f"# Page {index}\n\n{text}".strip())
+            else:
+                pages.append(f"# Page {index}\n\n> No extractable text found on this page. It may need OCR.")
+    finally:
+        document.close()
 
     markdown = "\n\n".join(pages).strip()
     if not pages_with_text:
@@ -2512,17 +2516,20 @@ def extract_pdf_page_images(content: bytes) -> Dict[str, Dict[str, Any]]:
         document = pymupdf.open(stream=content, filetype="pdf")
     except Exception:
         return {}
-    info = {}
-    for index in range(document.page_count):
-        page = document[index]
-        images = pdf_page_images(page)
-        if images:
-            info[str(index + 1)] = {
-                "images": images,
-                "width": float(page.rect.width),
-                "height": float(page.rect.height),
-            }
-    return info
+    try:
+        info = {}
+        for index in range(document.page_count):
+            page = document[index]
+            images = pdf_page_images(page)
+            if images:
+                info[str(index + 1)] = {
+                    "images": images,
+                    "width": float(page.rect.width),
+                    "height": float(page.rect.height),
+                }
+        return info
+    finally:
+        document.close()
 
 
 MUPDF_BOLD_FLAG = 1 << 4  # span flag bit 4, per PyMuPDF's text-extraction flag table
@@ -3366,60 +3373,63 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
         document = pymupdf.open(stream=content, filetype="pdf")
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read PDF: {exc}") from exc
-    if not document.page_count:
-        raise HTTPException(status_code=422, detail="PDF has no pages")
+    try:
+        if not document.page_count:
+            raise HTTPException(status_code=422, detail="PDF has no pages")
 
-    pages = []
-    # Checked once on the first page that has text, exactly like extract_pdf_markdown_from_bytes:
-    # a text layer is written by one producer for the whole file, and the check costs a render
-    # plus an OSD call. Unlike the markdown path there is no per-page OCR fallback here, so
-    # distrust aborts the whole layout pass instead of only that one page.
-    trust_text_layer = None
-    for index in parse_page_range(page_range, document.page_count):
-        page = document[index - 1]
-        # page.mediabox, not page.rect: pdf_page_runs/obstacles/rules extract into the page's own
-        # raw, un-rotated frame (see pdf_page_flip_matrix), and the overlay is built and merged in
-        # that same frame - /Rotate is left on the merged page for the viewer to apply once, to
-        # both the kept original content and the overlay together.
-        box = page.mediabox
-        # ponytail: AcroForm widgets keep their original text on a rotated page - widget.rect's
-        # own rotation convention isn't verified against pdf_page_flip_matrix yet, and a rotated
-        # scan with a text field is a narrow case. Lift this once that's checked.
-        rotated = page.rotation % 360 != 0
-        obstacles = pdf_page_obstacles(page)
-        rules = pdf_page_rules(page)
-        row_rules = pdf_page_row_rules(page)
-        widgets = [] if rotated else pdf_page_widget_values(page)
-        lines = group_pdf_lines(
-            pdf_page_runs(page, rules, [widget["rect"] for widget in widgets]),
-            obstacles, rules)
-        if trust_text_layer is None:
-            page_text = page.get_text().strip()
-            if page_text:
-                trust_text_layer = text_layer_is_trustworthy(content, index, page_text)
-                if not trust_text_layer:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="Text layer does not match the page's printed script. "
-                               "Falling back to OCR extraction.",
-                    )
-        pages.append({
-            "number": index,
-            "width": float(box.width),
-            "height": float(box.height),
-            "paragraphs": group_pdf_paragraphs(lines, rules),
-            "obstacles": obstacles,
-            "columns": page_column_walls(lines),
-            "row_rules": row_rules,
-            "widgets": widgets,
-        })
-    if not any(page["paragraphs"] or page["widgets"] for page in pages):
-        raise HTTPException(
-            status_code=422,
-            detail="No positioned text found. This PDF may be scanned or image-only, "
-                   "translate it with Plaintext enabled instead.",
-        )
-    return pages
+        pages = []
+        # Checked once on the first page that has text, exactly like extract_pdf_markdown_from_bytes:
+        # a text layer is written by one producer for the whole file, and the check costs a render
+        # plus an OSD call. Unlike the markdown path there is no per-page OCR fallback here, so
+        # distrust aborts the whole layout pass instead of only that one page.
+        trust_text_layer = None
+        for index in parse_page_range(page_range, document.page_count):
+            page = document[index - 1]
+            # page.mediabox, not page.rect: pdf_page_runs/obstacles/rules extract into the page's own
+            # raw, un-rotated frame (see pdf_page_flip_matrix), and the overlay is built and merged in
+            # that same frame - /Rotate is left on the merged page for the viewer to apply once, to
+            # both the kept original content and the overlay together.
+            box = page.mediabox
+            # ponytail: AcroForm widgets keep their original text on a rotated page - widget.rect's
+            # own rotation convention isn't verified against pdf_page_flip_matrix yet, and a rotated
+            # scan with a text field is a narrow case. Lift this once that's checked.
+            rotated = page.rotation % 360 != 0
+            obstacles = pdf_page_obstacles(page)
+            rules = pdf_page_rules(page)
+            row_rules = pdf_page_row_rules(page)
+            widgets = [] if rotated else pdf_page_widget_values(page)
+            lines = group_pdf_lines(
+                pdf_page_runs(page, rules, [widget["rect"] for widget in widgets]),
+                obstacles, rules)
+            if trust_text_layer is None:
+                page_text = page.get_text().strip()
+                if page_text:
+                    trust_text_layer = text_layer_is_trustworthy(content, index, page_text)
+                    if not trust_text_layer:
+                        raise HTTPException(
+                            status_code=422,
+                            detail="Text layer does not match the page's printed script. "
+                                   "Falling back to OCR extraction.",
+                        )
+            pages.append({
+                "number": index,
+                "width": float(box.width),
+                "height": float(box.height),
+                "paragraphs": group_pdf_paragraphs(lines, rules),
+                "obstacles": obstacles,
+                "columns": page_column_walls(lines),
+                "row_rules": row_rules,
+                "widgets": widgets,
+            })
+        if not any(page["paragraphs"] or page["widgets"] for page in pages):
+            raise HTTPException(
+                status_code=422,
+                detail="No positioned text found. This PDF may be scanned or image-only, "
+                       "translate it with Plaintext enabled instead.",
+            )
+        return pages
+    finally:
+        document.close()
 
 
 def wrap_text_to_width(text: str, width: Union[float, Sequence[float]], size: float,
@@ -4018,66 +4028,66 @@ def redact_translated_text(content: bytes, pages: List[Dict[str, Any]], translat
     text operators themselves, and with fill off and images/line art excluded it leaves the page
     background, table shading, icons and vector graphics untouched.
     """
-    document = pymupdf.open(stream=content, filetype="pdf")
-    index = 0
-    for page_data in pages:
-        page = document[page_data["number"] - 1]
-        redacted = False
-        # Every line of the page, to keep a rectangle out of the cell beside it: the point of
-        # padding either side is to catch the glyph's own overhang, and in a table that point
-        # lands in the neighbouring cell. On page 13 of MatterhornProtokoll the "Software" cell
-        # ends 0.2pt before "21-001" begins, and the padded rectangle took the "2" with it.
-        neighbours = [line for other in page_data["paragraphs"] for line in other["lines"]]
-        for paragraph in page_data["paragraphs"]:
-            # A paragraph without a translation keeps its original text rather than being
-            # erased with nothing put in its place. An untranslatable fragment (a table's numeric
-            # column, say) is redacted like any other: render_pdf_layout_overlay draws its own
-            # original text back at whatever size level_table_sizes settled on, and skipping the
-            # redaction here would leave that redraw stamped straight over the untouched original.
-            if index < len(translations) and translations[index].strip():
-                for line in paragraph["lines"]:
-                    size = line["size"]
-                    # Still narrower than the line's full height - a rectangle only has to touch
-                    # a glyph for MuPDF to drop it, and one tall enough to hold ascenders would
-                    # reach into the line above. It does reach below the baseline far enough to
-                    # cover the link underlines that sit there (measured at 0.23em), which have
-                    # to go with the text they underline or they end up striking through an
-                    # unrelated part of the translation.
-                    on_baseline = [other for other in neighbours
-                                   if other is not line
-                                   and abs(other["y"] - line["y"]) <= 0.3 * size]
-                    left = max([other["right"] for other in on_baseline
-                                if other["right"] <= line["x"]] + [line["x"] - 1])
-                    right = min([other["x"] for other in on_baseline
-                                 if other["x"] >= line["right"]] + [line["right"] + 1])
-                    rectangle = pymupdf.Rect(
-                        left,
-                        line["y"] - 0.30 * size,
-                        right,
-                        line["y"] + 0.5 * size,
-                    ) * pdf_page_flip_matrix(page)
-                    page.add_redact_annot(rectangle, fill=False)
-                    redacted = True
-            index += 1
-        # Not redacted: a field's value never was page content to begin with, see
-        # pdf_page_runs' widget_rects. It skips the same number of translations as
-        # render_pdf_layout_overlay assigned it, though, to stay on the same paragraph past it.
-        index += len(page_data.get("widgets") or [])
-        if redacted:
-            page.apply_redactions(
-                images=pymupdf.PDF_REDACT_IMAGE_NONE,
-                # IF_COVERED, not NONE or IF_TOUCHED: an underline lies wholly inside its line's
-                # rectangle and goes, while page backgrounds, table shading and rules extend past
-                # it and stay. IF_TOUCHED would strip every panel a line of text sits on.
-                graphics=pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
-                text=pymupdf.PDF_REDACT_TEXT_REMOVE,
-            )
-        for widget in page.widgets() or []:
-            value = (widget_updates or {}).get((page_data["number"], widget.field_name))
-            if value is not None:
-                widget.field_value = value
-                widget.update()
-    return document.tobytes(garbage=3, deflate=True)
+    with pymupdf.open(stream=content, filetype="pdf") as document:
+        index = 0
+        for page_data in pages:
+            page = document[page_data["number"] - 1]
+            redacted = False
+            # Every line of the page, to keep a rectangle out of the cell beside it: the point of
+            # padding either side is to catch the glyph's own overhang, and in a table that point
+            # lands in the neighbouring cell. On page 13 of MatterhornProtokoll the "Software" cell
+            # ends 0.2pt before "21-001" begins, and the padded rectangle took the "2" with it.
+            neighbours = [line for other in page_data["paragraphs"] for line in other["lines"]]
+            for paragraph in page_data["paragraphs"]:
+                # A paragraph without a translation keeps its original text rather than being
+                # erased with nothing put in its place. An untranslatable fragment (a table's numeric
+                # column, say) is redacted like any other: render_pdf_layout_overlay draws its own
+                # original text back at whatever size level_table_sizes settled on, and skipping the
+                # redaction here would leave that redraw stamped straight over the untouched original.
+                if index < len(translations) and translations[index].strip():
+                    for line in paragraph["lines"]:
+                        size = line["size"]
+                        # Still narrower than the line's full height - a rectangle only has to touch
+                        # a glyph for MuPDF to drop it, and one tall enough to hold ascenders would
+                        # reach into the line above. It does reach below the baseline far enough to
+                        # cover the link underlines that sit there (measured at 0.23em), which have
+                        # to go with the text they underline or they end up striking through an
+                        # unrelated part of the translation.
+                        on_baseline = [other for other in neighbours
+                                       if other is not line
+                                       and abs(other["y"] - line["y"]) <= 0.3 * size]
+                        left = max([other["right"] for other in on_baseline
+                                    if other["right"] <= line["x"]] + [line["x"] - 1])
+                        right = min([other["x"] for other in on_baseline
+                                     if other["x"] >= line["right"]] + [line["right"] + 1])
+                        rectangle = pymupdf.Rect(
+                            left,
+                            line["y"] - 0.30 * size,
+                            right,
+                            line["y"] + 0.5 * size,
+                        ) * pdf_page_flip_matrix(page)
+                        page.add_redact_annot(rectangle, fill=False)
+                        redacted = True
+                index += 1
+            # Not redacted: a field's value never was page content to begin with, see
+            # pdf_page_runs' widget_rects. It skips the same number of translations as
+            # render_pdf_layout_overlay assigned it, though, to stay on the same paragraph past it.
+            index += len(page_data.get("widgets") or [])
+            if redacted:
+                page.apply_redactions(
+                    images=pymupdf.PDF_REDACT_IMAGE_NONE,
+                    # IF_COVERED, not NONE or IF_TOUCHED: an underline lies wholly inside its line's
+                    # rectangle and goes, while page backgrounds, table shading and rules extend past
+                    # it and stay. IF_TOUCHED would strip every panel a line of text sits on.
+                    graphics=pymupdf.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
+                    text=pymupdf.PDF_REDACT_TEXT_REMOVE,
+                )
+            for widget in page.widgets() or []:
+                value = (widget_updates or {}).get((page_data["number"], widget.field_name))
+                if value is not None:
+                    widget.field_value = value
+                    widget.update()
+        return document.tobytes(garbage=3, deflate=True)
 
 
 def level_table_sizes(paragraphs: List[Dict[str, Any]], bases: List[float], targets: List[float],
@@ -6208,12 +6218,19 @@ def export_history(item_id: str, format: str = "md"):
 
 def history_original_export(item_id: str, extension: str, content: bytes, text: str,
                             source_meta: Dict[str, str]) -> bytes:
-    """The export in its original format, built once and cached, see history_export_path."""
+    """The export in its original format, built once and cached, see history_export_path.
+
+    Written to a per-call temp file and moved into place with os.replace, which POSIX and
+    Windows both guarantee is atomic - two concurrent downloads racing to fill the same cache
+    then each write a whole, valid file, never one interleaved with the other's bytes.
+    """
     cache_path = history_export_path(item_id, extension)
     if cache_path.exists():
         return cache_path.read_bytes()
     exported = export_original_history_content(extension, content, text, source_meta)
-    cache_path.write_bytes(exported)
+    temp_path = cache_path.with_name(f"{cache_path.name}.{uuid.uuid4().hex}.tmp")
+    temp_path.write_bytes(exported)
+    os.replace(temp_path, cache_path)
     return exported
 
 
@@ -6393,8 +6410,14 @@ def reset_history(keep: int = 0):
     items = history_items()
     deleted = 0
     for item in items[keep:]:
-        delete_history(item["id"])
-        deleted += 1
+        try:
+            delete_history(item["id"])
+            deleted += 1
+        except HTTPException as exc:
+            # A concurrent delete of the same item already reached the goal state (gone), so
+            # this is not a reason to abort the rest of the batch.
+            if exc.status_code != 404:
+                raise
     return {"deleted": deleted, "kept": len(items) - deleted}
 
 
