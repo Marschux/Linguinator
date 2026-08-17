@@ -3628,6 +3628,29 @@ class MainTests(unittest.TestCase):
                 main.JOB_RUNNERS.clear()
             shutil.rmtree(temp_dir.parent, ignore_errors=True)
 
+    def test_rebuild_runner_for_job_fails_an_unknown_kind_instead_of_looping(self):
+        # A None return with the job left "queued" made job_worker_loop pick the very same job
+        # again with nothing to make it wait, spinning one worker at 100% CPU forever - a
+        # corrupted or hand-edited job file, or a kind a later version removed, must instead
+        # come back the same way a missing PDF payload already does: failed, not silently retried.
+        with main.JOBS_LOCK:
+            main.JOBS.clear()
+            main.JOB_RUNNERS.clear()
+        try:
+            job_id = main.create_job("some-future-kind", "eng_Latn", "deu_Latn", "Text")
+            job = main.get_job(job_id)
+
+            runner_data = main.rebuild_runner_for_job(job)
+
+            self.assertIsNone(runner_data)
+            failed_job = main.get_job(job_id)
+            self.assertEqual(failed_job["status"], "failed")
+            self.assertIn("some-future-kind", failed_job["error"])
+        finally:
+            with main.JOBS_LOCK:
+                main.JOBS.clear()
+                main.JOB_RUNNERS.clear()
+
     def test_load_persisted_jobs_requeues_running_jobs(self):
         temp_dir = test_temp_dir()
         try:

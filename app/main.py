@@ -1870,6 +1870,11 @@ def rebuild_runner_for_job(job: Dict[str, Any]) -> Optional[Tuple[Callable[..., 
             job.get("filename", "pdf"),
             job.get("page_range", ""),
         )
+    # An unrecognised kind (a hand-edited or corrupted job file, or one from a kind since
+    # removed) must not come back as None with the job left "queued" - job_worker_loop would
+    # just pick the same job again with nothing to make it wait, spinning one worker at 100% CPU
+    # forever instead of blocking on JOBS_CONDITION.wait() like every other empty queue does.
+    update_job(job_id, status="failed", message="Failed", error=f"Unknown job kind: {job.get('kind')}", finished_at=time.time())
     return None
 
 
