@@ -5009,12 +5009,30 @@ def xlsx_rows_with_values(root, shared: List[str], namespace: Dict[str, str]) ->
     return rows
 
 
-def resolve_xlsx_columns(rows: List[Dict[str, Any]], selected_columns: List[str]) -> List[str]:
+def xlsx_header_row_index(rows: List[Dict[str, Any]], selected_columns: List[str]) -> int:
+    """Find the row that actually names the requested columns, rather than assuming it is
+    whatever row happens to be first. A hand-built sheet commonly has a title or spacer row
+    above its real header (measured: a real spreadsheet's first populated row was "Router
+    Informationen", several rows above the row naming "Hostname"/"Kategorie"/"IP") - treating
+    that as the header meant those names were never found in it, fell back to being read as a
+    literal column letter, and were then reported "not found" since no such letter existed
+    either. Falls back to row 0 if none contain a requested name (e.g. all-letter selectors).
+    """
+    wanted = {column.strip().lower() for column in selected_columns}
+    for index, row in enumerate(rows):
+        values_lower = {str(value).strip().lower() for value in row["values"].values() if value}
+        if wanted & values_lower:
+            return index
+    return 0
+
+
+def resolve_xlsx_columns(rows: List[Dict[str, Any]], header_index: int, selected_columns: List[str]) -> List[str]:
     if not rows:
         raise HTTPException(status_code=422, detail="XLSX sheet has no rows")
-    header = {value: column for column, value in rows[0]["values"].items() if value}
+    header = {value: column for column, value in rows[header_index]["values"].items() if value}
     resolved_columns = [header.get(column, column.upper()) for column in selected_columns]
-    missing = [column for column in resolved_columns if all(not row["values"].get(column) for row in rows)]
+    data_rows = rows[header_index + 1:]
+    missing = [column for column in resolved_columns if all(not row["values"].get(column) for row in data_rows)]
     if missing:
         raise HTTPException(status_code=400, detail="XLSX columns not found: " + ", ".join(missing))
     return resolved_columns
@@ -5045,10 +5063,11 @@ def extract_xlsx_text_from_bytes(content: bytes, sheet_name: str, columns: str) 
 
     namespace = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     rows = xlsx_rows_with_values(root, shared, namespace)
-    resolved_columns = resolve_xlsx_columns(rows, selected_columns)
+    header_index = xlsx_header_row_index(rows, selected_columns)
+    resolved_columns = resolve_xlsx_columns(rows, header_index, selected_columns)
 
     output_rows = []
-    for row in rows[1:]:
+    for row in rows[header_index + 1:]:
         for column in resolved_columns:
             value = row["values"].get(column, "").strip()
             if value:
@@ -5104,12 +5123,13 @@ def export_xlsx_with_translated_text(content: bytes, sheet_name: str, columns: s
 
     namespace = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     rows = xlsx_rows_with_values(root, shared, namespace)
-    resolved_columns = resolve_xlsx_columns(rows, selected_columns)
+    header_index = xlsx_header_row_index(rows, selected_columns)
+    resolved_columns = resolve_xlsx_columns(rows, header_index, selected_columns)
     blocks = translated_blocks(translated_text)
     # Same reasoning as export_csv_with_translated_text: one block per non-empty cell, not one
     # block per row split back apart on a separator the model doesn't reliably keep.
     block_index = 0
-    for row_info in rows[1:]:
+    for row_info in rows[header_index + 1:]:
         for column in resolved_columns:
             if not row_info["values"].get(column, "").strip():
                 continue
