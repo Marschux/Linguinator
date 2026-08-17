@@ -435,14 +435,14 @@
     }
     .actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
     .actions-right { flex: 1; justify-content: flex-end; }
-    /* Reset sits apart on the left of this row, Pause/Resume/Stop pack together on the right -
-       it deletes data, so it does not belong in the same cluster a misclick could land in. */
-    #pauseJob { margin-left: auto; }
     .primary-actions { justify-content: flex-end; }
     .section { margin-top: 1.4rem; }
     .hidden { display: none; }
     .invisible { visibility: hidden; }
-    .reset-history { display: flex; align-items: center; gap: .6rem; }
+    /* Pause/Resume/Stop pack together on the left, Reset sits apart on the right (the auto
+       margin) - it deletes data, so it does not belong in the same cluster a misclick could
+       land in. */
+    .reset-history { display: flex; align-items: center; gap: .6rem; margin-left: auto; }
     .history-select-all {
       display: flex;
       align-items: center;
