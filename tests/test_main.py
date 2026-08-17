@@ -909,9 +909,11 @@ class MainTests(unittest.TestCase):
         ]
         with patch.object(main, "render_pdf_region", return_value=Path("crop.png")):
             with patch.object(main, "ocr_page_script", return_value="Devanagari") as osd:
-                scripts = main.ocr_block_scripts(b"%PDF", 1, blocks, "Latin", "/tmp")
+                results = main.ocr_block_scripts(b"%PDF", 1, blocks, "Latin", "/tmp")
 
-        self.assertEqual(scripts, ["Devanagari", "Latin"])
+        self.assertEqual([script for script, _region in results], ["Devanagari", "Latin"])
+        self.assertEqual(results[0][1], Path("crop.png"))
+        self.assertIsNone(results[1][1])
         self.assertEqual(osd.call_count, 1)
 
     def test_ocr_block_scripts_ignores_scripts_no_language_exists_for(self):
@@ -923,7 +925,8 @@ class MainTests(unittest.TestCase):
                 with self.subTest(script=reported):
                     with patch.object(main, "ocr_page_script", return_value=reported):
                         self.assertEqual(
-                            main.ocr_block_scripts(b"%PDF", 1, blocks, "Han", "/tmp"), ["Han"]
+                            [script for script, _region in main.ocr_block_scripts(b"%PDF", 1, blocks, "Han", "/tmp")],
+                            ["Han"],
                         )
 
     def test_scripts_are_compatible_covers_the_han_variants(self):
@@ -953,7 +956,7 @@ class MainTests(unittest.TestCase):
                     with patch.object(main, "ocr_page_script", return_value="Latin"):
                         with patch.object(main, "ocr_page_blocks", return_value=blocks):
                             with patch.object(main, "ocr_block_scripts",
-                                              return_value=["Devanagari", "Latin"]):
+                                              return_value=[("Devanagari", None), ("Latin", None)]):
                                 with patch.object(main, "ocr_read_with_detection", fake_read):
                                     text = main.ocr_pdf_page(b"%PDF", 1)
 
@@ -969,7 +972,7 @@ class MainTests(unittest.TestCase):
             with patch.object(main, "render_pdf_page", return_value=Path("page.png")):
                 with patch.object(main, "ocr_page_script", return_value="Latin"):
                     with patch.object(main, "ocr_page_blocks", return_value=blocks):
-                        with patch.object(main, "ocr_block_scripts", return_value=["Latin"] * 3):
+                        with patch.object(main, "ocr_block_scripts", return_value=[("Latin", None)] * 3):
                             with patch.object(main, "ocr_read_with_detection",
                                               return_value="whole page") as read:
                                 text = main.ocr_pdf_page(b"%PDF", 1)

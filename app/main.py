@@ -2381,8 +2381,10 @@ def ocr_read_with_detection(image_path: Path, script: str) -> str:
 
 
 def ocr_block_scripts(content: bytes, page_number: int, blocks: List[Dict[str, Any]],
-                      page_script: str, temp_dir: str) -> List[str]:
-    """The script each block is printed in, one entry per block.
+                      page_script: str, temp_dir: str) -> List[Tuple[str, Optional[Path]]]:
+    """The script each block is printed in, one entry per block, alongside the region image
+    already rendered to determine it (None for blocks too short to be asked at all) - so a mixed
+    page's later read of that same block doesn't render it from the PDF a second time.
 
     OSD needs a fair amount of text before its answer means anything, and it does not say so - it
     answers anyway. Measured on the scanned fixtures: blocks of 200+ characters were right every
@@ -2390,9 +2392,9 @@ def ocr_block_scripts(content: bytes, page_number: int, blocks: List[Dict[str, A
     Reading those in the script OSD named would have replaced the heading with invented Arabic,
     so short blocks are not asked at all and take the page's script instead.
     """
-    scripts = []
+    results = []
     for index, block in enumerate(blocks):
-        script = ""
+        script, region = "", None
         if len(block["text"]) >= OCR_BLOCK_MIN_CHARS:
             region = render_pdf_region(content, page_number, block["box"], temp_dir, f"block{index}")
             script = ocr_page_script(region)
@@ -2402,8 +2404,8 @@ def ocr_block_scripts(content: bytes, page_number: int, blocks: List[Dict[str, A
             # and reading Han as English deletes it - or it named a script that is written with
             # the page's anyway (kanji in a Japanese page). Neither is a reason to split.
             script = page_script
-        scripts.append(script)
-    return scripts
+        results.append((script, region))
+    return results
 
 
 def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE) -> str:
@@ -2415,8 +2417,8 @@ def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE) ->
 
         page_script = ocr_page_script(image_path)
         blocks = ocr_page_blocks(image_path, ocr_probe_languages(page_script))
-        scripts = ocr_block_scripts(content, page_number, blocks, page_script, temp_dir)
-        if len(set(scripts)) < 2:
+        block_scripts = ocr_block_scripts(content, page_number, blocks, page_script, temp_dir)
+        if len({script for script, _region in block_scripts}) < 2:
             # One script on the page, which is the normal case: read it in one go. Splitting a
             # page into blocks only to read each in the same language would cost several OCR
             # runs and lose the layout analysis' view of the whole page for nothing.
@@ -2427,8 +2429,9 @@ def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE) ->
         # reinvented in the wrong alphabet. Each block is read in its own script instead and the
         # results are put back together in tesseract's reading order.
         pieces = []
-        for index, (block, script) in enumerate(zip(blocks, scripts)):
-            region = render_pdf_region(content, page_number, block["box"], temp_dir, f"read{index}")
+        for index, (block, (script, region)) in enumerate(zip(blocks, block_scripts)):
+            if region is None:
+                region = render_pdf_region(content, page_number, block["box"], temp_dir, f"read{index}")
             text = ocr_read_with_detection(region, script)
             if text.strip():
                 pieces.append(text.strip())
@@ -4097,6 +4100,8 @@ def level_table_sizes(paragraphs: List[Dict[str, Any]], bases: List[float], targ
     - the same left edge one above the other, which joins the rows of a table into the table. Only
       between paragraphs that are cells to begin with, so ordinary body text is never caught.
     """
+    # ponytail: O(n²) pairwise comparison over a page's paragraphs, switch to a spatial index if a
+    # document's tables ever make this the bottleneck.
     count = len(paragraphs)
     extent = [(min(line["x"] for line in item["lines"]),
                max(line["right"] for line in item["lines"]),
@@ -5133,22 +5138,15 @@ def extract_xlsx_text_from_bytes(content: bytes, sheet_name: str, columns: str) 
         raise HTTPException(status_code=400, detail="Select at least one XLSX column")
 
     try:
-        workbook = zipfile.ZipFile(BytesIO(content))
-        ensure_zip_size(workbook)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Could not read XLSX: {exc}") from exc
-
-    try:
-        with workbook:
+        with zipfile.ZipFile(BytesIO(content)) as workbook:
+            ensure_zip_size(workbook)
             shared = xlsx_shared_strings(workbook)
             sheet_path = xlsx_sheet_path(workbook, sheet_name)
             root = ElementTree.fromstring(workbook.read(sheet_path))
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Could not parse XLSX: {exc}") from exc
+        raise HTTPException(status_code=400, detail=f"Could not read XLSX: {exc}") from exc
 
     namespace = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     rows = xlsx_rows_with_values(root, shared, namespace)
@@ -5192,15 +5190,8 @@ def export_xlsx_with_translated_text(content: bytes, sheet_name: str, columns: s
     if not selected_columns:
         raise HTTPException(status_code=400, detail="Select at least one XLSX column")
     try:
-        workbook = zipfile.ZipFile(BytesIO(content))
-        ensure_zip_size(workbook)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Could not read XLSX: {exc}") from exc
-
-    try:
-        with workbook:
+        with zipfile.ZipFile(BytesIO(content)) as workbook:
+            ensure_zip_size(workbook)
             shared = xlsx_shared_strings(workbook)
             sheet_path = xlsx_sheet_path(workbook, sheet_name)
             sheet_xml = workbook.read(sheet_path)
@@ -5208,7 +5199,7 @@ def export_xlsx_with_translated_text(content: bytes, sheet_name: str, columns: s
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Could not parse XLSX: {exc}") from exc
+        raise HTTPException(status_code=400, detail=f"Could not read XLSX: {exc}") from exc
 
     namespace = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     rows = xlsx_rows_with_values(root, shared, namespace)
@@ -5315,18 +5306,11 @@ def extract_xlsx_auto_text_from_bytes(content: bytes) -> str:
     column paths, this doesn't try to single out a header row first (there's no requested column
     name to search for) - a header label like "Hostname" is itself just more text to translate.
     """
-    try:
-        workbook = zipfile.ZipFile(BytesIO(content))
-        ensure_zip_size(workbook)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Could not read XLSX: {exc}") from exc
-
     namespace = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     blocks = []
     try:
-        with workbook:
+        with zipfile.ZipFile(BytesIO(content)) as workbook:
+            ensure_zip_size(workbook)
             shared = xlsx_shared_strings(workbook)
             for _sheet_name, sheet_path in xlsx_all_sheets(workbook):
                 root = ElementTree.fromstring(workbook.read(sheet_path))
@@ -5337,7 +5321,7 @@ def extract_xlsx_auto_text_from_bytes(content: bytes) -> str:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Could not parse XLSX: {exc}") from exc
+        raise HTTPException(status_code=400, detail=f"Could not read XLSX: {exc}") from exc
 
     result = "\n\n".join(blocks).strip()
     if not result:
@@ -5347,35 +5331,33 @@ def extract_xlsx_auto_text_from_bytes(content: bytes) -> str:
 
 def export_xlsx_auto_with_translated_text(content: bytes, translated_text: str) -> bytes:
     blocks = translated_blocks(translated_text)
+    namespace = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    replacements = {}
+    block_index = 0
     try:
-        workbook = zipfile.ZipFile(BytesIO(content))
-        ensure_zip_size(workbook)
+        with zipfile.ZipFile(BytesIO(content)) as workbook:
+            ensure_zip_size(workbook)
+            shared = xlsx_shared_strings(workbook)
+            for _sheet_name, sheet_path in xlsx_all_sheets(workbook):
+                root = ElementTree.fromstring(workbook.read(sheet_path))
+                changed = False
+                for row in xlsx_rows_with_values(root, shared, namespace):
+                    for column in sorted(row["values"], key=xlsx_column_index):
+                        if not spreadsheet_value_looks_translatable(row["values"][column]):
+                            continue
+                        if block_index >= len(blocks):
+                            continue
+                        cell = row["cells"].get(column)
+                        if cell is not None:
+                            xlsx_set_cell_text(cell, blocks[block_index])
+                        block_index += 1
+                        changed = True
+                if changed:
+                    replacements[sheet_path] = ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Could not read XLSX: {exc}") from exc
-
-    namespace = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
-    replacements = {}
-    block_index = 0
-    with workbook:
-        shared = xlsx_shared_strings(workbook)
-        for _sheet_name, sheet_path in xlsx_all_sheets(workbook):
-            root = ElementTree.fromstring(workbook.read(sheet_path))
-            changed = False
-            for row in xlsx_rows_with_values(root, shared, namespace):
-                for column in sorted(row["values"], key=xlsx_column_index):
-                    if not spreadsheet_value_looks_translatable(row["values"][column]):
-                        continue
-                    if block_index >= len(blocks):
-                        continue
-                    cell = row["cells"].get(column)
-                    if cell is not None:
-                        xlsx_set_cell_text(cell, blocks[block_index])
-                    block_index += 1
-                    changed = True
-            if changed:
-                replacements[sheet_path] = ElementTree.tostring(root, encoding="utf-8", xml_declaration=True)
     return write_zip_with_replacement(content, replacements)
 
 
@@ -5487,8 +5469,10 @@ def export_subtitle_with_translated_text(content: bytes, translated_text: str) -
     parts = re.split(r"(\n\s*\n)", original)
     block_index = 0
     for index, part in enumerate(parts):
-        if "-->" not in part or block_index >= len(blocks):
+        if "-->" not in part:
             continue
+        if block_index >= len(blocks):
+            break
         lines = part.splitlines()
         cue_line = next((line_index for line_index, line in enumerate(lines) if "-->" in line), None)
         if cue_line is None:

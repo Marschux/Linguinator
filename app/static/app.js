@@ -24,14 +24,12 @@ let languageData = null;
       en: {
         uiLanguage: "UI Language",
         subtitle: "Local translation workbench for text and document workflows.",
-        queue: "Queue",
         source: "Source",
         target: "Target",
         searchLanguage: "Search language...",
         detection: "Detection",
         favorites: "Favorites",
         allLanguages: "All languages",
-        loading: "Loading...",
         textField: "Text Field",
         textResult: "Result",
         text: "TXT File",
@@ -126,14 +124,12 @@ let languageData = null;
       de: {
         uiLanguage: "UI-Sprache",
         subtitle: "Lokale Übersetzungsoberfläche für Text- und Dokument-Workflows.",
-        queue: "Warteschlange",
         source: "Quelle",
         target: "Ziel",
         searchLanguage: "Sprache suchen...",
         detection: "Erkennung",
         favorites: "Favoriten",
         allLanguages: "Alle Sprachen",
-        loading: "Lädt...",
         textField: "Textfeld",
         textResult: "Ergebnis",
         text: "TXT-Datei",
@@ -228,14 +224,12 @@ let languageData = null;
       es: {
         uiLanguage: "Idioma de UI",
         subtitle: "Banco local de traducción para flujos de texto y documentos.",
-        queue: "Cola",
         source: "Origen",
         target: "Destino",
         searchLanguage: "Buscar idioma...",
         detection: "Detección",
         favorites: "Favoritos",
         allLanguages: "Todos los idiomas",
-        loading: "Cargando...",
         textField: "Campo de texto",
         textResult: "Resultado",
         text: "Archivo TXT",
@@ -330,14 +324,12 @@ let languageData = null;
       fr: {
         uiLanguage: "Langue UI",
         subtitle: "Atelier local de traduction pour les workflows texte et documents.",
-        queue: "File d'attente",
         source: "Source",
         target: "Cible",
         searchLanguage: "Rechercher une langue...",
         detection: "Détection",
         favorites: "Favoris",
         allLanguages: "Toutes les langues",
-        loading: "Chargement...",
         textField: "Champ texte",
         textResult: "Résultat",
         text: "Fichier TXT",
@@ -1454,7 +1446,6 @@ let languageData = null;
           // or two typed into the Text Field tab.
           setResult(job.kind === "translate" ? (job.result || "") : "");
           lastCompletedJob = job;
-              loadHistory();
           loadQueue();
           playNotificationSound();
           activeJobId = null;
@@ -1592,20 +1583,20 @@ let languageData = null;
       }
     }
 
-    function formatHistoryDate(isoString) {
+    function formatHistoryDateTime(isoString, options, fallback) {
       try {
-        return new Intl.DateTimeFormat(currentUiLanguage, {year: "numeric", month: "2-digit", day: "2-digit", timeZone: historyTimezone}).format(new Date(isoString));
+        return new Intl.DateTimeFormat(currentUiLanguage, {...options, timeZone: historyTimezone}).format(new Date(isoString));
       } catch {
-        return (isoString || "").slice(0, 10);
+        return fallback;
       }
     }
 
+    function formatHistoryDate(isoString) {
+      return formatHistoryDateTime(isoString, {year: "numeric", month: "2-digit", day: "2-digit"}, (isoString || "").slice(0, 10));
+    }
+
     function formatHistoryTime(isoString) {
-      try {
-        return new Intl.DateTimeFormat(currentUiLanguage, {hour: "2-digit", minute: "2-digit", timeZone: historyTimezone, hour12: hour12Option()}).format(new Date(isoString));
-      } catch {
-        return "";
-      }
+      return formatHistoryDateTime(isoString, {hour: "2-digit", minute: "2-digit", hour12: hour12Option()}, "");
     }
 
     function historyTimestamp(item) {
