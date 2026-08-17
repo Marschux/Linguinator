@@ -82,8 +82,10 @@ let languageData = null;
         historyFormat: "Select the history download format.",
         selectLanguage: "Select {language}.",
         pageRangeHint: "Pages, e.g. 1-3,5",
-        sheetNameHint: "XLSX sheet name, optional",
-        csvColumnsHint: "Leave empty to translate the whole file, or e.g. title,description or A,B - or one \"Sheet: columns\" line per XLSX sheet",
+        sheetNameLabel: "XLSX Sheet",
+        sheetNameHint: "Optional, first sheet if empty",
+        csvColumnsLabel: "Columns to translate",
+        csvColumnsHint: "Optional, e.g. title,description or A,B",
         historyFilterHint: "Filter history...",
         tipReload: "Reload Linguinator.",
         tipUiLanguage: "Select the interface language.",
@@ -102,8 +104,8 @@ let languageData = null;
         tipCounter: "Characters used, character limit, and estimated translation chunks.",
         tipTextResult: "The translation, once the job completes.",
         tipFilePick: "Select the file to load.",
-        tipSheetName: "Optional XLSX sheet name. Leave empty to use the first sheet, or to select several sheets in the columns field below.",
-        tipCsvColumns: "Column names or letters to translate. Leave empty to translate every cell in the whole file (numbers, IP and MAC addresses are skipped automatically). For several XLSX sheets at once, one \"Sheet: columns\" line per sheet.",
+        tipSheetName: "Which sheet to use in an XLSX file. Leave empty for the first sheet. Not used for CSV files, and not used if the columns field below lists its own sheets.",
+        tipCsvColumns: "Column names or letters to translate. Leave empty to translate every cell (numbers, IP and MAC addresses are skipped automatically). For several XLSX sheets at once, one \"Sheet: columns\" line per sheet, overriding the sheet field above.",
         tipPdfPick: "Select the PDF to translate.",
         tipPageRange: "Optional page range, e.g. 1-3,5. Leave empty to translate all pages.",
         tipTranslate: "Start a new translation for the current input.",
@@ -182,8 +184,10 @@ let languageData = null;
         historyFormat: "Format für den Verlauf-Download wählen.",
         selectLanguage: "{language} auswählen.",
         pageRangeHint: "Seiten, z. B. 1-3,5",
-        sheetNameHint: "XLSX-Blattname, optional",
-        csvColumnsHint: "Leer lassen für die ganze Datei, oder z. B. titel,beschreibung oder A,B - oder je Blatt eine Zeile \"Blatt: Spalten\"",
+        sheetNameLabel: "XLSX-Blatt",
+        sheetNameHint: "Optional, ohne Angabe erstes Blatt",
+        csvColumnsLabel: "Zu übersetzende Spalten",
+        csvColumnsHint: "Optional, z. B. titel,beschreibung oder A,B",
         historyFilterHint: "Verlauf filtern...",
         tipReload: "Linguinator neu laden.",
         tipUiLanguage: "Sprache der Oberfläche wählen.",
@@ -202,8 +206,8 @@ let languageData = null;
         tipCounter: "Verbrauchte Zeichen, Zeichengrenze und geschätzte Chunks.",
         tipTextResult: "Die Übersetzung, sobald der Job abgeschlossen ist.",
         tipFilePick: "Zu ladende Datei wählen.",
-        tipSheetName: "Optionaler XLSX-Blattname. Leer lassen für das erste Blatt, oder leer lassen und mehrere Blätter im Spalten-Feld angeben.",
-        tipCsvColumns: "Zu übersetzende Spaltennamen oder -buchstaben. Leer lassen, um jede Zelle der ganzen Datei zu übersetzen (Zahlen, IP- und MAC-Adressen werden automatisch übersprungen). Für mehrere XLSX-Blätter auf einmal: pro Blatt eine Zeile \"Blatt: Spalten\".",
+        tipSheetName: "Welches Blatt einer XLSX-Datei verwendet wird. Leer lassen für das erste Blatt. Wird bei CSV-Dateien nicht verwendet, und nicht, wenn das Spalten-Feld unten eigene Blätter angibt.",
+        tipCsvColumns: "Zu übersetzende Spaltennamen oder -buchstaben. Leer lassen, um jede Zelle zu übersetzen (Zahlen, IP- und MAC-Adressen werden automatisch übersprungen). Für mehrere XLSX-Blätter auf einmal: pro Blatt eine Zeile \"Blatt: Spalten\", das ersetzt das Blatt-Feld oben.",
         tipPdfPick: "Zu uebersetzende PDF wählen.",
         tipPageRange: "Optionaler Seitenbereich, z. B. 1-3,5. Leer übersetzt alle Seiten.",
         tipTranslate: "Neue Übersetzung für die aktuelle Eingabe starten.",
@@ -282,8 +286,10 @@ let languageData = null;
         historyFormat: "Elegir el formato de descarga del historial.",
         selectLanguage: "Seleccionar {language}.",
         pageRangeHint: "Páginas, p. ej. 1-3,5",
-        sheetNameHint: "Nombre de hoja XLSX, opcional",
-        csvColumnsHint: "Vacío para traducir todo el archivo, o p. ej. título,descripción o A,B - o una línea \"Hoja: columnas\" por hoja",
+        sheetNameLabel: "Hoja XLSX",
+        sheetNameHint: "Opcional, primera hoja si está vacío",
+        csvColumnsLabel: "Columnas a traducir",
+        csvColumnsHint: "Opcional, p. ej. título,descripción o A,B",
         historyFilterHint: "Filtrar historial...",
         tipReload: "Recargar Linguinator.",
         tipUiLanguage: "Elegir el idioma de la interfaz.",
@@ -302,8 +308,8 @@ let languageData = null;
         tipCounter: "Caracteres usados, límite y bloques estimados.",
         tipTextResult: "La traducción, una vez que el trabajo se complete.",
         tipFilePick: "Elegir el archivo a cargar.",
-        tipSheetName: "Nombre de hoja XLSX, opcional. Vacío usa la primera hoja, o déjalo vacío para varias hojas en el campo de columnas.",
-        tipCsvColumns: "Nombres o letras de las columnas a traducir. Déjalo vacío para traducir cada celda de todo el archivo (los números y las direcciones IP/MAC se omiten automáticamente). Para varias hojas XLSX a la vez: una línea \"Hoja: columnas\" por hoja.",
+        tipSheetName: "Qué hoja usar en un archivo XLSX. Vacío para la primera hoja. No se usa en archivos CSV, ni si el campo de columnas de abajo indica sus propias hojas.",
+        tipCsvColumns: "Nombres o letras de las columnas a traducir. Déjalo vacío para traducir cada celda (los números y las direcciones IP/MAC se omiten automáticamente). Para varias hojas XLSX a la vez: una línea \"Hoja: columnas\" por hoja, que sustituye al campo de hoja de arriba.",
         tipPdfPick: "Elegir el PDF a traducir.",
         tipPageRange: "Rango de páginas opcional, p. ej. 1-3,5. Vacío traduce todas.",
         tipTranslate: "Iniciar una traducción para la entrada actual.",
@@ -382,8 +388,10 @@ let languageData = null;
         historyFormat: "Choisir le format de téléchargement de l'historique.",
         selectLanguage: "Sélectionner {language}.",
         pageRangeHint: "Pages, p. ex. 1-3,5",
-        sheetNameHint: "Nom de feuille XLSX, optionnel",
-        csvColumnsHint: "Vide pour traduire tout le fichier, ou p. ex. titre,description ou A,B - ou une ligne \"Feuille : colonnes\" par feuille",
+        sheetNameLabel: "Feuille XLSX",
+        sheetNameHint: "Optionnel, première feuille si vide",
+        csvColumnsLabel: "Colonnes à traduire",
+        csvColumnsHint: "Optionnel, p. ex. titre,description ou A,B",
         historyFilterHint: "Filtrer l'historique...",
         tipReload: "Recharger Linguinator.",
         tipUiLanguage: "Choisir la langue de l'interface.",
@@ -402,8 +410,8 @@ let languageData = null;
         tipCounter: "Caractères utilisés, limite et blocs estimés.",
         tipTextResult: "La traduction, une fois le travail terminé.",
         tipFilePick: "Choisir le fichier à charger.",
-        tipSheetName: "Nom de feuille XLSX, optionnel. Vide pour la première feuille, ou vide pour plusieurs feuilles dans le champ colonnes.",
-        tipCsvColumns: "Noms ou lettres des colonnes à traduire. Laisser vide pour traduire chaque cellule de tout le fichier (nombres, adresses IP et MAC ignorés automatiquement). Pour plusieurs feuilles XLSX à la fois : une ligne \"Feuille : colonnes\" par feuille.",
+        tipSheetName: "Quelle feuille utiliser dans un fichier XLSX. Vide pour la première feuille. Pas utilisé pour les fichiers CSV, ni si le champ colonnes ci-dessous indique ses propres feuilles.",
+        tipCsvColumns: "Noms ou lettres des colonnes à traduire. Laisser vide pour traduire chaque cellule (nombres, adresses IP et MAC ignorés automatiquement). Pour plusieurs feuilles XLSX à la fois : une ligne \"Feuille : colonnes\" par feuille, qui remplace le champ feuille ci-dessus.",
         tipPdfPick: "Choisir le PDF à traduire.",
         tipPageRange: "Plage de pages optionnelle, p. ex. 1-3,5. Vide traduit tout.",
         tipTranslate: "Lancer une traduction pour l'entrée actuelle.",
@@ -605,6 +613,8 @@ let languageData = null;
       for (const element of document.querySelectorAll("[data-title-key]")) {
         element.title = t(element.dataset.titleKey);
       }
+      setText('label[for="sheetName"]', "sheetNameLabel");
+      setText('label[for="csvColumns"]', "csvColumnsLabel");
       setPlaceholder("#pageRange", "pageRangeHint");
       setPlaceholder("#sheetName", "sheetNameHint");
       setPlaceholder("#csvColumns", "csvColumnsHint");
@@ -1790,6 +1800,8 @@ let languageData = null;
         ? ["md", "txt", "doc"]
         : item.source_extension === "docx"
         ? ["txt"]
+        : item.source_extension === "pptx" || item.source_extension === "csv"
+        ? (hasOriginal ? [] : ["txt"])
         : isTextFieldName(item.original_name)
         ? ["txt", "doc"]
         : isPlainTextUpload && hasOriginal
