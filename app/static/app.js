@@ -1698,11 +1698,11 @@ let languageData = null;
         .map((cell, index) => (cell && cell.conceptId === conceptId ? index : -1))
         .filter((index) => index !== -1);
       memoryLastPair = freedIndices
-        .map((index) => {
+        .map((index, i) => {
           const cell = memoryBoard[index];
           const word = memoryWordFor(cell);
           const flag = MEMORY_FLAGS[cell.isUi ? currentUiLanguage : cell.lang] || "";
-          return `${flag} ${word} ${flag}`;
+          return i === 0 ? `${flag} ${word}` : `${word} ${flag}`;
         })
         .join(" - ");
       memorySelected = [];
