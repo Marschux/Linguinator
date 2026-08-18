@@ -1220,8 +1220,8 @@ let languageData = null;
       {de: "Winter", en: "winter", fr: "hiver", es: "invierno"},
       {de: "Zug", en: "train", fr: "train", es: "tren"},
     ];
-    const MEMORY_ROUND_PAIRS = 20; // how many concepts get drawn from the pool each round
-    const MEMORY_BOARD_SIZE = 20;
+    const MEMORY_ROUND_PAIRS = 15; // how many concepts get drawn from the pool each round
+    const MEMORY_BOARD_SIZE = 30;
     let memoryBoard = []; // [{conceptId, isUi, lang}, ...] one entry per visible card;
     // isUi cards show the concept in the current UI language, re-evaluated on every render
     // so switching the UI language updates them immediately - "lang" is only used otherwise.
