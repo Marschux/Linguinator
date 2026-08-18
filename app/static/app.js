@@ -888,9 +888,10 @@ let languageData = null;
       option.className = "language-option";
       option.dataset.code = language.code;
       option.dataset.english = englishLanguageName(language.code).toLowerCase();
-      option.title = t("selectLanguage").replace("{language}", formatLanguageLabel(language.code));
+      const label = formatLanguageLabel(language.code);
+      option.title = t("selectLanguage", {language: label});
       option.innerHTML =
-        '<span class="language-name">' + escapeHtml(formatLanguageLabel(language.code)) + '</span>' +
+        '<span class="language-name">' + escapeHtml(label) + '</span>' +
         '<span class="language-code">' + escapeHtml(language.code) + '</span>';
       option.classList.toggle("active", language.code === selectedValue);
       option.addEventListener("click", () => {
@@ -1274,7 +1275,7 @@ let languageData = null;
       return new Date(timestamp * 1000).toLocaleString(undefined, {hour12: hour12Option()});
     }
 
-    async function controlJob(jobId, action) {
+    async function controlJob(jobId, action, reloadQueue = true) {
       const response = await fetch("jobs/" + jobId + "/" + action, {method: "POST"});
       if (!response.ok) {
         const text = await response.text();
@@ -1282,11 +1283,11 @@ let languageData = null;
         return null;
       }
       const job = await response.json();
-      await loadQueue();
+      if (reloadQueue) await loadQueue();
       return job;
     }
 
-function queueRing(job) {
+    function queueRing(job) {
       const ring = document.createElement("div");
       const failed = job.status === "failed";
       // Nothing to count yet: the file is still being read or uploaded, so the ring turns
@@ -1670,7 +1671,10 @@ function queueRing(job) {
       if (!response.ok) return;
       const data = await response.json();
       const eligible = data.items.filter((job) => (QUEUE_CONTROL_STATUSES[action] || []).includes(job.status));
-      await Promise.all(eligible.map((job) => controlJob(job.id, action)));
+      // One /jobs refresh for the whole batch, not one per job - controlJob's own reload is only
+      // for the single-job cancel button, where there is just one job to catch up on.
+      await Promise.all(eligible.map((job) => controlJob(job.id, action, false)));
+      await loadQueue();
       if (activeJobId) {
         const activeResponse = await fetch("jobs/" + activeJobId);
         if (activeResponse.ok) updateDocumentTitle(await activeResponse.json());
@@ -1832,6 +1836,26 @@ function queueRing(job) {
       if (badge) parent.appendChild(badge);
     }
 
+    // Which download formats to offer beside the always-available Markdown/TXT export, per
+    // source format - a fresh array each call, since the caller pushes "original" onto it.
+    function historyDownloadFormats(item, hasOriginal, isPlainTextUpload) {
+      // Plain PDF is either worse than the original-format re-export (layout mode dropped) or,
+      // without layout mode, byte-for-byte the same output (history_original_export falls back to
+      // the same create_text_pdf) - offering it beside "Original Format (.pdf)" only invites
+      // picking the redundant one.
+      if (item.source_extension === "pdf") return ["md", "txt", "doc"];
+      if (item.source_extension === "docx") return ["txt"];
+      if (item.source_extension === "pptx" || item.source_extension === "csv") return hasOriginal ? [] : ["txt"];
+      // The Text Field tab's own output isn't a document with layout to preserve or reflow,
+      // so Markdown and Plain PDF (both meant for structured files) don't apply to it.
+      if (isTextFieldName(item.original_name)) return ["txt", "doc"];
+      // An uploaded .txt or .md file re-exports as "Original Format" byte-for-byte the same as
+      // Markdown/Plain TXT (history_original_export just writes the text back out for either
+      // extension) - offering all three beside each other only invites picking a redundant one.
+      if (isPlainTextUpload && hasOriginal) return ["pdf", "doc"];
+      return ["md", "txt", "pdf", "doc"];
+    }
+
     function buildHistoryRow(item) {
       const row = document.createElement("div");
       row.className = "history-row";
@@ -1871,27 +1895,8 @@ function queueRing(job) {
       format.className = "history-format";
       format.title = t("historyFormat");
       const hasOriginal = item.has_source_file && item.source_extension;
-      // Plain PDF is either worse than the original-format re-export (layout mode dropped) or,
-      // without layout mode, byte-for-byte the same output (history_original_export falls back to
-      // the same create_text_pdf) - offering it beside "Original Format (.pdf)" only invites
-      // picking the redundant one.
-      // The Text Field tab's own output isn't a document with layout to preserve or reflow,
-      // so Markdown and Plain PDF (both meant for structured files) don't apply to it.
-      // An uploaded .txt or .md file re-exports as "Original Format" byte-for-byte the same as
-      // Markdown/Plain TXT (history_original_export just writes the text back out for either
-      // extension) - offering all three beside each other only invites picking a redundant one.
       const isPlainTextUpload = ["txt", "md"].includes(item.source_extension) && !isTextFieldName(item.original_name);
-      const historyFormats = item.source_extension === "pdf"
-        ? ["md", "txt", "doc"]
-        : item.source_extension === "docx"
-        ? ["txt"]
-        : item.source_extension === "pptx" || item.source_extension === "csv"
-        ? (hasOriginal ? [] : ["txt"])
-        : isTextFieldName(item.original_name)
-        ? ["txt", "doc"]
-        : isPlainTextUpload && hasOriginal
-        ? ["pdf", "doc"]
-        : ["md", "txt", "pdf", "doc"];
+      const historyFormats = historyDownloadFormats(item, hasOriginal, isPlainTextUpload);
       if (hasOriginal) {
         historyFormats.push("original");
       }

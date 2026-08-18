@@ -3560,6 +3560,39 @@ class MainTests(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir.parent, ignore_errors=True)
 
+    def test_update_job_throttles_disk_writes_between_progress_ticks(self):
+        # A document with thousands of sentences used to write the whole job out to disk once per
+        # sentence - every progress tick still lands in memory (get_job sees it right away), but
+        # only the first write per throttle window, and every terminal one, reaches disk.
+        temp_dir = test_temp_dir()
+        try:
+            with patch.object(main, "JOBS_DIR", temp_dir):
+                with main.JOBS_LOCK:
+                    main.JOBS.clear()
+                    main.JOB_RUNNERS.clear()
+                    main.JOB_LAST_PERSISTED_AT.clear()
+                job_id = main.create_job("translate", "eng_Latn", "deu_Latn", "Text")
+
+                main.update_job(job_id, status="running", total=1000, current=1)
+                after_first = json.loads(main.job_json_path(job_id).read_text(encoding="utf-8"))
+
+                main.update_job(job_id, current=2)
+                after_second = json.loads(main.job_json_path(job_id).read_text(encoding="utf-8"))
+
+                self.assertEqual(main.get_job(job_id)["current"], 2)
+                self.assertEqual(after_first["current"], 1)
+                self.assertEqual(after_second["current"], 1)
+
+                main.update_job(job_id, status="failed", error="boom", finished_at=time.time())
+                after_failure = json.loads(main.job_json_path(job_id).read_text(encoding="utf-8"))
+
+                self.assertEqual(after_failure["current"], 2)
+                self.assertEqual(after_failure["status"], "failed")
+        finally:
+            with main.JOBS_LOCK:
+                main.JOB_LAST_PERSISTED_AT.clear()
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
     def test_list_jobs_hides_payloads_and_adds_queue_positions(self):
         temp_dir = test_temp_dir()
         try:

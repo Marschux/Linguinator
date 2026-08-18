@@ -1,7 +1,6 @@
 # ... existing imports and setup code ...
 import base64
 import gc
-import math
 import os
 import re
 import secrets
@@ -343,6 +342,12 @@ JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
 JOBS_LOCK = threading.RLock()
 JOBS_CONDITION = threading.Condition(JOBS_LOCK)
 QUEUE_WORKERS_STARTED = False
+# Per-chunk progress ticks otherwise wrote the whole job out to disk once per sentence - a
+# document with thousands of sentences did thousands of small synchronous writes purely for
+# crash-resume bookkeeping. update_job skips a write within this many seconds of the last one for
+# the same job, unless the job just reached a terminal status.
+JOB_PERSIST_MIN_INTERVAL_SECONDS = 2.0
+JOB_LAST_PERSISTED_AT: Dict[str, float] = {}
 MODEL_LOCK = threading.RLock()
 MODEL_ACTIVE_USERS = 0
 MODEL_LAST_USED = 0.0
@@ -1646,12 +1651,6 @@ def persist_job(job: Dict[str, Any]):
     job_json_path(job["id"]).write_text(json.dumps(persisted_job(job)), encoding="utf-8")
 
 
-def persist_all_jobs():
-    with JOBS_LOCK:
-        for job in JOBS.values():
-            persist_job(job)
-
-
 def load_persisted_jobs():
     JOBS_DIR.mkdir(parents=True, exist_ok=True)
     with JOBS_LOCK:
@@ -1706,6 +1705,7 @@ def cleanup_finished_jobs():
         for job_id in stale:
             JOBS.pop(job_id, None)
             JOB_RUNNERS.pop(job_id, None)
+            JOB_LAST_PERSISTED_AT.pop(job_id, None)
             job_json_path(job_id).unlink(missing_ok=True)
 
 
@@ -1774,7 +1774,11 @@ def update_job(job_id: str, **values):
             job["eta_seconds"] = round((elapsed / current) * (total - current))
         elif current and total and current >= total:
             job["eta_seconds"] = 0
-        persist_job(job)
+        now = time.time()
+        terminal = job.get("status") in ("complete", "failed", "cancelled")
+        if terminal or now - JOB_LAST_PERSISTED_AT.get(job_id, 0) >= JOB_PERSIST_MIN_INTERVAL_SECONDS:
+            persist_job(job)
+            JOB_LAST_PERSISTED_AT[job_id] = now
         JOBS_CONDITION.notify_all()
 
 
@@ -4953,20 +4957,23 @@ def parse_column_names(columns: str) -> List[str]:
     return [column.strip() for column in columns.split(",") if column.strip()]
 
 
+def csv_dict_reader(content: bytes) -> csv.DictReader:
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not decode CSV as UTF-8: {exc}") from exc
+    reader = csv.DictReader(StringIO(text))
+    if not reader.fieldnames:
+        raise HTTPException(status_code=422, detail="CSV has no header row")
+    return reader
+
+
 def extract_csv_text_from_bytes(content: bytes, columns: str) -> str:
     selected_columns = parse_column_names(columns)
     if not selected_columns:
         raise HTTPException(status_code=400, detail="Select at least one CSV column")
 
-    try:
-        text = content.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=400, detail=f"Could not decode CSV as UTF-8: {exc}") from exc
-
-    reader = csv.DictReader(StringIO(text))
-    if not reader.fieldnames:
-        raise HTTPException(status_code=422, detail="CSV has no header row")
-
+    reader = csv_dict_reader(content)
     missing = [column for column in selected_columns if column not in reader.fieldnames]
     if missing:
         raise HTTPException(status_code=400, detail="CSV columns not found: " + ", ".join(missing))
@@ -4988,13 +4995,7 @@ def export_csv_with_translated_text(content: bytes, columns: str, translated_tex
     selected_columns = parse_column_names(columns)
     if not selected_columns:
         raise HTTPException(status_code=400, detail="Select at least one CSV column")
-    try:
-        text = content.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=400, detail=f"Could not decode CSV as UTF-8: {exc}") from exc
-    reader = csv.DictReader(StringIO(text))
-    if not reader.fieldnames:
-        raise HTTPException(status_code=422, detail="CSV has no header row")
+    reader = csv_dict_reader(content)
     missing = [column for column in selected_columns if column not in reader.fieldnames]
     if missing:
         raise HTTPException(status_code=400, detail="CSV columns not found: " + ", ".join(missing))
@@ -5023,14 +5024,7 @@ def extract_csv_auto_text_from_bytes(content: bytes) -> str:
     """No columns given at all: translate every cell that looks like real text, across every
     column, rather than requiring the user to name one - see spreadsheet_value_looks_translatable
     for what gets skipped."""
-    try:
-        text = content.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=400, detail=f"Could not decode CSV as UTF-8: {exc}") from exc
-    reader = csv.DictReader(StringIO(text))
-    if not reader.fieldnames:
-        raise HTTPException(status_code=422, detail="CSV has no header row")
-
+    reader = csv_dict_reader(content)
     blocks = []
     for row in reader:
         for column in reader.fieldnames:
@@ -5045,14 +5039,7 @@ def extract_csv_auto_text_from_bytes(content: bytes) -> str:
 
 
 def export_csv_auto_with_translated_text(content: bytes, translated_text: str) -> bytes:
-    try:
-        text = content.decode("utf-8-sig")
-    except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=400, detail=f"Could not decode CSV as UTF-8: {exc}") from exc
-    reader = csv.DictReader(StringIO(text))
-    if not reader.fieldnames:
-        raise HTTPException(status_code=422, detail="CSV has no header row")
-
+    reader = csv_dict_reader(content)
     rows = list(reader)
     blocks = translated_blocks(translated_text)
     block_index = 0
