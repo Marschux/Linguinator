@@ -1037,6 +1037,7 @@ let languageData = null;
     });
 
     function setInputTab(tab) {
+      hideEasterEgg();
       const config = inputTabs[tab] || inputTabs.textarea;
       currentInputTab = tab;
       localStorage.setItem("linguinator_input_tab", currentInputTab);
@@ -1076,12 +1077,188 @@ let languageData = null;
       });
     }
 
+    // Triple-click on the same tab button within 600ms opens the hidden memory game instead
+    // of switching tabs - a single/double click still behaves like a normal tab switch.
+    let secretClickButton = null;
+    let secretClickCount = 0;
+    let secretClickTimer = null;
     document.querySelectorAll("[data-input-tab]").forEach((button) => {
-      button.addEventListener("click", () => setInputTab(button.dataset.inputTab));
+      button.addEventListener("click", () => {
+        secretClickCount = secretClickButton === button ? secretClickCount + 1 : 1;
+        secretClickButton = button;
+        clearTimeout(secretClickTimer);
+        secretClickTimer = setTimeout(() => { secretClickCount = 0; }, 600);
+        if (secretClickCount >= 3) {
+          secretClickCount = 0;
+          toggleEasterEgg();
+          return;
+        }
+        setInputTab(button.dataset.inputTab);
+      });
     });
 
     document.getElementById("inputTabSelect").addEventListener("change", (event) => {
       setInputTab(event.target.value);
+    });
+
+    // Hidden word-memory game: click matching translations of the same word (2 or 3 of them,
+    // languages mixed at random) to clear that group. Not a serious feature - kept as one
+    // self-contained block rather than wired into the translation pipeline anywhere.
+    const MEMORY_LANGS = ["de", "en", "it", "fr", "es", "pt", "nl"];
+    const MEMORY_CONCEPTS = [
+      {de: "Nudeln", en: "pasta", it: "pasta", fr: "pâtes", es: "pasta", pt: "massa", nl: "pasta"},
+      {de: "Haus", en: "house", it: "casa", fr: "maison", es: "casa", pt: "casa", nl: "huis"},
+      {de: "Katze", en: "cat", it: "gatto", fr: "chat", es: "gato", pt: "gato", nl: "kat"},
+      {de: "Hund", en: "dog", it: "cane", fr: "chien", es: "perro", pt: "cão", nl: "hond"},
+      {de: "Wasser", en: "water", it: "acqua", fr: "eau", es: "agua", pt: "água", nl: "water"},
+      {de: "Brot", en: "bread", it: "pane", fr: "pain", es: "pan", pt: "pão", nl: "brood"},
+      {de: "Sonne", en: "sun", it: "sole", fr: "soleil", es: "sol", pt: "sol", nl: "zon"},
+      {de: "Mond", en: "moon", it: "luna", fr: "lune", es: "luna", pt: "lua", nl: "maan"},
+      {de: "Baum", en: "tree", it: "albero", fr: "arbre", es: "árbol", pt: "árvore", nl: "boom"},
+      {de: "Buch", en: "book", it: "libro", fr: "livre", es: "libro", pt: "livro", nl: "boek"},
+      {de: "Freund", en: "friend", it: "amico", fr: "ami", es: "amigo", pt: "amigo", nl: "vriend"},
+      {de: "Stadt", en: "city", it: "città", fr: "ville", es: "ciudad", pt: "cidade", nl: "stad"},
+      {de: "Meer", en: "sea", it: "mare", fr: "mer", es: "mar", pt: "mar", nl: "zee"},
+      {de: "Berg", en: "mountain", it: "montagna", fr: "montagne", es: "montaña", pt: "montanha", nl: "berg"},
+      {de: "Blume", en: "flower", it: "fiore", fr: "fleur", es: "flor", pt: "flor", nl: "bloem"},
+      {de: "Zeit", en: "time", it: "tempo", fr: "temps", es: "tiempo", pt: "tempo", nl: "tijd"},
+      {de: "Liebe", en: "love", it: "amore", fr: "amour", es: "amor", pt: "amor", nl: "liefde"},
+      {de: "Milch", en: "milk", it: "latte", fr: "lait", es: "leche", pt: "leite", nl: "melk"},
+    ];
+    const MEMORY_BOARD_SIZE = 40;
+    let memoryBoard = []; // [{conceptId, lang, word}, ...], one entry per visible card
+    let memoryReserve = []; // concept ids not yet placed on the board this round
+    let memorySelected = []; // indices into memoryBoard currently picked
+    let memoryBusy = false; // true while an error flash is being shown, blocks further clicks
+
+    function shuffled(array) {
+      const copy = array.slice();
+      for (let i = copy.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    }
+
+    // 2 or 3, but never a size that would leave exactly one empty cell behind (a lone card
+    // can't form a group with anything).
+    function memoryGroupSize(remaining) {
+      const options = [2, 3].filter((size) => size <= remaining && remaining - size !== 1);
+      return options[Math.floor(Math.random() * options.length)];
+    }
+
+    function memoryGroupFromConcept(conceptId, size) {
+      const langs = shuffled(MEMORY_LANGS).slice(0, size);
+      const concept = MEMORY_CONCEPTS[conceptId];
+      return langs.map((lang) => ({conceptId, lang, word: concept[lang]}));
+    }
+
+    function buildMemoryBoard() {
+      memoryReserve = shuffled(MEMORY_CONCEPTS.map((_, i) => i));
+      memoryBoard = [];
+      memorySelected = [];
+      while (memoryBoard.length < MEMORY_BOARD_SIZE && memoryReserve.length) {
+        const remaining = MEMORY_BOARD_SIZE - memoryBoard.length;
+        const size = memoryGroupSize(remaining);
+        if (!size) break;
+        const conceptId = memoryReserve.shift();
+        memoryBoard.push(...memoryGroupFromConcept(conceptId, size));
+      }
+    }
+
+    function renderMemoryBoard() {
+      const grid = document.getElementById("memoryGrid");
+      grid.innerHTML = "";
+      memoryBoard.forEach((cell, index) => {
+        const card = document.createElement("button");
+        card.type = "button";
+        card.className = "memory-card";
+        card.textContent = cell.word;
+        if (memorySelected.includes(index)) card.classList.add("selected");
+        card.addEventListener("click", () => handleMemoryCardClick(index));
+        grid.appendChild(card);
+      });
+    }
+
+    function handleMemoryCardClick(index) {
+      if (memoryBusy || memorySelected.includes(index)) return;
+      const conceptId = memoryBoard[index].conceptId;
+      if (memorySelected.length && memoryBoard[memorySelected[0]].conceptId !== conceptId) {
+        const wrong = memorySelected.concat(index);
+        memorySelected = [];
+        flashMemoryError(wrong);
+        return;
+      }
+      memorySelected.push(index);
+      const groupTotal = memoryBoard.filter((cell) => cell.conceptId === conceptId).length;
+      if (memorySelected.length === groupTotal) {
+        resolveMemoryGroup(conceptId);
+        return;
+      }
+      renderMemoryBoard();
+    }
+
+    function flashMemoryError(indices) {
+      memoryBusy = true;
+      const grid = document.getElementById("memoryGrid");
+      indices.forEach((index) => grid.children[index].classList.add("error"));
+      setTimeout(() => {
+        memoryBusy = false;
+        renderMemoryBoard();
+      }, 500);
+    }
+
+    function resolveMemoryGroup(conceptId) {
+      const freedIndices = memoryBoard
+        .map((cell, index) => (cell.conceptId === conceptId ? index : -1))
+        .filter((index) => index !== -1);
+      memorySelected = [];
+      if (memoryReserve.length) {
+        const nextConceptId = memoryReserve.shift();
+        const size = Math.min(freedIndices.length, MEMORY_LANGS.length);
+        const newCells = memoryGroupFromConcept(nextConceptId, size);
+        shuffled(freedIndices).forEach((boardIndex, i) => {
+          memoryBoard[boardIndex] = newCells[i];
+        });
+      } else {
+        memoryBoard = memoryBoard.filter((cell) => cell.conceptId !== conceptId);
+      }
+      if (!memoryBoard.length) {
+        document.getElementById("memoryWin").classList.remove("hidden");
+      }
+      renderMemoryBoard();
+    }
+
+    function hideEasterEgg() {
+      const panel = document.getElementById("easterEggPanel");
+      if (panel.classList.contains("hidden")) return;
+      panel.classList.add("hidden");
+      const config = inputTabs[currentInputTab] || inputTabs.textarea;
+      document.querySelectorAll(".tab-panel").forEach((tabPanel) => {
+        tabPanel.classList.toggle("active", tabPanel.id === config.panel);
+      });
+    }
+
+    function openEasterEgg() {
+      document.getElementById("easterEggPanel").classList.remove("hidden");
+      document.getElementById("memoryWin").classList.add("hidden");
+      document.querySelectorAll(".tab-panel").forEach((tabPanel) => tabPanel.classList.remove("active"));
+      if (!memoryBoard.length) buildMemoryBoard();
+      renderMemoryBoard();
+    }
+
+    function toggleEasterEgg() {
+      if (document.getElementById("easterEggPanel").classList.contains("hidden")) {
+        openEasterEgg();
+      } else {
+        hideEasterEgg();
+      }
+    }
+
+    document.getElementById("memoryReset").addEventListener("click", () => {
+      document.getElementById("memoryWin").classList.add("hidden");
+      buildMemoryBoard();
+      renderMemoryBoard();
     });
 
     function setResult(text) {
