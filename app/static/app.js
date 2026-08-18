@@ -86,7 +86,7 @@ let languageData = null;
         downloadItem: "Download this history item.",
         historyFormat: "Select the history download format.",
         selectLanguage: "Select {language}.",
-        pageRangeHint: "Pages, e.g. 1-3,5",
+        pageRangeHint: "Optional, e.g. 1-3,5",
         sheetNameLabel: "XLSX Sheet",
         sheetNameHint: "Optional, first sheet if empty",
         docPageRangeLabel: "Pages",
@@ -192,7 +192,7 @@ let languageData = null;
         downloadItem: "Diesen Verlaufseintrag herunterladen.",
         historyFormat: "Format für den Verlauf-Download wählen.",
         selectLanguage: "{language} auswählen.",
-        pageRangeHint: "Seiten, z. B. 1-3,5",
+        pageRangeHint: "Optional, z. B. 1-3,5",
         sheetNameLabel: "XLSX-Blatt",
         sheetNameHint: "Optional, ohne Angabe erstes Blatt",
         docPageRangeLabel: "Seiten",
@@ -298,7 +298,7 @@ let languageData = null;
         downloadItem: "Descargar este elemento del historial.",
         historyFormat: "Elegir el formato de descarga del historial.",
         selectLanguage: "Seleccionar {language}.",
-        pageRangeHint: "Páginas, p. ej. 1-3,5",
+        pageRangeHint: "Opcional, p. ej. 1-3,5",
         sheetNameLabel: "Hoja XLSX",
         sheetNameHint: "Opcional, primera hoja si está vacío",
         docPageRangeLabel: "Páginas",
@@ -404,7 +404,7 @@ let languageData = null;
         downloadItem: "Télécharger cet élément de l'historique.",
         historyFormat: "Choisir le format de téléchargement de l'historique.",
         selectLanguage: "Sélectionner {language}.",
-        pageRangeHint: "Pages, p. ex. 1-3,5",
+        pageRangeHint: "Optionnel, p. ex. 1-3,5",
         sheetNameLabel: "Feuille XLSX",
         sheetNameHint: "Optionnel, première feuille si vide",
         docPageRangeLabel: "Pages",
@@ -636,6 +636,7 @@ let languageData = null;
       setText('label[for="sheetName"]', "sheetNameLabel");
       setText('label[for="csvColumns"]', "csvColumnsLabel");
       setText('label[for="docPageRange"]', "docPageRangeLabel");
+      setText('label[for="pageRange"]', "docPageRangeLabel");
       setPlaceholder("#pageRange", "pageRangeHint");
       setPlaceholder("#sheetName", "sheetNameHint");
       setPlaceholder("#csvColumns", "csvColumnsHint");
