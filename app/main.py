@@ -1776,7 +1776,8 @@ def update_job(job_id: str, **values):
             job["eta_seconds"] = 0
         now = time.time()
         terminal = job.get("status") in ("complete", "failed", "cancelled")
-        if terminal or now - JOB_LAST_PERSISTED_AT.get(job_id, 0) >= JOB_PERSIST_MIN_INTERVAL_SECONDS:
+        control_flag_changed = "cancel_requested" in values or "pause_requested" in values
+        if terminal or control_flag_changed or now - JOB_LAST_PERSISTED_AT.get(job_id, 0) >= JOB_PERSIST_MIN_INTERVAL_SECONDS:
             persist_job(job)
             JOB_LAST_PERSISTED_AT[job_id] = now
         JOBS_CONDITION.notify_all()
