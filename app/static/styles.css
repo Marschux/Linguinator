@@ -458,6 +458,7 @@
       border-radius: 8px;
       display: inline-flex;
       line-height: 1.2;
+      min-height: 1.9rem;
       padding: .35rem .7rem;
     }
     .memory-grid {
