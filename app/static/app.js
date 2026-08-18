@@ -130,6 +130,9 @@ let languageData = null;
         modelFallback: "No dedicated model for this pair, using the multilingual fallback.",
         modelAutoDetect: "Detected automatically. Scans take longer, and a scan mixing two scripts needs the language set.",
         autoDetect: "Auto-detect",
+        memoryPairsFound: "Pairs found: {count} / {total}",
+        memoryWin: "All pairs found!",
+        memoryReset: "Play again",
       },
       de: {
         uiLanguage: "UI-Sprache",
@@ -236,6 +239,9 @@ let languageData = null;
         modelFallback: "Kein eigenes Modell für dieses Paar, nutzt den mehrsprachigen Fallback.",
         modelAutoDetect: "Wird automatisch erkannt. Scans dauern länger, bei zwei Schriften die Sprache selbst setzen.",
         autoDetect: "Automatisch erkennen",
+        memoryPairsFound: "Gefundene Paare: {count} / {total}",
+        memoryWin: "Alle Paare gefunden!",
+        memoryReset: "Nochmal",
       },
       es: {
         uiLanguage: "Idioma de UI",
@@ -342,6 +348,9 @@ let languageData = null;
         modelFallback: "Sin modelo dedicado para este par, se usa el alternativo multilingüe.",
         modelAutoDetect: "Se detecta automáticamente. Los escaneos tardan más; si mezclan dos alfabetos, fija el idioma.",
         autoDetect: "Detección automática",
+        memoryPairsFound: "Pares encontrados: {count} / {total}",
+        memoryWin: "¡Todos los pares encontrados!",
+        memoryReset: "Otra vez",
       },
       fr: {
         uiLanguage: "Langue UI",
@@ -448,6 +457,9 @@ let languageData = null;
         modelFallback: "Pas de modèle dédié pour cette paire, utilise le modèle multilingue.",
         modelAutoDetect: "Détectée automatiquement. Les scans prennent plus de temps; si deux écritures se mélangent, choisis la langue.",
         autoDetect: "Détection automatique",
+        memoryPairsFound: "Paires trouvées : {count} / {total}",
+        memoryWin: "Toutes les paires trouvées !",
+        memoryReset: "Rejouer",
       }
     };
     const AUTO_LANGUAGE = {code: "auto", name: "auto"};
@@ -645,6 +657,7 @@ let languageData = null;
       refreshInputLabels();
       refreshInputTabSelectLabels();
       updateCounter();
+      applyMemoryLabels();
       if (languageData) {
         renderSelect("source", document.getElementById("source").value);
         renderSelect("target", document.getElementById("target").value);
@@ -1125,9 +1138,10 @@ let languageData = null;
       {de: "Liebe", en: "love", it: "amore", fr: "amour", es: "amor", pt: "amor", nl: "liefde"},
       {de: "Milch", en: "milk", it: "latte", fr: "lait", es: "leche", pt: "leite", nl: "melk"},
     ];
-    const MEMORY_PAIR_SIZE = 2;
     const MEMORY_BOARD_SIZE = 30;
-    let memoryBoard = []; // [{conceptId, lang, word}, ...], one entry per visible card
+    let memoryBoard = []; // [{conceptId, isUi, lang}, ...] one entry per visible card;
+    // isUi cards show the concept in the current UI language, re-evaluated on every render
+    // so switching the UI language updates them immediately - "lang" is only used otherwise.
     let memoryReserve = []; // concept ids not yet placed on the board this round
     let memorySelected = []; // indices into memoryBoard currently picked
     let memoryBusy = false; // true while a match/error flash is being shown, blocks further clicks
@@ -1143,10 +1157,16 @@ let languageData = null;
       return copy;
     }
 
+    function memoryWordFor(cell) {
+      return MEMORY_CONCEPTS[cell.conceptId][cell.isUi ? currentUiLanguage : cell.lang];
+    }
+
+    // One side always tracks the current UI language, the other is a fixed random language
+    // (never the UI one, or both sides would show the same language) picked once per pair.
     function memoryGroupFromConcept(conceptId) {
-      const langs = shuffled(MEMORY_LANGS).slice(0, MEMORY_PAIR_SIZE);
-      const concept = MEMORY_CONCEPTS[conceptId];
-      return langs.map((lang) => ({conceptId, lang, word: concept[lang]}));
+      const otherLangs = MEMORY_LANGS.filter((lang) => lang !== currentUiLanguage);
+      const randomLang = otherLangs[Math.floor(Math.random() * otherLangs.length)];
+      return shuffled([{conceptId, isUi: true}, {conceptId, isUi: false, lang: randomLang}]);
     }
 
     function buildMemoryBoard() {
@@ -1158,11 +1178,23 @@ let languageData = null;
         const conceptId = memoryReserve.shift();
         memoryBoard.push(...memoryGroupFromConcept(conceptId));
       }
+      memoryBoard = shuffled(memoryBoard);
+      document.getElementById("memoryWinText").classList.add("hidden");
       renderMemoryCounter();
     }
 
     function renderMemoryCounter() {
-      document.getElementById("memoryCounter").textContent = "Gefundene Paare: " + memoryFound + " / " + MEMORY_TOTAL_PAIRS;
+      document.getElementById("memoryCounter").textContent = t("memoryPairsFound", {count: memoryFound, total: MEMORY_TOTAL_PAIRS});
+    }
+
+    // Re-localizes the game's own labels and re-renders the board, so a UI language switch
+    // updates the UI-tracking side of every visible pair immediately (e.g. "Hund" -> "dog").
+    function applyMemoryLabels() {
+      document.getElementById("memoryReset").textContent = t("memoryReset");
+      renderMemoryCounter();
+      const winText = document.getElementById("memoryWinText");
+      if (!winText.classList.contains("hidden")) winText.textContent = t("memoryWin");
+      renderMemoryBoard();
     }
 
     function renderMemoryBoard() {
@@ -1172,7 +1204,7 @@ let languageData = null;
         const card = document.createElement("button");
         card.type = "button";
         card.className = "memory-card";
-        card.textContent = cell.word;
+        card.textContent = memoryWordFor(cell);
         if (memorySelected.includes(index)) card.classList.add("selected");
         card.addEventListener("click", () => handleMemoryCardClick(index));
         grid.appendChild(card);
@@ -1180,7 +1212,12 @@ let languageData = null;
     }
 
     function handleMemoryCardClick(index) {
-      if (memoryBusy || memorySelected.includes(index)) return;
+      if (memoryBusy) return;
+      if (memorySelected.includes(index)) {
+        memorySelected = memorySelected.filter((selectedIndex) => selectedIndex !== index);
+        renderMemoryBoard();
+        return;
+      }
       const conceptId = memoryBoard[index].conceptId;
       if (memorySelected.length && memoryBoard[memorySelected[0]].conceptId !== conceptId) {
         const wrong = memorySelected.concat(index);
@@ -1189,7 +1226,7 @@ let languageData = null;
         return;
       }
       memorySelected.push(index);
-      if (memorySelected.length === MEMORY_PAIR_SIZE) {
+      if (memorySelected.length === 2) {
         flashMemoryCorrect(memorySelected, conceptId);
         return;
       }
@@ -1232,7 +1269,9 @@ let languageData = null;
         memoryBoard = memoryBoard.filter((cell) => cell.conceptId !== conceptId);
       }
       if (!memoryBoard.length) {
-        document.getElementById("memoryWin").classList.remove("hidden");
+        const winText = document.getElementById("memoryWinText");
+        winText.textContent = t("memoryWin");
+        winText.classList.remove("hidden");
       }
       renderMemoryCounter();
       renderMemoryBoard();
@@ -1250,7 +1289,6 @@ let languageData = null;
 
     function openEasterEgg() {
       document.getElementById("easterEggPanel").classList.remove("hidden");
-      document.getElementById("memoryWin").classList.add("hidden");
       document.querySelectorAll(".tab-panel").forEach((tabPanel) => tabPanel.classList.remove("active"));
       if (!memoryBoard.length) buildMemoryBoard();
       renderMemoryBoard();
@@ -1265,7 +1303,6 @@ let languageData = null;
     }
 
     document.getElementById("memoryReset").addEventListener("click", () => {
-      document.getElementById("memoryWin").classList.add("hidden");
       buildMemoryBoard();
       renderMemoryBoard();
     });

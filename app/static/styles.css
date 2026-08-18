@@ -441,16 +441,24 @@
     .hidden { display: none; }
     .invisible { visibility: hidden; }
 
+    .memory-status {
+      align-items: center;
+      display: flex;
+      gap: 1rem;
+      justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+    .memory-status .subtle { margin: 0; }
     .memory-grid {
       display: grid;
       gap: .5rem;
       grid-template-columns: repeat(6, minmax(0, 1fr));
     }
     .memory-card {
-      background: var(--panel-soft);
+      background: #22262b;
       border: 1px solid var(--line);
       border-radius: 8px;
-      color: var(--text);
+      color: #f2f5f8;
       cursor: pointer;
       font: inherit;
       min-height: 2.65rem;
@@ -460,13 +468,6 @@
     .memory-card.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
     .memory-card.error { background: #b3413d; border-color: #b3413d; color: #fff; }
     .memory-card.correct { background: #3d9142; border-color: #3d9142; color: #fff; }
-    .memory-win {
-      align-items: center;
-      display: flex;
-      gap: 1rem;
-      justify-content: center;
-      margin-top: 1rem;
-    }
     /* Pause/Resume/Stop pack together on the left, Reset sits apart on the right (the auto
        margin) - it deletes data, so it does not belong in the same cluster a misclick could
        land in. */
