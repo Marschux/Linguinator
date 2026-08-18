@@ -1294,6 +1294,12 @@ let languageData = null;
       const grid = document.getElementById("memoryGrid");
       grid.innerHTML = "";
       memoryBoard.forEach((cell, index) => {
+        if (!cell) {
+          const placeholder = document.createElement("div");
+          placeholder.className = "memory-card memory-card-empty";
+          grid.appendChild(placeholder);
+          return;
+        }
         const card = document.createElement("button");
         card.type = "button";
         card.className = "memory-card";
@@ -1306,6 +1312,7 @@ let languageData = null;
 
     function handleMemoryCardClick(index) {
       if (memoryBusy) return;
+      if (!memoryBoard[index]) return;
       if (memorySelected.includes(index)) {
         memorySelected = memorySelected.filter((selectedIndex) => selectedIndex !== index);
         renderMemoryBoard();
@@ -1348,7 +1355,7 @@ let languageData = null;
 
     function resolveMemoryGroup(conceptId) {
       const freedIndices = memoryBoard
-        .map((cell, index) => (cell.conceptId === conceptId ? index : -1))
+        .map((cell, index) => (cell && cell.conceptId === conceptId ? index : -1))
         .filter((index) => index !== -1);
       memoryLastPair = freedIndices.map((index) => memoryWordFor(memoryBoard[index])).join(" - ");
       memorySelected = [];
@@ -1360,9 +1367,11 @@ let languageData = null;
           memoryBoard[boardIndex] = newCells[i];
         });
       } else {
-        memoryBoard = memoryBoard.filter((cell) => cell.conceptId !== conceptId);
+        freedIndices.forEach((boardIndex) => {
+          memoryBoard[boardIndex] = null;
+        });
       }
-      if (!memoryBoard.length) {
+      if (memoryBoard.every((cell) => !cell)) {
         const winText = document.getElementById("memoryWinText");
         winText.textContent = t("memoryWin");
         winText.classList.remove("hidden");
