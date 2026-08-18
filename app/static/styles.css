@@ -455,7 +455,7 @@
       grid-template-columns: repeat(6, minmax(0, 1fr));
     }
     .memory-card {
-      background: #22262b;
+      background: #000;
       border: 1px solid var(--line);
       border-radius: 8px;
       color: #f2f5f8;
