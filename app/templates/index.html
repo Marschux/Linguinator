@@ -53,7 +53,7 @@
         </select>
       </div>
 
-      <div class="row">
+      <div id="languageRow" class="row">
         <div class="language-field" data-picker="source">
           <label for="source">Source</label>
           <select id="source" class="native-select"></select>
@@ -70,12 +70,13 @@
       <p id="modelQualityHint" class="subtle"></p>
 
       <div id="easterEggPanel" class="hidden">
+        <div id="memoryGrid" class="memory-grid"></div>
         <div class="memory-status">
           <span id="memoryCounter" class="subtle"></span>
+          <span id="memoryLastPair" class="subtle"></span>
           <span id="memoryWinText" class="subtle hidden"></span>
           <button id="memoryReset" class="secondary" type="button"></button>
         </div>
-        <div id="memoryGrid" class="memory-grid"></div>
       </div>
 
       <div id="textareaPanel" class="tab-panel active">

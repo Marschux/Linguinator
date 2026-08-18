@@ -1138,7 +1138,7 @@ let languageData = null;
       {de: "Liebe", en: "love", it: "amore", fr: "amour", es: "amor", pt: "amor", nl: "liefde"},
       {de: "Milch", en: "milk", it: "latte", fr: "lait", es: "leche", pt: "leite", nl: "melk"},
     ];
-    const MEMORY_BOARD_SIZE = 30;
+    const MEMORY_BOARD_SIZE = 20;
     let memoryBoard = []; // [{conceptId, isUi, lang}, ...] one entry per visible card;
     // isUi cards show the concept in the current UI language, re-evaluated on every render
     // so switching the UI language updates them immediately - "lang" is only used otherwise.
@@ -1146,6 +1146,7 @@ let languageData = null;
     let memorySelected = []; // indices into memoryBoard currently picked
     let memoryBusy = false; // true while a match/error flash is being shown, blocks further clicks
     let memoryFound = 0; // pairs matched so far this round
+    let memoryLastPair = ""; // the two words of the most recently matched pair, e.g. "Hund - dog"
     const MEMORY_TOTAL_PAIRS = MEMORY_CONCEPTS.length;
 
     function shuffled(array) {
@@ -1181,6 +1182,7 @@ let languageData = null;
       memoryBoard = [];
       memorySelected = [];
       memoryFound = 0;
+      memoryLastPair = "";
       while (memoryBoard.length < MEMORY_BOARD_SIZE && memoryReserve.length) {
         const conceptId = memoryReserve.shift();
         memoryBoard.push(...memoryGroupFromConcept(conceptId));
@@ -1192,6 +1194,7 @@ let languageData = null;
 
     function renderMemoryCounter() {
       document.getElementById("memoryCounter").textContent = t("memoryPairsFound", {count: memoryFound, total: MEMORY_TOTAL_PAIRS});
+      document.getElementById("memoryLastPair").textContent = memoryLastPair;
     }
 
     // Re-localizes the game's own labels and re-renders the board, so a UI language switch
@@ -1264,6 +1267,7 @@ let languageData = null;
       const freedIndices = memoryBoard
         .map((cell, index) => (cell.conceptId === conceptId ? index : -1))
         .filter((index) => index !== -1);
+      memoryLastPair = freedIndices.map((index) => memoryWordFor(memoryBoard[index])).join(" - ");
       memorySelected = [];
       memoryFound += 1;
       if (memoryReserve.length) {
@@ -1288,6 +1292,8 @@ let languageData = null;
       const panel = document.getElementById("easterEggPanel");
       if (panel.classList.contains("hidden")) return;
       panel.classList.add("hidden");
+      document.getElementById("languageRow").classList.remove("hidden");
+      document.getElementById("primaryActions").classList.remove("hidden");
       const config = inputTabs[currentInputTab] || inputTabs.textarea;
       document.querySelectorAll(".tab-panel").forEach((tabPanel) => {
         tabPanel.classList.toggle("active", tabPanel.id === config.panel);
@@ -1296,6 +1302,8 @@ let languageData = null;
 
     function openEasterEgg() {
       document.getElementById("easterEggPanel").classList.remove("hidden");
+      document.getElementById("languageRow").classList.add("hidden");
+      document.getElementById("primaryActions").classList.add("hidden");
       document.querySelectorAll(".tab-panel").forEach((tabPanel) => tabPanel.classList.remove("active"));
       if (!memoryBoard.length) buildMemoryBoard();
       renderMemoryBoard();
