@@ -450,6 +450,7 @@
     }
     .memory-status .subtle { margin: 0; }
     .memory-badges { display: flex; gap: .4rem; }
+    .memory-lastpair { min-width: 12rem; text-align: center; }
     .memory-badge {
       background: var(--panel-soft);
       border: 1px solid var(--line);
