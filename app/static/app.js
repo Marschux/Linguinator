@@ -1117,7 +1117,7 @@ let languageData = null;
     // Hidden word-memory game: click two matching translations of the same word (languages
     // mixed at random) to clear that pair. Not a serious feature - kept as one self-contained
     // block rather than wired into the translation pipeline anywhere.
-    const MEMORY_LANGS = ["de", "en", "it", "fr", "es", "pt", "nl"];
+    const MEMORY_LANGS = ["de", "en", "fr", "es"];
     const MEMORY_CONCEPTS = [
       {de: "Nudeln", en: "pasta", it: "pasta", fr: "pâtes", es: "pasta", pt: "massa", nl: "pasta"},
       {de: "Haus", en: "house", it: "casa", fr: "maison", es: "casa", pt: "casa", nl: "huis"},
