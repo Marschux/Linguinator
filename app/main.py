@@ -335,7 +335,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="0.21.3", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="0.21.4", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -1794,12 +1794,14 @@ def get_job(job_id: str):
 
 
 def control_job(job_id: str, action: str):
+    if action not in ("pause", "resume", "cancel"):
+        raise HTTPException(status_code=400, detail="Unknown job action")
+    current = get_job(job_id)
     if action == "pause":
         update_job(job_id, pause_requested=True, message="Pause requested")
     elif action == "resume":
         update_job(job_id, pause_requested=False, message="Resuming")
     elif action == "cancel":
-        current = get_job(job_id)
         if current.get("status") == "queued":
             update_job(
                 job_id,
@@ -1812,8 +1814,6 @@ def control_job(job_id: str, action: str):
             cleanup_job_payload(job_id)
         else:
             update_job(job_id, cancel_requested=True, pause_requested=False, message="Stop requested")
-    else:
-        raise HTTPException(status_code=400, detail="Unknown job action")
     return get_job(job_id)
 
 
