@@ -1526,6 +1526,7 @@ let languageData = null;
     ];
     const MEMORY_ROUND_PAIRS = 15; // how many concepts get drawn from the pool each round
     const MEMORY_BOARD_SIZE = 30;
+    const MEMORY_MAX_WRONG = 15; // wrong attempts allowed before the round auto-resets
     let memoryBoard = []; // [{conceptId, isUi, lang}, ...] one entry per visible card;
     // isUi cards show the concept in the current UI language, re-evaluated on every render
     // so switching the UI language updates them immediately - "lang" is only used otherwise.
@@ -1646,6 +1647,19 @@ let languageData = null;
       renderMemoryCounter();
       const grid = document.getElementById("memoryGrid");
       indices.forEach((index) => grid.children[index].classList.add("error"));
+      if (memoryWrong >= MEMORY_MAX_WRONG) {
+        setTimeout(() => {
+          playMemoryFailSound();
+          grid.classList.add("fail");
+          grid.addEventListener("animationend", () => grid.classList.remove("fail"), {once: true});
+          setTimeout(() => {
+            memoryBusy = false;
+            buildMemoryBoard();
+            renderMemoryBoard();
+          }, 600);
+        }, 500);
+        return;
+      }
       setTimeout(() => {
         memoryBusy = false;
         renderMemoryBoard();
@@ -1675,6 +1689,22 @@ let languageData = null;
         osc.connect(gain).connect(ctx.destination);
         osc.start(start);
         osc.stop(start + 0.35);
+      });
+    }
+
+    function playMemoryFailSound() {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [392, 329.63, 261.63].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "triangle";
+        osc.frequency.value = freq;
+        const start = ctx.currentTime + i * 0.12;
+        gain.gain.setValueAtTime(0.15, start);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.3);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + 0.3);
       });
     }
 
