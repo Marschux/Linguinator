@@ -131,8 +131,8 @@ let languageData = null;
         modelAutoDetect: "Detected automatically. Scans take longer, and a scan mixing two scripts needs the language set.",
         autoDetect: "Auto-detect",
         memoryPairsFound: "Pairs found: {count} / {total}",
-        memoryWrongCount: "Wrong: {count}",
-        memoryWin: "All pairs found!",
+        memoryWrongCount: "Wrong: {count} / {total}",
+        memoryWin: "All pairs found in {time}!",
         memoryReset: "Play again",
       },
       de: {
@@ -241,8 +241,8 @@ let languageData = null;
         modelAutoDetect: "Wird automatisch erkannt. Scans dauern länger, bei zwei Schriften die Sprache selbst setzen.",
         autoDetect: "Automatisch erkennen",
         memoryPairsFound: "Gefundene Paare: {count} / {total}",
-        memoryWrongCount: "Falsch: {count}",
-        memoryWin: "Alle Paare gefunden!",
+        memoryWrongCount: "Falsch: {count} / {total}",
+        memoryWin: "Alle Paare gefunden in {time}!",
         memoryReset: "Nochmal",
       },
       es: {
@@ -351,8 +351,8 @@ let languageData = null;
         modelAutoDetect: "Se detecta automáticamente. Los escaneos tardan más; si mezclan dos alfabetos, fija el idioma.",
         autoDetect: "Detección automática",
         memoryPairsFound: "Pares encontrados: {count} / {total}",
-        memoryWrongCount: "Errores: {count}",
-        memoryWin: "¡Todos los pares encontrados!",
+        memoryWrongCount: "Errores: {count} / {total}",
+        memoryWin: "¡Todos los pares encontrados en {time}!",
         memoryReset: "Otra vez",
       },
       fr: {
@@ -461,8 +461,8 @@ let languageData = null;
         modelAutoDetect: "Détectée automatiquement. Les scans prennent plus de temps; si deux écritures se mélangent, choisis la langue.",
         autoDetect: "Détection automatique",
         memoryPairsFound: "Paires trouvées : {count} / {total}",
-        memoryWrongCount: "Erreurs : {count}",
-        memoryWin: "Toutes les paires trouvées !",
+        memoryWrongCount: "Erreurs : {count} / {total}",
+        memoryWin: "Toutes les paires trouvées en {time} !",
         memoryReset: "Rejouer",
       }
     };
@@ -1536,6 +1536,8 @@ let languageData = null;
     let memoryFound = 0; // pairs matched so far this round
     let memoryWrong = 0; // wrong attempts so far this round
     let memoryLastPair = ""; // the two words of the most recently matched pair, e.g. "Hund - dog"
+    let memoryStartTime = 0; // Date.now() when the current round started
+    let memoryWinElapsedMs = 0; // elapsed time when the round was won, for re-localizing the win text
     const MEMORY_TOTAL_PAIRS = MEMORY_ROUND_PAIRS;
 
     function shuffled(array) {
@@ -1573,6 +1575,7 @@ let languageData = null;
       memoryFound = 0;
       memoryWrong = 0;
       memoryLastPair = "";
+      memoryStartTime = Date.now();
       while (memoryBoard.length < MEMORY_BOARD_SIZE && memoryReserve.length) {
         const conceptId = memoryReserve.shift();
         memoryBoard.push(...memoryGroupFromConcept(conceptId));
@@ -1584,7 +1587,7 @@ let languageData = null;
 
     function renderMemoryCounter() {
       document.getElementById("memoryCounter").textContent = t("memoryPairsFound", {count: memoryFound, total: MEMORY_TOTAL_PAIRS});
-      document.getElementById("memoryWrongCount").textContent = t("memoryWrongCount", {count: memoryWrong});
+      document.getElementById("memoryWrongCount").textContent = t("memoryWrongCount", {count: memoryWrong, total: MEMORY_MAX_WRONG});
       document.getElementById("memoryLastPair").textContent = memoryLastPair;
     }
 
@@ -1594,7 +1597,7 @@ let languageData = null;
       document.getElementById("memoryReset").textContent = t("memoryReset");
       renderMemoryCounter();
       const winText = document.getElementById("memoryWinText");
-      if (!winText.classList.contains("hidden")) winText.textContent = t("memoryWin");
+      if (!winText.classList.contains("hidden")) winText.textContent = t("memoryWin", {time: formatMemoryTime(memoryWinElapsedMs)});
       renderMemoryBoard();
     }
 
@@ -1676,6 +1679,13 @@ let languageData = null;
       }, 500);
     }
 
+    function formatMemoryTime(ms) {
+      const totalSeconds = Math.round(ms / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return `${minutes}:${String(seconds).padStart(2, "0")}`;
+    }
+
     function playMemoryWinSound() {
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       [523.25, 659.25, 783.99].forEach((freq, i) => {
@@ -1750,8 +1760,9 @@ let languageData = null;
       }
       const won = memoryBoard.every((cell) => !cell);
       if (won) {
+        memoryWinElapsedMs = Date.now() - memoryStartTime;
         const winText = document.getElementById("memoryWinText");
-        winText.textContent = t("memoryWin");
+        winText.textContent = t("memoryWin", {time: formatMemoryTime(memoryWinElapsedMs)});
         winText.classList.remove("hidden");
       }
       renderMemoryCounter();
