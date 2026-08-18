@@ -4,8 +4,8 @@
 TODO.md
 mistake.md
 Onboarding Testbench.md
-.claude/*
-!.claude/skills/
+.claude/
+CLAUDE.md
 __pycache__/
 *.pyc
 *.pyo
