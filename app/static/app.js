@@ -1137,7 +1137,90 @@ let languageData = null;
       {de: "Zeit", en: "time", it: "tempo", fr: "temps", es: "tiempo", pt: "tempo", nl: "tijd"},
       {de: "Liebe", en: "love", it: "amore", fr: "amour", es: "amor", pt: "amor", nl: "liefde"},
       {de: "Milch", en: "milk", it: "latte", fr: "lait", es: "leche", pt: "leite", nl: "melk"},
+      {de: "Feuer", en: "fire", it: "fuoco", fr: "feu", es: "fuego", pt: "fogo", nl: "vuur"},
+      {de: "Straße", en: "street", it: "strada", fr: "rue", es: "calle", pt: "rua", nl: "straat"},
+      {de: "Vogel", en: "bird", it: "uccello", fr: "oiseau", es: "pájaro", pt: "pássaro", nl: "vogel"},
+      {de: "Fisch", en: "fish", it: "pesce", fr: "poisson", es: "pez", pt: "peixe", nl: "vis"},
+      {de: "Wind", en: "wind", it: "vento", fr: "vent", es: "viento", pt: "vento", nl: "wind"},
+      {de: "Schnee", en: "snow", it: "neve", fr: "neige", es: "nieve", pt: "neve", nl: "sneeuw"},
+      {de: "Musik", en: "music", it: "musica", fr: "musique", es: "música", pt: "música", nl: "muziek"},
+      {de: "Kind", en: "child", it: "bambino", fr: "enfant", es: "niño", pt: "criança", nl: "kind"},
+      {de: "Schule", en: "school", it: "scuola", fr: "école", es: "escuela", pt: "escola", nl: "school"},
+      {de: "Arbeit", en: "work", it: "lavoro", fr: "travail", es: "trabajo", pt: "trabalho", nl: "werk"},
+      {de: "Garten", en: "garden", it: "giardino", fr: "jardin", es: "jardín", pt: "jardim", nl: "tuin"},
+      {de: "Licht", en: "light", it: "luce", fr: "lumière", es: "luz", pt: "luz", nl: "licht"},
+      {de: "Nacht", en: "night", it: "notte", fr: "nuit", es: "noche", pt: "noite", nl: "nacht"},
+      {de: "Farbe", en: "color", it: "colore", fr: "couleur", es: "color", pt: "cor", nl: "kleur"},
+      {de: "Tür", en: "door", it: "porta", fr: "porte", es: "puerta", pt: "porta", nl: "deur"},
+      {de: "Fenster", en: "window", it: "finestra", fr: "fenêtre", es: "ventana", pt: "janela", nl: "raam"},
+      {de: "Baby", en: "baby", it: "bebè", fr: "bébé", es: "bebé", pt: "bebê", nl: "baby"},
+      {de: "Insel", en: "island", it: "isola", fr: "île", es: "isla", pt: "ilha", nl: "eiland"},
+      {de: "Reise", en: "journey", it: "viaggio", fr: "voyage", es: "viaje", pt: "viagem", nl: "reis"},
+      {de: "Tisch", en: "table", it: "tavolo", fr: "table", es: "mesa", pt: "mesa", nl: "tafel"},
+      {de: "Apfel", en: "apple", fr: "pomme", es: "manzana"},
+      {de: "Auto", en: "car", fr: "voiture", es: "coche"},
+      {de: "Brief", en: "letter", fr: "lettre", es: "carta"},
+      {de: "Brücke", en: "bridge", fr: "pont", es: "puente"},
+      {de: "Ei", en: "egg", fr: "œuf", es: "huevo"},
+      {de: "Fahrrad", en: "bicycle", fr: "vélo", es: "bicicleta"},
+      {de: "Familie", en: "family", fr: "famille", es: "familia"},
+      {de: "Feld", en: "field", fr: "champ", es: "campo"},
+      {de: "Ferien", en: "holiday", fr: "vacances", es: "vacaciones"},
+      {de: "Film", en: "movie", fr: "film", es: "película"},
+      {de: "Flasche", en: "bottle", fr: "bouteille", es: "botella"},
+      {de: "Flughafen", en: "airport", fr: "aéroport", es: "aeropuerto"},
+      {de: "Frage", en: "question", fr: "question", es: "pregunta"},
+      {de: "Frau", en: "woman", fr: "femme", es: "mujer"},
+      {de: "Frühling", en: "spring", fr: "printemps", es: "primavera"},
+      {de: "Frühstück", en: "breakfast", fr: "petit-déjeuner", es: "desayuno"},
+      {de: "Geburtstag", en: "birthday", fr: "anniversaire", es: "cumpleaños"},
+      {de: "Geld", en: "money", fr: "argent", es: "dinero"},
+      {de: "Gesicht", en: "face", fr: "visage", es: "cara"},
+      {de: "Glück", en: "luck", fr: "chance", es: "suerte"},
+      {de: "Hand", en: "hand", fr: "main", es: "mano"},
+      {de: "Herbst", en: "autumn", fr: "automne", es: "otoño"},
+      {de: "Herz", en: "heart", fr: "cœur", es: "corazón"},
+      {de: "Himmel", en: "sky", fr: "ciel", es: "cielo"},
+      {de: "Hunger", en: "hunger", fr: "faim", es: "hambre"},
+      {de: "Idee", en: "idea", fr: "idée", es: "idea"},
+      {de: "Käse", en: "cheese", fr: "fromage", es: "queso"},
+      {de: "Kaffee", en: "coffee", fr: "café", es: "café"},
+      {de: "Kirche", en: "church", fr: "église", es: "iglesia"},
+      {de: "Koffer", en: "suitcase", fr: "valise", es: "maleta"},
+      {de: "König", en: "king", fr: "roi", es: "rey"},
+      {de: "Krankenhaus", en: "hospital", fr: "hôpital", es: "hospital"},
+      {de: "Küche", en: "kitchen", fr: "cuisine", es: "cocina"},
+      {de: "Lehrer", en: "teacher", fr: "enseignant", es: "profesor"},
+      {de: "Leben", en: "life", fr: "vie", es: "vida"},
+      {de: "Löffel", en: "spoon", fr: "cuillère", es: "cuchara"},
+      {de: "Luft", en: "air", fr: "air", es: "aire"},
+      {de: "Mann", en: "man", fr: "homme", es: "hombre"},
+      {de: "Markt", en: "market", fr: "marché", es: "mercado"},
+      {de: "Messer", en: "knife", fr: "couteau", es: "cuchillo"},
+      {de: "Morgen", en: "morning", fr: "matin", es: "mañana"},
+      {de: "Museum", en: "museum", fr: "musée", es: "museo"},
+      {de: "Nachbar", en: "neighbor", fr: "voisin", es: "vecino"},
+      {de: "Ozean", en: "ocean", fr: "océan", es: "océano"},
+      {de: "Papier", en: "paper", fr: "papier", es: "papel"},
+      {de: "Regen", en: "rain", fr: "pluie", es: "lluvia"},
+      {de: "Restaurant", en: "restaurant", fr: "restaurant", es: "restaurante"},
+      {de: "Sand", en: "sand", fr: "sable", es: "arena"},
+      {de: "Schiff", en: "ship", fr: "bateau", es: "barco"},
+      {de: "Schlüssel", en: "key", fr: "clé", es: "llave"},
+      {de: "Schuh", en: "shoe", fr: "chaussure", es: "zapato"},
+      {de: "See", en: "lake", fr: "lac", es: "lago"},
+      {de: "Sommer", en: "summer", fr: "été", es: "verano"},
+      {de: "Spiegel", en: "mirror", fr: "miroir", es: "espejo"},
+      {de: "Stern", en: "star", fr: "étoile", es: "estrella"},
+      {de: "Stuhl", en: "chair", fr: "chaise", es: "silla"},
+      {de: "Tasse", en: "cup", fr: "tasse", es: "taza"},
+      {de: "Tier", en: "animal", fr: "animal", es: "animal"},
+      {de: "Traum", en: "dream", fr: "rêve", es: "sueño"},
+      {de: "Uhr", en: "clock", fr: "horloge", es: "reloj"},
+      {de: "Winter", en: "winter", fr: "hiver", es: "invierno"},
+      {de: "Zug", en: "train", fr: "train", es: "tren"},
     ];
+    const MEMORY_ROUND_PAIRS = 20; // how many concepts get drawn from the pool each round
     const MEMORY_BOARD_SIZE = 20;
     let memoryBoard = []; // [{conceptId, isUi, lang}, ...] one entry per visible card;
     // isUi cards show the concept in the current UI language, re-evaluated on every render
@@ -1147,7 +1230,7 @@ let languageData = null;
     let memoryBusy = false; // true while a match/error flash is being shown, blocks further clicks
     let memoryFound = 0; // pairs matched so far this round
     let memoryLastPair = ""; // the two words of the most recently matched pair, e.g. "Hund - dog"
-    const MEMORY_TOTAL_PAIRS = MEMORY_CONCEPTS.length;
+    const MEMORY_TOTAL_PAIRS = MEMORY_ROUND_PAIRS;
 
     function shuffled(array) {
       const copy = array.slice();
@@ -1178,7 +1261,7 @@ let languageData = null;
     }
 
     function buildMemoryBoard() {
-      memoryReserve = shuffled(MEMORY_CONCEPTS.map((_, i) => i));
+      memoryReserve = shuffled(MEMORY_CONCEPTS.map((_, i) => i)).slice(0, MEMORY_ROUND_PAIRS);
       memoryBoard = [];
       memorySelected = [];
       memoryFound = 0;
@@ -1294,6 +1377,8 @@ let languageData = null;
       panel.classList.add("hidden");
       document.getElementById("languageRow").classList.remove("hidden");
       document.getElementById("primaryActions").classList.remove("hidden");
+      document.getElementById("modelQualityHint").classList.remove("hidden");
+      document.getElementById("easterEggDivider").classList.add("hidden");
       const config = inputTabs[currentInputTab] || inputTabs.textarea;
       document.querySelectorAll(".tab-panel").forEach((tabPanel) => {
         tabPanel.classList.toggle("active", tabPanel.id === config.panel);
@@ -1304,6 +1389,8 @@ let languageData = null;
       document.getElementById("easterEggPanel").classList.remove("hidden");
       document.getElementById("languageRow").classList.add("hidden");
       document.getElementById("primaryActions").classList.add("hidden");
+      document.getElementById("modelQualityHint").classList.add("hidden");
+      document.getElementById("easterEggDivider").classList.remove("hidden");
       document.querySelectorAll(".tab-panel").forEach((tabPanel) => tabPanel.classList.remove("active"));
       if (!memoryBoard.length) buildMemoryBoard();
       renderMemoryBoard();
