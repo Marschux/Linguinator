@@ -461,7 +461,7 @@
       color: #f2f5f8;
       cursor: pointer;
       font: inherit;
-      min-height: 2.65rem;
+      min-height: 3.4rem;
       padding: .5rem .3rem;
     }
     .memory-card:hover { border-color: var(--accent); transform: none; }
