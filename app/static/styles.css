@@ -444,7 +444,7 @@
     .memory-grid {
       display: grid;
       gap: .5rem;
-      grid-template-columns: repeat(8, minmax(0, 1fr));
+      grid-template-columns: repeat(6, minmax(0, 1fr));
     }
     .memory-card {
       background: var(--panel-soft);
@@ -459,6 +459,7 @@
     .memory-card:hover { border-color: var(--accent); transform: none; }
     .memory-card.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
     .memory-card.error { background: #b3413d; border-color: #b3413d; color: #fff; }
+    .memory-card.correct { background: #3d9142; border-color: #3d9142; color: #fff; }
     .memory-win {
       align-items: center;
       display: flex;

@@ -1101,9 +1101,9 @@ let languageData = null;
       setInputTab(event.target.value);
     });
 
-    // Hidden word-memory game: click matching translations of the same word (2 or 3 of them,
-    // languages mixed at random) to clear that group. Not a serious feature - kept as one
-    // self-contained block rather than wired into the translation pipeline anywhere.
+    // Hidden word-memory game: click two matching translations of the same word (languages
+    // mixed at random) to clear that pair. Not a serious feature - kept as one self-contained
+    // block rather than wired into the translation pipeline anywhere.
     const MEMORY_LANGS = ["de", "en", "it", "fr", "es", "pt", "nl"];
     const MEMORY_CONCEPTS = [
       {de: "Nudeln", en: "pasta", it: "pasta", fr: "pâtes", es: "pasta", pt: "massa", nl: "pasta"},
@@ -1125,11 +1125,14 @@ let languageData = null;
       {de: "Liebe", en: "love", it: "amore", fr: "amour", es: "amor", pt: "amor", nl: "liefde"},
       {de: "Milch", en: "milk", it: "latte", fr: "lait", es: "leche", pt: "leite", nl: "melk"},
     ];
-    const MEMORY_BOARD_SIZE = 40;
+    const MEMORY_PAIR_SIZE = 2;
+    const MEMORY_BOARD_SIZE = 30;
     let memoryBoard = []; // [{conceptId, lang, word}, ...], one entry per visible card
     let memoryReserve = []; // concept ids not yet placed on the board this round
     let memorySelected = []; // indices into memoryBoard currently picked
-    let memoryBusy = false; // true while an error flash is being shown, blocks further clicks
+    let memoryBusy = false; // true while a match/error flash is being shown, blocks further clicks
+    let memoryFound = 0; // pairs matched so far this round
+    const MEMORY_TOTAL_PAIRS = MEMORY_CONCEPTS.length;
 
     function shuffled(array) {
       const copy = array.slice();
@@ -1140,15 +1143,8 @@ let languageData = null;
       return copy;
     }
 
-    // 2 or 3, but never a size that would leave exactly one empty cell behind (a lone card
-    // can't form a group with anything).
-    function memoryGroupSize(remaining) {
-      const options = [2, 3].filter((size) => size <= remaining && remaining - size !== 1);
-      return options[Math.floor(Math.random() * options.length)];
-    }
-
-    function memoryGroupFromConcept(conceptId, size) {
-      const langs = shuffled(MEMORY_LANGS).slice(0, size);
+    function memoryGroupFromConcept(conceptId) {
+      const langs = shuffled(MEMORY_LANGS).slice(0, MEMORY_PAIR_SIZE);
       const concept = MEMORY_CONCEPTS[conceptId];
       return langs.map((lang) => ({conceptId, lang, word: concept[lang]}));
     }
@@ -1157,13 +1153,16 @@ let languageData = null;
       memoryReserve = shuffled(MEMORY_CONCEPTS.map((_, i) => i));
       memoryBoard = [];
       memorySelected = [];
+      memoryFound = 0;
       while (memoryBoard.length < MEMORY_BOARD_SIZE && memoryReserve.length) {
-        const remaining = MEMORY_BOARD_SIZE - memoryBoard.length;
-        const size = memoryGroupSize(remaining);
-        if (!size) break;
         const conceptId = memoryReserve.shift();
-        memoryBoard.push(...memoryGroupFromConcept(conceptId, size));
+        memoryBoard.push(...memoryGroupFromConcept(conceptId));
       }
+      renderMemoryCounter();
+    }
+
+    function renderMemoryCounter() {
+      document.getElementById("memoryCounter").textContent = "Gefundene Paare: " + memoryFound + " / " + MEMORY_TOTAL_PAIRS;
     }
 
     function renderMemoryBoard() {
@@ -1190,9 +1189,8 @@ let languageData = null;
         return;
       }
       memorySelected.push(index);
-      const groupTotal = memoryBoard.filter((cell) => cell.conceptId === conceptId).length;
-      if (memorySelected.length === groupTotal) {
-        resolveMemoryGroup(conceptId);
+      if (memorySelected.length === MEMORY_PAIR_SIZE) {
+        flashMemoryCorrect(memorySelected, conceptId);
         return;
       }
       renderMemoryBoard();
@@ -1208,15 +1206,25 @@ let languageData = null;
       }, 500);
     }
 
+    function flashMemoryCorrect(indices, conceptId) {
+      memoryBusy = true;
+      const grid = document.getElementById("memoryGrid");
+      indices.forEach((index) => grid.children[index].classList.add("correct"));
+      setTimeout(() => {
+        memoryBusy = false;
+        resolveMemoryGroup(conceptId);
+      }, 500);
+    }
+
     function resolveMemoryGroup(conceptId) {
       const freedIndices = memoryBoard
         .map((cell, index) => (cell.conceptId === conceptId ? index : -1))
         .filter((index) => index !== -1);
       memorySelected = [];
+      memoryFound += 1;
       if (memoryReserve.length) {
         const nextConceptId = memoryReserve.shift();
-        const size = Math.min(freedIndices.length, MEMORY_LANGS.length);
-        const newCells = memoryGroupFromConcept(nextConceptId, size);
+        const newCells = memoryGroupFromConcept(nextConceptId);
         shuffled(freedIndices).forEach((boardIndex, i) => {
           memoryBoard[boardIndex] = newCells[i];
         });
@@ -1226,6 +1234,7 @@ let languageData = null;
       if (!memoryBoard.length) {
         document.getElementById("memoryWin").classList.remove("hidden");
       }
+      renderMemoryCounter();
       renderMemoryBoard();
     }
 
