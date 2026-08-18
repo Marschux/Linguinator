@@ -114,7 +114,7 @@
       color: var(--text);
       display: flex;
       font-size: clamp(2.15rem, 5vw, 3.65rem);
-      font-weight: 850;
+      font-weight: 500;
       gap: .18em;
     }
     .brand-link {
