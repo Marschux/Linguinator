@@ -131,6 +131,7 @@ let languageData = null;
         modelAutoDetect: "Detected automatically. Scans take longer, and a scan mixing two scripts needs the language set.",
         autoDetect: "Auto-detect",
         memoryPairsFound: "Pairs found: {count} / {total}",
+        memoryWrongCount: "Wrong: {count}",
         memoryWin: "All pairs found!",
         memoryReset: "Play again",
       },
@@ -240,6 +241,7 @@ let languageData = null;
         modelAutoDetect: "Wird automatisch erkannt. Scans dauern länger, bei zwei Schriften die Sprache selbst setzen.",
         autoDetect: "Automatisch erkennen",
         memoryPairsFound: "Gefundene Paare: {count} / {total}",
+        memoryWrongCount: "Falsch: {count}",
         memoryWin: "Alle Paare gefunden!",
         memoryReset: "Nochmal",
       },
@@ -349,6 +351,7 @@ let languageData = null;
         modelAutoDetect: "Se detecta automáticamente. Los escaneos tardan más; si mezclan dos alfabetos, fija el idioma.",
         autoDetect: "Detección automática",
         memoryPairsFound: "Pares encontrados: {count} / {total}",
+        memoryWrongCount: "Errores: {count}",
         memoryWin: "¡Todos los pares encontrados!",
         memoryReset: "Otra vez",
       },
@@ -458,6 +461,7 @@ let languageData = null;
         modelAutoDetect: "Détectée automatiquement. Les scans prennent plus de temps; si deux écritures se mélangent, choisis la langue.",
         autoDetect: "Détection automatique",
         memoryPairsFound: "Paires trouvées : {count} / {total}",
+        memoryWrongCount: "Erreurs : {count}",
         memoryWin: "Toutes les paires trouvées !",
         memoryReset: "Rejouer",
       }
@@ -1118,6 +1122,7 @@ let languageData = null;
     // mixed at random) to clear that pair. Not a serious feature - kept as one self-contained
     // block rather than wired into the translation pipeline anywhere.
     const MEMORY_LANGS = ["de", "en", "fr", "es"];
+    const MEMORY_FLAGS = {de: "🇩🇪", en: "🇬🇧", fr: "🇫🇷", es: "🇪🇸"};
     const MEMORY_CONCEPTS = [
       {de: "Nudeln", en: "pasta", it: "pasta", fr: "pâtes", es: "pasta", pt: "massa", nl: "pasta"},
       {de: "Haus", en: "house", it: "casa", fr: "maison", es: "casa", pt: "casa", nl: "huis"},
@@ -1219,6 +1224,305 @@ let languageData = null;
       {de: "Uhr", en: "clock", fr: "horloge", es: "reloj"},
       {de: "Winter", en: "winter", fr: "hiver", es: "invierno"},
       {de: "Zug", en: "train", fr: "train", es: "tren"},
+      {de: "Bruder", en: "brother", fr: "frère", es: "hermano"},
+      {de: "Schwester", en: "sister", fr: "sœur", es: "hermana"},
+      {de: "Mutter", en: "mother", fr: "mère", es: "madre"},
+      {de: "Vater", en: "father", fr: "père", es: "padre"},
+      {de: "Onkel", en: "uncle", fr: "oncle", es: "tío"},
+      {de: "Tante", en: "aunt", fr: "tante", es: "tía"},
+      {de: "Großmutter", en: "grandmother", fr: "grand-mère", es: "abuela"},
+      {de: "Großvater", en: "grandfather", fr: "grand-père", es: "abuelo"},
+      {de: "Kopf", en: "head", fr: "tête", es: "cabeza"},
+      {de: "Auge", en: "eye", fr: "œil", es: "ojo"},
+      {de: "Ohr", en: "ear", fr: "oreille", es: "oreja"},
+      {de: "Mund", en: "mouth", fr: "bouche", es: "boca"},
+      {de: "Nase", en: "nose", fr: "nez", es: "nariz"},
+      {de: "Fuß", en: "foot", fr: "pied", es: "pie"},
+      {de: "Arm", en: "arm", fr: "bras", es: "brazo"},
+      {de: "Bein", en: "leg", fr: "jambe", es: "pierna"},
+      {de: "Farm", en: "farm", fr: "ferme", es: "granja"},
+      {de: "Wald", en: "forest", fr: "forêt", es: "bosque"},
+      {de: "Wüste", en: "desert", fr: "désert", es: "desierto"},
+      {de: "Fluss", en: "river", fr: "fleuve", es: "río"},
+      {de: "Wolke", en: "cloud", fr: "nuage", es: "nube"},
+      {de: "Blitz", en: "lightning", fr: "éclair", es: "rayo"},
+      {de: "Sturm", en: "storm", fr: "tempête", es: "tormenta"},
+      {de: "Salz", en: "salt", fr: "sel", es: "sal"},
+      {de: "Zucker", en: "sugar", fr: "sucre", es: "azúcar"},
+      {de: "Fleisch", en: "meat", fr: "viande", es: "carne"},
+      {de: "Gemüse", en: "vegetable", fr: "légume", es: "verdura"},
+      {de: "Obst", en: "fruit", fr: "fruit", es: "fruta"},
+      {de: "Reis", en: "rice", fr: "riz", es: "arroz"},
+      {de: "Wein", en: "wine", fr: "vin", es: "vino"},
+      {de: "Bier", en: "beer", fr: "bière", es: "cerveza"},
+      {de: "Saft", en: "juice", fr: "jus", es: "zumo"},
+      {de: "Teller", en: "plate", fr: "assiette", es: "plato"},
+      {de: "Gabel", en: "fork", fr: "fourchette", es: "tenedor"},
+      {de: "Zeitung", en: "newspaper", fr: "journal", es: "periódico"},
+      {de: "Computer", en: "computer", fr: "ordinateur", es: "ordenador"},
+      {de: "Telefon", en: "phone", fr: "téléphone", es: "teléfono"},
+      {de: "Straßenbahn", en: "tram", fr: "tramway", es: "tranvía"},
+      {de: "Flugzeug", en: "airplane", fr: "avion", es: "avión"},
+      {de: "Bus", en: "bus", fr: "bus", es: "autobús"},
+      {de: "Polizei", en: "police", fr: "police", es: "policía"},
+      {de: "Feuerwehr", en: "fire brigade", fr: "pompiers", es: "bomberos"},
+      {de: "Arzt", en: "doctor", fr: "médecin", es: "médico"},
+      {de: "Krankenschwester", en: "nurse", fr: "infirmière", es: "enfermera"},
+      {de: "Bäcker", en: "baker", fr: "boulanger", es: "panadero"},
+      {de: "Bauer", en: "farmer", fr: "agriculteur", es: "agricultor"},
+      {de: "Anwalt", en: "lawyer", fr: "avocat", es: "abogado"},
+      {de: "Musiker", en: "musician", fr: "musicien", es: "músico"},
+      {de: "Maler", en: "painter", fr: "peintre", es: "pintor"},
+      {de: "Sänger", en: "singer", fr: "chanteur", es: "cantante"},
+      {de: "Tänzer", en: "dancer", fr: "danseur", es: "bailarín"},
+      {de: "Krieger", en: "warrior", fr: "guerrier", es: "guerrero"},
+      {de: "Bauernhof", en: "farmhouse", fr: "ferme", es: "granja"},
+      {de: "Schlange", en: "snake", fr: "serpent", es: "serpiente"},
+      {de: "Löwe", en: "lion", fr: "lion", es: "león"},
+      {de: "Tiger", en: "tiger", fr: "tigre", es: "tigre"},
+      {de: "Bär", en: "bear", fr: "ours", es: "oso"},
+      {de: "Wolf", en: "wolf", fr: "loup", es: "lobo"},
+      {de: "Elefant", en: "elephant", fr: "éléphant", es: "elefante"},
+      {de: "Affe", en: "monkey", fr: "singe", es: "mono"},
+      {de: "Pferd", en: "horse", fr: "cheval", es: "caballo"},
+      {de: "Kuh", en: "cow", fr: "vache", es: "vaca"},
+      {de: "Schwein", en: "pig", fr: "cochon", es: "cerdo"},
+      {de: "Schaf", en: "sheep", fr: "mouton", es: "oveja"},
+      {de: "Ziege", en: "goat", fr: "chèvre", es: "cabra"},
+      {de: "Huhn", en: "chicken", fr: "poule", es: "gallina"},
+      {de: "Ente", en: "duck", fr: "canard", es: "pato"},
+      {de: "Biene", en: "bee", fr: "abeille", es: "abeja"},
+      {de: "Schmetterling", en: "butterfly", fr: "papillon", es: "mariposa"},
+      {de: "Spinne", en: "spider", fr: "araignée", es: "araña"},
+      {de: "Ameise", en: "ant", fr: "fourmi", es: "hormiga"},
+      {de: "Mücke", en: "mosquito", fr: "moustique", es: "mosquito"},
+      {de: "Frosch", en: "frog", fr: "grenouille", es: "rana"},
+      {de: "Hase", en: "rabbit", fr: "lapin", es: "conejo"},
+      {de: "Maus", en: "mouse", fr: "souris", es: "ratón"},
+      {de: "Ratte", en: "rat", fr: "rat", es: "rata"},
+      {de: "Kamel", en: "camel", fr: "chameau", es: "camello"},
+      {de: "Delfin", en: "dolphin", fr: "dauphin", es: "delfín"},
+      {de: "Hai", en: "shark", fr: "requin", es: "tiburón"},
+      {de: "Wal", en: "whale", fr: "baleine", es: "ballena"},
+      {de: "Krebs", en: "crab", fr: "crabe", es: "cangrejo"},
+      {de: "Eule", en: "owl", fr: "hibou", es: "búho"},
+      {de: "Adler", en: "eagle", fr: "aigle", es: "águila"},
+      {de: "Taube", en: "pigeon", fr: "pigeon", es: "paloma"},
+      {de: "Schwan", en: "swan", fr: "cygne", es: "cisne"},
+      {de: "Storch", en: "stork", fr: "cigogne", es: "cigüeña"},
+      {de: "Pinguin", en: "penguin", fr: "pingouin", es: "pingüino"},
+      {de: "Krokodil", en: "crocodile", fr: "crocodile", es: "cocodrilo"},
+      {de: "Schildkröte", en: "turtle", fr: "tortue", es: "tortuga"},
+      {de: "Eidechse", en: "lizard", fr: "lézard", es: "lagarto"},
+      {de: "Fuchs", en: "fox", fr: "renard", es: "zorro"},
+      {de: "Hirsch", en: "deer", fr: "cerf", es: "ciervo"},
+      {de: "Igel", en: "hedgehog", fr: "hérisson", es: "erizo"},
+      {de: "Eichhörnchen", en: "squirrel", fr: "écureuil", es: "ardilla"},
+      {de: "Biber", en: "beaver", fr: "castor", es: "castor"},
+      {de: "Dachs", en: "badger", fr: "blaireau", es: "tejón"},
+      {de: "Otter", en: "otter", fr: "loutre", es: "nutria"},
+      {de: "Robbe", en: "seal", fr: "phoque", es: "foca"},
+      {de: "Papagei", en: "parrot", fr: "perroquet", es: "loro"},
+      {de: "Rot", en: "red", fr: "rouge", es: "rojo"},
+      {de: "Blau", en: "blue", fr: "bleu", es: "azul"},
+      {de: "Grün", en: "green", fr: "vert", es: "verde"},
+      {de: "Gelb", en: "yellow", fr: "jaune", es: "amarillo"},
+      {de: "Schwarz", en: "black", fr: "noir", es: "negro"},
+      {de: "Weiß", en: "white", fr: "blanc", es: "blanco"},
+      {de: "Grau", en: "gray", fr: "gris", es: "gris"},
+      {de: "Braun", en: "brown", fr: "marron", es: "marrón"},
+      {de: "Rosa", en: "pink", fr: "rose", es: "rosa"},
+      {de: "Lila", en: "purple", fr: "violet", es: "morado"},
+      {de: "Türkis", en: "turquoise", fr: "turquoise", es: "turquesa"},
+      {de: "Eins", en: "one", fr: "un", es: "uno"},
+      {de: "Zwei", en: "two", fr: "deux", es: "dos"},
+      {de: "Drei", en: "three", fr: "trois", es: "tres"},
+      {de: "Vier", en: "four", fr: "quatre", es: "cuatro"},
+      {de: "Fünf", en: "five", fr: "cinq", es: "cinco"},
+      {de: "Sechs", en: "six", fr: "six", es: "seis"},
+      {de: "Sieben", en: "seven", fr: "sept", es: "siete"},
+      {de: "Acht", en: "eight", fr: "huit", es: "ocho"},
+      {de: "Neun", en: "nine", fr: "neuf", es: "nueve"},
+      {de: "Zehn", en: "ten", fr: "dix", es: "diez"},
+      {de: "Hemd", en: "shirt", fr: "chemise", es: "camisa"},
+      {de: "Hose", en: "trousers", fr: "pantalon", es: "pantalón"},
+      {de: "Kleid", en: "dress", fr: "robe", es: "vestido"},
+      {de: "Rock", en: "skirt", fr: "jupe", es: "falda"},
+      {de: "Mantel", en: "coat", fr: "manteau", es: "abrigo"},
+      {de: "Jacke", en: "jacket", fr: "veste", es: "chaqueta"},
+      {de: "Mütze", en: "cap", fr: "bonnet", es: "gorro"},
+      {de: "Hut", en: "hat", fr: "chapeau", es: "sombrero"},
+      {de: "Schal", en: "scarf", fr: "écharpe", es: "bufanda"},
+      {de: "Handschuh", en: "glove", fr: "gant", es: "guante"},
+      {de: "Socke", en: "sock", fr: "chaussette", es: "calcetín"},
+      {de: "Gürtel", en: "belt", fr: "ceinture", es: "cinturón"},
+      {de: "Krawatte", en: "tie", fr: "cravate", es: "corbata"},
+      {de: "Anzug", en: "suit", fr: "costume", es: "traje"},
+      {de: "Pullover", en: "sweater", fr: "pull", es: "suéter"},
+      {de: "Zahn", en: "tooth", fr: "dent", es: "diente"},
+      {de: "Haar", en: "hair", fr: "cheveux", es: "pelo"},
+      {de: "Finger", en: "finger", fr: "doigt", es: "dedo"},
+      {de: "Bauch", en: "stomach", fr: "ventre", es: "vientre"},
+      {de: "Rücken", en: "back", fr: "dos", es: "espalda"},
+      {de: "Schulter", en: "shoulder", fr: "épaule", es: "hombro"},
+      {de: "Knie", en: "knee", fr: "genou", es: "rodilla"},
+      {de: "Hals", en: "neck", fr: "cou", es: "cuello"},
+      {de: "Lippe", en: "lip", fr: "lèvre", es: "labio"},
+      {de: "Zunge", en: "tongue", fr: "langue", es: "lengua"},
+      {de: "Haut", en: "skin", fr: "peau", es: "piel"},
+      {de: "Nagel", en: "nail", fr: "ongle", es: "uña"},
+      {de: "Hitze", en: "heat", fr: "chaleur", es: "calor"},
+      {de: "Kälte", en: "cold", fr: "froid", es: "frío"},
+      {de: "Nebel", en: "fog", fr: "brouillard", es: "niebla"},
+      {de: "Eis", en: "ice", fr: "glace", es: "hielo"},
+      {de: "Regenbogen", en: "rainbow", fr: "arc-en-ciel", es: "arcoíris"},
+      {de: "Angst", en: "fear", fr: "peur", es: "miedo"},
+      {de: "Freude", en: "joy", fr: "joie", es: "alegría"},
+      {de: "Wut", en: "anger", fr: "colère", es: "ira"},
+      {de: "Trauer", en: "sadness", fr: "tristesse", es: "tristeza"},
+      {de: "Hoffnung", en: "hope", fr: "espoir", es: "esperanza"},
+      {de: "Mut", en: "courage", fr: "courage", es: "valentía"},
+      {de: "Stolz", en: "pride", fr: "fierté", es: "orgullo"},
+      {de: "Scham", en: "shame", fr: "honte", es: "vergüenza"},
+      {de: "Neid", en: "envy", fr: "envie", es: "envidia"},
+      {de: "Geduld", en: "patience", fr: "patience", es: "paciencia"},
+      {de: "Schloss", en: "castle", fr: "château", es: "castillo"},
+      {de: "Turm", en: "tower", fr: "tour", es: "torre"},
+      {de: "Brunnen", en: "fountain", fr: "fontaine", es: "fuente"},
+      {de: "Park", en: "park", fr: "parc", es: "parque"},
+      {de: "Bibliothek", en: "library", fr: "bibliothèque", es: "biblioteca"},
+      {de: "Bahnhof", en: "train station", fr: "gare", es: "estación"},
+      {de: "Fabrik", en: "factory", fr: "usine", es: "fábrica"},
+      {de: "Büro", en: "office", fr: "bureau", es: "oficina"},
+      {de: "Hotel", en: "hotel", fr: "hôtel", es: "hotel"},
+      {de: "Bank", en: "bank", fr: "banque", es: "banco"},
+      {de: "Apotheke", en: "pharmacy", fr: "pharmacie", es: "farmacia"},
+      {de: "Supermarkt", en: "supermarket", fr: "supermarché", es: "supermercado"},
+      {de: "Zimmer", en: "room", fr: "chambre", es: "habitación"},
+      {de: "Keller", en: "cellar", fr: "cave", es: "sótano"},
+      {de: "Dach", en: "roof", fr: "toit", es: "techo"},
+      {de: "Wand", en: "wall", fr: "mur", es: "pared"},
+      {de: "Boden", en: "floor", fr: "sol", es: "suelo"},
+      {de: "Treppe", en: "stairs", fr: "escalier", es: "escalera"},
+      {de: "Balkon", en: "balcony", fr: "balcon", es: "balcón"},
+      {de: "Garage", en: "garage", fr: "garage", es: "garaje"},
+      {de: "Hammer", en: "hammer", fr: "marteau", es: "martillo"},
+      {de: "Säge", en: "saw", fr: "scie", es: "sierra"},
+      {de: "Schraube", en: "screw", fr: "vis", es: "tornillo"},
+      {de: "Leiter", en: "ladder", fr: "échelle", es: "escalera"},
+      {de: "Eimer", en: "bucket", fr: "seau", es: "cubo"},
+      {de: "Besen", en: "broom", fr: "balai", es: "escoba"},
+      {de: "Kerze", en: "candle", fr: "bougie", es: "vela"},
+      {de: "Lampe", en: "lamp", fr: "lampe", es: "lámpara"},
+      {de: "Ring", en: "ring", fr: "bague", es: "anillo"},
+      {de: "Kette", en: "chain", fr: "chaîne", es: "cadena"},
+      {de: "Tasche", en: "bag", fr: "sac", es: "bolsa"},
+      {de: "Rucksack", en: "backpack", fr: "sac à dos", es: "mochila"},
+      {de: "Regenschirm", en: "umbrella", fr: "parapluie", es: "paraguas"},
+      {de: "Brille", en: "glasses", fr: "lunettes", es: "gafas"},
+      {de: "Kamm", en: "comb", fr: "peigne", es: "peine"},
+      {de: "Bürste", en: "brush", fr: "brosse", es: "cepillo"},
+      {de: "Seife", en: "soap", fr: "savon", es: "jabón"},
+      {de: "Topf", en: "pot", fr: "casserole", es: "olla"},
+      {de: "Pfanne", en: "pan", fr: "poêle", es: "sartén"},
+      {de: "Herd", en: "stove", fr: "cuisinière", es: "cocina"},
+      {de: "Ofen", en: "oven", fr: "four", es: "horno"},
+      {de: "Kühlschrank", en: "refrigerator", fr: "réfrigérateur", es: "refrigerador"},
+      {de: "Glas", en: "glass", fr: "verre", es: "vaso"},
+      {de: "Schüssel", en: "bowl", fr: "bol", es: "tazón"},
+      {de: "Boot", en: "boat", fr: "bateau", es: "barco"},
+      {de: "Motorrad", en: "motorcycle", fr: "moto", es: "motocicleta"},
+      {de: "Lastwagen", en: "truck", fr: "camion", es: "camión"},
+      {de: "Taxi", en: "taxi", fr: "taxi", es: "taxi"},
+      {de: "U-Bahn", en: "subway", fr: "métro", es: "metro"},
+      {de: "Fähre", en: "ferry", fr: "ferry", es: "ferry"},
+      {de: "Rakete", en: "rocket", fr: "fusée", es: "cohete"},
+      {de: "Hubschrauber", en: "helicopter", fr: "hélicoptère", es: "helicóptero"},
+      {de: "Vulkan", en: "volcano", fr: "volcan", es: "volcán"},
+      {de: "Höhle", en: "cave", fr: "grotte", es: "cueva"},
+      {de: "Tal", en: "valley", fr: "vallée", es: "valle"},
+      {de: "Klippe", en: "cliff", fr: "falaise", es: "acantilado"},
+      {de: "Strand", en: "beach", fr: "plage", es: "playa"},
+      {de: "Welle", en: "wave", fr: "vague", es: "ola"},
+      {de: "Stein", en: "stone", fr: "pierre", es: "piedra"},
+      {de: "Fels", en: "rock", fr: "rocher", es: "roca"},
+      {de: "Erde", en: "earth", fr: "terre", es: "tierra"},
+      {de: "Gras", en: "grass", fr: "herbe", es: "hierba"},
+      {de: "Blatt", en: "leaf", fr: "feuille", es: "hoja"},
+      {de: "Wurzel", en: "root", fr: "racine", es: "raíz"},
+      {de: "Ast", en: "branch", fr: "branche", es: "rama"},
+      {de: "Zweig", en: "twig", fr: "brindille", es: "ramita"},
+      {de: "Dorn", en: "thorn", fr: "épine", es: "espina"},
+      {de: "Stift", en: "pen", fr: "stylo", es: "bolígrafo"},
+      {de: "Bleistift", en: "pencil", fr: "crayon", es: "lápiz"},
+      {de: "Radiergummi", en: "eraser", fr: "gomme", es: "goma"},
+      {de: "Lineal", en: "ruler", fr: "règle", es: "regla"},
+      {de: "Heft", en: "notebook", fr: "cahier", es: "cuaderno"},
+      {de: "Tafel", en: "blackboard", fr: "tableau", es: "pizarra"},
+      {de: "Klasse", en: "class", fr: "classe", es: "clase"},
+      {de: "Prüfung", en: "exam", fr: "examen", es: "examen"},
+      {de: "Note", en: "grade", fr: "note", es: "nota"},
+      {de: "Hausaufgabe", en: "homework", fr: "devoir", es: "tarea"},
+      {de: "Ball", en: "ball", fr: "balle", es: "pelota"},
+      {de: "Tor", en: "goal", fr: "but", es: "gol"},
+      {de: "Mannschaft", en: "team", fr: "équipe", es: "equipo"},
+      {de: "Spieler", en: "player", fr: "joueur", es: "jugador"},
+      {de: "Sieger", en: "winner", fr: "gagnant", es: "ganador"},
+      {de: "Rennen", en: "race", fr: "course", es: "carrera"},
+      {de: "Schwimmen", en: "swimming", fr: "natation", es: "natación"},
+      {de: "Tennis", en: "tennis", fr: "tennis", es: "tenis"},
+      {de: "Fußball", en: "soccer", fr: "football", es: "fútbol"},
+      {de: "Basketball", en: "basketball", fr: "basket", es: "baloncesto"},
+      {de: "Woche", en: "week", fr: "semaine", es: "semana"},
+      {de: "Monat", en: "month", fr: "mois", es: "mes"},
+      {de: "Jahr", en: "year", fr: "année", es: "año"},
+      {de: "Stunde", en: "hour", fr: "heure", es: "hora"},
+      {de: "Minute", en: "minute", fr: "minute", es: "minuto"},
+      {de: "Sekunde", en: "second", fr: "seconde", es: "segundo"},
+      {de: "Ende", en: "end", fr: "fin", es: "fin"},
+      {de: "Anfang", en: "beginning", fr: "début", es: "comienzo"},
+      {de: "Zukunft", en: "future", fr: "futur", es: "futuro"},
+      {de: "Vergangenheit", en: "past", fr: "passé", es: "pasado"},
+      {de: "Wahrheit", en: "truth", fr: "vérité", es: "verdad"},
+      {de: "Lüge", en: "lie", fr: "mensonge", es: "mentira"},
+      {de: "Frieden", en: "peace", fr: "paix", es: "paz"},
+      {de: "Krieg", en: "war", fr: "guerre", es: "guerra"},
+      {de: "Freiheit", en: "freedom", fr: "liberté", es: "libertad"},
+      {de: "Gesundheit", en: "health", fr: "santé", es: "salud"},
+      {de: "Krankheit", en: "illness", fr: "maladie", es: "enfermedad"},
+      {de: "Medizin", en: "medicine", fr: "médecine", es: "medicina"},
+      {de: "Koch", en: "cook", fr: "cuisinier", es: "cocinero"},
+      {de: "Kellner", en: "waiter", fr: "serveur", es: "camarero"},
+      {de: "Friseur", en: "hairdresser", fr: "coiffeur", es: "peluquero"},
+      {de: "Ingenieur", en: "engineer", fr: "ingénieur", es: "ingeniero"},
+      {de: "Pilot", en: "pilot", fr: "pilote", es: "piloto"},
+      {de: "Soldat", en: "soldier", fr: "soldat", es: "soldado"},
+      {de: "Richter", en: "judge", fr: "juge", es: "juez"},
+      {de: "Priester", en: "priest", fr: "prêtre", es: "sacerdote"},
+      {de: "Künstler", en: "artist", fr: "artiste", es: "artista"},
+      {de: "Schriftsteller", en: "writer", fr: "écrivain", es: "escritor"},
+      {de: "Fotograf", en: "photographer", fr: "photographe", es: "fotógrafo"},
+      {de: "Journalist", en: "journalist", fr: "journaliste", es: "periodista"},
+      {de: "Suppe", en: "soup", fr: "soupe", es: "sopa"},
+      {de: "Kuchen", en: "cake", fr: "gâteau", es: "pastel"},
+      {de: "Schokolade", en: "chocolate", fr: "chocolat", es: "chocolate"},
+      {de: "Honig", en: "honey", fr: "miel", es: "miel"},
+      {de: "Butter", en: "butter", fr: "beurre", es: "mantequilla"},
+      {de: "Joghurt", en: "yogurt", fr: "yaourt", es: "yogur"},
+      {de: "Pizza", en: "pizza", fr: "pizza", es: "pizza"},
+      {de: "Sandwich", en: "sandwich", fr: "sandwich", es: "sándwich"},
+      {de: "Marmelade", en: "jam", fr: "confiture", es: "mermelada"},
+      {de: "Gewürz", en: "spice", fr: "épice", es: "especia"},
+      {de: "Pfeffer", en: "pepper", fr: "poivre", es: "pimienta"},
+      {de: "Zitrone", en: "lemon", fr: "citron", es: "limón"},
+      {de: "Banane", en: "banana", fr: "banane", es: "plátano"},
+      {de: "Traube", en: "grape", fr: "raisin", es: "uva"},
+      {de: "Erdbeere", en: "strawberry", fr: "fraise", es: "fresa"},
+      {de: "Kartoffel", en: "potato", fr: "pomme de terre", es: "patata"},
+      {de: "Tomate", en: "tomato", fr: "tomate", es: "tomate"},
+      {de: "Zwiebel", en: "onion", fr: "oignon", es: "cebolla"},
+      {de: "Knoblauch", en: "garlic", fr: "ail", es: "ajo"},
+      {de: "Pilz", en: "mushroom", fr: "champignon", es: "champiñón"},
     ];
     const MEMORY_ROUND_PAIRS = 15; // how many concepts get drawn from the pool each round
     const MEMORY_BOARD_SIZE = 30;
@@ -1229,6 +1533,7 @@ let languageData = null;
     let memorySelected = []; // indices into memoryBoard currently picked
     let memoryBusy = false; // true while a match/error flash is being shown, blocks further clicks
     let memoryFound = 0; // pairs matched so far this round
+    let memoryWrong = 0; // wrong attempts so far this round
     let memoryLastPair = ""; // the two words of the most recently matched pair, e.g. "Hund - dog"
     const MEMORY_TOTAL_PAIRS = MEMORY_ROUND_PAIRS;
 
@@ -1265,6 +1570,7 @@ let languageData = null;
       memoryBoard = [];
       memorySelected = [];
       memoryFound = 0;
+      memoryWrong = 0;
       memoryLastPair = "";
       while (memoryBoard.length < MEMORY_BOARD_SIZE && memoryReserve.length) {
         const conceptId = memoryReserve.shift();
@@ -1277,6 +1583,7 @@ let languageData = null;
 
     function renderMemoryCounter() {
       document.getElementById("memoryCounter").textContent = t("memoryPairsFound", {count: memoryFound, total: MEMORY_TOTAL_PAIRS});
+      document.getElementById("memoryWrongCount").textContent = t("memoryWrongCount", {count: memoryWrong});
       document.getElementById("memoryLastPair").textContent = memoryLastPair;
     }
 
@@ -1304,6 +1611,7 @@ let languageData = null;
         card.type = "button";
         card.className = "memory-card";
         card.textContent = memoryWordFor(cell);
+        card.dataset.flag = MEMORY_FLAGS[cell.isUi ? currentUiLanguage : cell.lang] || "";
         if (memorySelected.includes(index)) card.classList.add("selected");
         card.addEventListener("click", () => handleMemoryCardClick(index));
         grid.appendChild(card);
@@ -1335,6 +1643,8 @@ let languageData = null;
 
     function flashMemoryError(indices) {
       memoryBusy = true;
+      memoryWrong += 1;
+      renderMemoryCounter();
       const grid = document.getElementById("memoryGrid");
       indices.forEach((index) => grid.children[index].classList.add("error"));
       setTimeout(() => {
@@ -1351,6 +1661,37 @@ let languageData = null;
         memoryBusy = false;
         resolveMemoryGroup(conceptId);
       }, 500);
+    }
+
+    function playMemoryWinSound() {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      [523.25, 659.25, 783.99].forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.value = freq;
+        const start = ctx.currentTime + i * 0.12;
+        gain.gain.setValueAtTime(0.15, start);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + 0.35);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(start);
+        osc.stop(start + 0.35);
+      });
+    }
+
+    function launchMemoryConfetti() {
+      const colors = ["#2f7df6", "#7c3aed", "#3d9142", "#eab308", "#b3413d"];
+      const grid = document.getElementById("memoryGrid");
+      for (let i = 0; i < 40; i += 1) {
+        const piece = document.createElement("div");
+        piece.className = "memory-confetti";
+        piece.style.left = `${Math.random() * 100}%`;
+        piece.style.background = colors[Math.floor(Math.random() * colors.length)];
+        piece.style.animationDelay = `${Math.random() * 0.3}s`;
+        piece.style.transform = `rotate(${Math.random() * 360}deg)`;
+        grid.appendChild(piece);
+        piece.addEventListener("animationend", () => piece.remove());
+      }
     }
 
     function resolveMemoryGroup(conceptId) {
@@ -1371,13 +1712,18 @@ let languageData = null;
           memoryBoard[boardIndex] = null;
         });
       }
-      if (memoryBoard.every((cell) => !cell)) {
+      const won = memoryBoard.every((cell) => !cell);
+      if (won) {
         const winText = document.getElementById("memoryWinText");
         winText.textContent = t("memoryWin");
         winText.classList.remove("hidden");
       }
       renderMemoryCounter();
       renderMemoryBoard();
+      if (won) {
+        playMemoryWinSound();
+        launchMemoryConfetti();
+      }
     }
 
     function hideEasterEgg() {

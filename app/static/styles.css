@@ -468,13 +468,41 @@
       cursor: pointer;
       font: inherit;
       min-height: 3.4rem;
+      overflow: hidden;
       padding: .5rem .3rem;
+      position: relative;
+      z-index: 0;
+    }
+    .memory-card::before {
+      content: attr(data-flag);
+      font-size: 2.6rem;
+      inset: 0;
+      align-items: center;
+      display: flex;
+      justify-content: center;
+      opacity: .18;
+      pointer-events: none;
+      position: absolute;
+      z-index: -1;
     }
     .memory-card:hover { border-color: var(--accent); transform: none; }
     .memory-card.selected { background: #7c3aed; border-color: #7c3aed; color: #fff; }
     .memory-card.error { background: #b3413d; border-color: #b3413d; color: #fff; animation: memory-shake .5s ease; }
     .memory-card.correct { background: #3d9142; border-color: #3d9142; color: #fff; animation: memory-flip .5s ease, memory-glow .5s ease; }
     .memory-card-empty { background: none; border-color: transparent; cursor: default; }
+    .memory-grid { position: relative; }
+    .memory-confetti {
+      animation: memory-confetti-fall 1.1s ease-in forwards;
+      border-radius: 2px;
+      height: 10px;
+      pointer-events: none;
+      position: absolute;
+      top: -10px;
+      width: 6px;
+    }
+    @keyframes memory-confetti-fall {
+      to { transform: translateY(320px) rotate(360deg); opacity: 0; }
+    }
     @keyframes memory-flip {
       0% { transform: rotateY(0deg); }
       50% { transform: rotateY(90deg); }
