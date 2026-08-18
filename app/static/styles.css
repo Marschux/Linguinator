@@ -452,9 +452,12 @@
     .memory-badges { display: flex; gap: .4rem; }
     .memory-lastpair { min-width: 7rem; text-align: center; }
     .memory-badge {
+      align-items: center;
       background: var(--panel-soft);
       border: 1px solid var(--line);
       border-radius: 8px;
+      display: inline-flex;
+      line-height: 1.2;
       padding: .35rem .7rem;
     }
     .memory-grid {
