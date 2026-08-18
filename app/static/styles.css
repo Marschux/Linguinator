@@ -476,15 +476,14 @@
     .memory-card::before {
       content: "";
       inset: 0;
-      opacity: .22;
       pointer-events: none;
       position: absolute;
       z-index: -1;
     }
-    .memory-card[data-lang="de"]::before { background: linear-gradient(to bottom, #000 33%, #dd0000 33% 66%, #ffce00 66%); }
-    .memory-card[data-lang="fr"]::before { background: linear-gradient(to right, #0055a4 33%, #fff 33% 66%, #ef4135 66%); }
-    .memory-card[data-lang="es"]::before { background: linear-gradient(to bottom, #aa151b 25%, #f1bf00 25% 75%, #aa151b 75%); }
-    .memory-card[data-lang="en"]::before { background: linear-gradient(to right, #012169 40%, #fff 40% 60%, #c8102e 60%); }
+    .memory-card[data-lang="de"]::before { background: linear-gradient(to bottom, rgba(0,0,0,.22) 33%, rgba(221,0,0,.22) 33% 66%, rgba(255,206,0,.22) 66%); }
+    .memory-card[data-lang="fr"]::before { background: linear-gradient(to right, rgba(0,85,164,.22) 33%, rgba(255,255,255,.4) 33% 66%, rgba(239,65,53,.22) 66%); }
+    .memory-card[data-lang="es"]::before { background: linear-gradient(to bottom, rgba(170,21,27,.22) 25%, rgba(241,191,0,.22) 25% 75%, rgba(170,21,27,.22) 75%); }
+    .memory-card[data-lang="en"]::before { background: linear-gradient(to right, rgba(1,33,105,.22) 40%, rgba(255,255,255,.4) 40% 60%, rgba(200,16,46,.22) 60%); }
     .memory-card:hover { border-color: var(--accent); transform: none; }
     .memory-card.selected { background: #7c3aed; border-color: #7c3aed; color: #fff; }
     .memory-card.error { background: #b3413d; border-color: #b3413d; color: #fff; animation: memory-shake .5s ease; }
