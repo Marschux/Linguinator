@@ -383,6 +383,7 @@
       border-radius: 8px;
       color: var(--muted);
       font: inherit;
+      margin-bottom: .5rem;
       padding: .75rem;
       width: 100%;
     }
