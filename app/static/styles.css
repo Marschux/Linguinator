@@ -468,25 +468,8 @@
       cursor: pointer;
       font: inherit;
       min-height: 3.4rem;
-      overflow: hidden;
       padding: .5rem .3rem;
-      position: relative;
-      z-index: 0;
     }
-    .memory-card::before {
-      background-position: center;
-      background-size: cover;
-      content: "";
-      inset: 0;
-      opacity: .55;
-      pointer-events: none;
-      position: absolute;
-      z-index: -1;
-    }
-    .memory-card[data-lang="de"]::before { background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='3'%20height='2'%20viewBox='0%200%203%202'%3E%3Crect%20width='3'%20height='0.667'%20fill='rgb(0,0,0)'/%3E%3Crect%20y='0.667'%20width='3'%20height='0.666'%20fill='rgb(221,0,0)'/%3E%3Crect%20y='1.333'%20width='3'%20height='0.667'%20fill='rgb(255,206,0)'/%3E%3C/svg%3E"); }
-    .memory-card[data-lang="fr"]::before { background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='3'%20height='2'%20viewBox='0%200%203%202'%3E%3Crect%20width='1'%20height='2'%20fill='rgb(0,85,164)'/%3E%3Crect%20x='1'%20width='1'%20height='2'%20fill='rgb(255,255,255)'/%3E%3Crect%20x='2'%20width='1'%20height='2'%20fill='rgb(239,65,53)'/%3E%3C/svg%3E"); }
-    .memory-card[data-lang="es"]::before { background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='3'%20height='2'%20viewBox='0%200%203%202'%3E%3Crect%20width='3'%20height='0.5'%20fill='rgb(170,21,27)'/%3E%3Crect%20y='0.5'%20width='3'%20height='1'%20fill='rgb(241,191,0)'/%3E%3Crect%20y='1.5'%20width='3'%20height='0.5'%20fill='rgb(170,21,27)'/%3E%3C/svg%3E"); }
-    .memory-card[data-lang="en"]::before { background-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='60'%20height='30'%20viewBox='0%200%2060%2030'%3E%3Crect%20width='60'%20height='30'%20fill='rgb(1,33,105)'/%3E%3Cpath%20d='M0,0%20L60,30%20M60,0%20L0,30'%20stroke='rgb(255,255,255)'%20stroke-width='6'/%3E%3Cpath%20d='M0,0%20L60,30%20M60,0%20L0,30'%20stroke='rgb(200,16,46)'%20stroke-width='2'/%3E%3Cpath%20d='M30,0%20V30%20M0,15%20H60'%20stroke='rgb(255,255,255)'%20stroke-width='10'/%3E%3Cpath%20d='M30,0%20V30%20M0,15%20H60'%20stroke='rgb(200,16,46)'%20stroke-width='6'/%3E%3C/svg%3E"); }
     .memory-card:hover { border-color: var(--accent); transform: none; }
     .memory-card.selected { background: #7c3aed; border-color: #7c3aed; color: #fff; }
     .memory-card.error { background: #b3413d; border-color: #b3413d; color: #fff; animation: memory-shake .5s ease; }

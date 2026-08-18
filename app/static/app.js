@@ -1122,6 +1122,7 @@ let languageData = null;
     // mixed at random) to clear that pair. Not a serious feature - kept as one self-contained
     // block rather than wired into the translation pipeline anywhere.
     const MEMORY_LANGS = ["de", "en", "fr", "es"];
+    const MEMORY_FLAGS = {de: "🇩🇪", en: "🇬🇧", fr: "🇫🇷", es: "🇪🇸"};
     const MEMORY_CONCEPTS = [
       {de: "Nudeln", en: "pasta", it: "pasta", fr: "pâtes", es: "pasta", pt: "massa", nl: "pasta"},
       {de: "Haus", en: "house", it: "casa", fr: "maison", es: "casa", pt: "casa", nl: "huis"},
@@ -1610,7 +1611,6 @@ let languageData = null;
         card.type = "button";
         card.className = "memory-card";
         card.textContent = memoryWordFor(cell);
-        card.dataset.lang = cell.isUi ? currentUiLanguage : cell.lang;
         if (memorySelected.includes(index)) card.classList.add("selected");
         card.addEventListener("click", () => handleMemoryCardClick(index));
         grid.appendChild(card);
@@ -1697,7 +1697,14 @@ let languageData = null;
       const freedIndices = memoryBoard
         .map((cell, index) => (cell && cell.conceptId === conceptId ? index : -1))
         .filter((index) => index !== -1);
-      memoryLastPair = freedIndices.map((index) => memoryWordFor(memoryBoard[index])).join(" - ");
+      memoryLastPair = freedIndices
+        .map((index) => {
+          const cell = memoryBoard[index];
+          const word = memoryWordFor(cell);
+          const flag = MEMORY_FLAGS[cell.isUi ? currentUiLanguage : cell.lang] || "";
+          return `${flag} ${word} ${flag}`;
+        })
+        .join(" - ");
       memorySelected = [];
       memoryFound += 1;
       if (memoryReserve.length) {
