@@ -1122,7 +1122,6 @@ let languageData = null;
     // mixed at random) to clear that pair. Not a serious feature - kept as one self-contained
     // block rather than wired into the translation pipeline anywhere.
     const MEMORY_LANGS = ["de", "en", "fr", "es"];
-    const MEMORY_FLAGS = {de: "🇩🇪", en: "🇬🇧", fr: "🇫🇷", es: "🇪🇸"};
     const MEMORY_CONCEPTS = [
       {de: "Nudeln", en: "pasta", it: "pasta", fr: "pâtes", es: "pasta", pt: "massa", nl: "pasta"},
       {de: "Haus", en: "house", it: "casa", fr: "maison", es: "casa", pt: "casa", nl: "huis"},
@@ -1611,7 +1610,7 @@ let languageData = null;
         card.type = "button";
         card.className = "memory-card";
         card.textContent = memoryWordFor(cell);
-        card.dataset.flag = MEMORY_FLAGS[cell.isUi ? currentUiLanguage : cell.lang] || "";
+        card.dataset.lang = cell.isUi ? currentUiLanguage : cell.lang;
         if (memorySelected.includes(index)) card.classList.add("selected");
         card.addEventListener("click", () => handleMemoryCardClick(index));
         grid.appendChild(card);
