@@ -1157,7 +1157,14 @@ let languageData = null;
       return copy;
     }
 
+    // A pair's random side keeps its language fixed even if the UI language changes later -
+    // except if it happens to now match the UI language, which would show the same word
+    // twice for one pair. Re-roll it in that case (self-heals on the next render/switch).
     function memoryWordFor(cell) {
+      if (!cell.isUi && cell.lang === currentUiLanguage) {
+        const otherLangs = MEMORY_LANGS.filter((lang) => lang !== currentUiLanguage);
+        cell.lang = otherLangs[Math.floor(Math.random() * otherLangs.length)];
+      }
       return MEMORY_CONCEPTS[cell.conceptId][cell.isUi ? currentUiLanguage : cell.lang];
     }
 
