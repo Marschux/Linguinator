@@ -2131,6 +2131,7 @@ let languageData = null;
     const MEMORY_ROUND_PAIRS = 15; // how many concepts get drawn from the pool each round
     const MEMORY_BOARD_SIZE = 30;
     const MEMORY_MAX_WRONG = 15; // wrong attempts allowed before the round auto-resets
+    const memoryGrid = document.getElementById("memoryGrid");
     let memoryBoard = []; // [{conceptId, isUi, lang}, ...] one entry per visible card;
     // isUi cards show the concept in the current UI language, re-evaluated on every render
     // so switching the UI language updates them immediately - "lang" is only used otherwise.
@@ -2143,7 +2144,6 @@ let languageData = null;
     let memoryStartTime = 0; // Date.now() when the current round started
     let memoryWinElapsedMs = 0; // elapsed time when the round was won, for re-localizing the win text
     let memoryTimerInterval = null;
-    const MEMORY_TOTAL_PAIRS = MEMORY_ROUND_PAIRS;
 
     function shuffled(array) {
       const copy = array.slice();
@@ -2187,12 +2187,12 @@ let languageData = null;
         memoryBoard.push(...memoryGroupFromConcept(conceptId));
       }
       memoryBoard = shuffled(memoryBoard);
-      document.getElementById("memoryWinText").classList.add("hidden");
+      document.getElementById("memoryWinText").classList.remove("visible");
       renderMemoryCounter();
     }
 
     function renderMemoryCounter() {
-      document.getElementById("memoryCounter").textContent = t("memoryPairsFound", {count: memoryFound, total: MEMORY_TOTAL_PAIRS});
+      document.getElementById("memoryCounter").textContent = t("memoryPairsFound", {count: memoryFound, total: MEMORY_ROUND_PAIRS});
       document.getElementById("memoryWrongCount").textContent = t("memoryWrongCount", {count: memoryWrong, total: MEMORY_MAX_WRONG});
       document.getElementById("memoryLastPair").textContent = memoryLastPair;
     }
@@ -2203,12 +2203,14 @@ let languageData = null;
       document.getElementById("memoryReset").textContent = t("memoryReset");
       renderMemoryCounter();
       const winText = document.getElementById("memoryWinText");
-      if (!winText.classList.contains("hidden")) winText.textContent = t("memoryWin", {time: formatMemoryTime(memoryWinElapsedMs)});
-      renderMemoryBoard();
+      if (winText.classList.contains("visible")) winText.textContent = t("memoryWin", {time: formatMemoryTime(memoryWinElapsedMs)});
+      // Skip the (comparatively expensive) full board rebuild while the panel is hidden -
+      // openEasterEgg() re-renders it anyway when the game is next opened.
+      if (!document.getElementById("easterEggPanel").classList.contains("hidden")) renderMemoryBoard();
     }
 
     function renderMemoryBoard() {
-      const grid = document.getElementById("memoryGrid");
+      const grid = memoryGrid;
       grid.innerHTML = "";
       memoryBoard.forEach((cell, index) => {
         if (!cell) {
@@ -2254,7 +2256,7 @@ let languageData = null;
       memoryBusy = true;
       memoryWrong += 1;
       renderMemoryCounter();
-      const grid = document.getElementById("memoryGrid");
+      const grid = memoryGrid;
       indices.forEach((index) => grid.children[index].classList.add("error"));
       if (memoryWrong >= MEMORY_MAX_WRONG) {
         setTimeout(() => {
@@ -2277,7 +2279,7 @@ let languageData = null;
 
     function flashMemoryCorrect(indices, conceptId) {
       memoryBusy = true;
-      const grid = document.getElementById("memoryGrid");
+      const grid = memoryGrid;
       indices.forEach((index) => grid.children[index].classList.add("correct"));
       setTimeout(() => {
         memoryBusy = false;
@@ -2308,7 +2310,8 @@ let languageData = null;
     }
 
     function playMemoryWinSound() {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = ensureAudioContext();
+      if (!ctx) return;
       [523.25, 659.25, 783.99].forEach((freq, i) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -2324,7 +2327,8 @@ let languageData = null;
     }
 
     function playMemoryFailSound() {
-      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const ctx = ensureAudioContext();
+      if (!ctx) return;
       [392, 329.63, 261.63].forEach((freq, i) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
@@ -2341,7 +2345,7 @@ let languageData = null;
 
     function launchMemoryConfetti() {
       const colors = ["#2f7df6", "#7c3aed", "#3d9142", "#eab308", "#b3413d"];
-      const grid = document.getElementById("memoryGrid");
+      const grid = memoryGrid;
       for (let i = 0; i < 40; i += 1) {
         const piece = document.createElement("div");
         piece.className = "memory-confetti";
@@ -2386,7 +2390,7 @@ let languageData = null;
         updateMemoryTimerDisplay();
         const winText = document.getElementById("memoryWinText");
         winText.textContent = t("memoryWin", {time: formatMemoryTime(memoryWinElapsedMs)});
-        winText.classList.remove("hidden");
+        winText.classList.add("visible");
       }
       renderMemoryCounter();
       renderMemoryBoard();
