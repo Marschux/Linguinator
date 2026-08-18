@@ -132,6 +132,7 @@ let languageData = null;
         autoDetect: "Auto-detect",
         memoryPairsFound: "Pairs found: {count} / {total}",
         memoryWrongCount: "Wrong: {count} / {total}",
+        memoryTimer: "Time: {time}",
         memoryWin: "All pairs found in {time}!",
         memoryReset: "Play again",
       },
@@ -242,6 +243,7 @@ let languageData = null;
         autoDetect: "Automatisch erkennen",
         memoryPairsFound: "Gefundene Paare: {count} / {total}",
         memoryWrongCount: "Falsch: {count} / {total}",
+        memoryTimer: "Zeit: {time}",
         memoryWin: "Alle Paare gefunden in {time}!",
         memoryReset: "Nochmal",
       },
@@ -352,6 +354,7 @@ let languageData = null;
         autoDetect: "Detección automática",
         memoryPairsFound: "Pares encontrados: {count} / {total}",
         memoryWrongCount: "Errores: {count} / {total}",
+        memoryTimer: "Tiempo: {time}",
         memoryWin: "¡Todos los pares encontrados en {time}!",
         memoryReset: "Otra vez",
       },
@@ -462,6 +465,7 @@ let languageData = null;
         autoDetect: "Détection automatique",
         memoryPairsFound: "Paires trouvées : {count} / {total}",
         memoryWrongCount: "Erreurs : {count} / {total}",
+        memoryTimer: "Temps : {time}",
         memoryWin: "Toutes les paires trouvées en {time} !",
         memoryReset: "Rejouer",
       }
@@ -1538,6 +1542,7 @@ let languageData = null;
     let memoryLastPair = ""; // the two words of the most recently matched pair, e.g. "Hund - dog"
     let memoryStartTime = 0; // Date.now() when the current round started
     let memoryWinElapsedMs = 0; // elapsed time when the round was won, for re-localizing the win text
+    let memoryTimerInterval = null;
     const MEMORY_TOTAL_PAIRS = MEMORY_ROUND_PAIRS;
 
     function shuffled(array) {
@@ -1576,6 +1581,7 @@ let languageData = null;
       memoryWrong = 0;
       memoryLastPair = "";
       memoryStartTime = Date.now();
+      startMemoryTimer();
       while (memoryBoard.length < MEMORY_BOARD_SIZE && memoryReserve.length) {
         const conceptId = memoryReserve.shift();
         memoryBoard.push(...memoryGroupFromConcept(conceptId));
@@ -1679,6 +1685,21 @@ let languageData = null;
       }, 500);
     }
 
+    function startMemoryTimer() {
+      clearInterval(memoryTimerInterval);
+      updateMemoryTimerDisplay();
+      memoryTimerInterval = setInterval(updateMemoryTimerDisplay, 1000);
+    }
+
+    function stopMemoryTimer() {
+      clearInterval(memoryTimerInterval);
+      memoryTimerInterval = null;
+    }
+
+    function updateMemoryTimerDisplay() {
+      document.getElementById("memoryTimer").textContent = t("memoryTimer", {time: formatMemoryTime(Date.now() - memoryStartTime)});
+    }
+
     function formatMemoryTime(ms) {
       const totalSeconds = Math.round(ms / 1000);
       const minutes = Math.floor(totalSeconds / 60);
@@ -1761,6 +1782,8 @@ let languageData = null;
       const won = memoryBoard.every((cell) => !cell);
       if (won) {
         memoryWinElapsedMs = Date.now() - memoryStartTime;
+        stopMemoryTimer();
+        updateMemoryTimerDisplay();
         const winText = document.getElementById("memoryWinText");
         winText.textContent = t("memoryWin", {time: formatMemoryTime(memoryWinElapsedMs)});
         winText.classList.remove("hidden");
@@ -1777,6 +1800,7 @@ let languageData = null;
       const panel = document.getElementById("easterEggPanel");
       if (panel.classList.contains("hidden")) return;
       panel.classList.add("hidden");
+      stopMemoryTimer();
       document.getElementById("languageRow").classList.remove("hidden");
       document.getElementById("primaryActions").classList.remove("hidden");
       document.getElementById("modelQualityHint").classList.remove("hidden");
@@ -1794,7 +1818,11 @@ let languageData = null;
       document.getElementById("modelQualityHint").classList.add("hidden");
       document.getElementById("easterEggDivider").classList.remove("hidden");
       document.querySelectorAll(".tab-panel").forEach((tabPanel) => tabPanel.classList.remove("active"));
-      if (!memoryBoard.length) buildMemoryBoard();
+      if (!memoryBoard.length) {
+        buildMemoryBoard();
+      } else if (!memoryBoard.every((cell) => !cell)) {
+        startMemoryTimer();
+      }
       renderMemoryBoard();
     }
 
