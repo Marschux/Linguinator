@@ -449,6 +449,12 @@
       margin-top: 1rem;
     }
     .memory-status .subtle { margin: 0; }
+    .memory-badge {
+      background: var(--panel-soft);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: .35rem .7rem;
+    }
     .memory-grid {
       display: grid;
       gap: .5rem;
