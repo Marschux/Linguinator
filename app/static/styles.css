@@ -449,6 +449,7 @@
       margin-top: 1rem;
     }
     .memory-status .subtle { margin: 0; }
+    .memory-badges { display: flex; gap: .4rem; }
     .memory-badge {
       background: var(--panel-soft);
       border: 1px solid var(--line);
@@ -491,6 +492,7 @@
       position: absolute;
       text-align: center;
     }
+    #memoryWinText.hidden { display: none; }
     .memory-confetti {
       animation: memory-confetti-fall 1.1s ease-in forwards;
       border-radius: 2px;
