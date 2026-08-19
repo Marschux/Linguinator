@@ -1,6 +1,6 @@
 services:
   linguinator:
-    image: registry.gitlab.com/marschu/linguinator:latest
+    image: registry.gitlab.com/uncoded-bytes/linguinator:latest
     build:
       context: ..
       dockerfile: docker/Dockerfile
@@ -28,29 +28,14 @@ services:
       retries: 3
       start_period: 120s
 
-  linguinator-gpu:
-    profiles: ["gpu"]
-    image: registry.gitlab.com/marschu/linguinator:latest
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
-    container_name: linguinator-gpu
-    restart: unless-stopped
-    env_file: ../.env
-    ports:
-      - "5052:5051"
-    volumes:
-      - hf-cache:/cache/huggingface
-      - history:/data/history
-    environment:
-      HF_HOME: /cache/huggingface
-    networks:
-      - proxy-net
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - capabilities: ["gpu"]
+
+    # --- GPU: uncomment the 5 lines below (host needs the NVIDIA container runtime) ---
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - capabilities: ["gpu"]
+    # --- end GPU ---
 
 volumes:
   hf-cache:
