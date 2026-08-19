@@ -1,11 +1,23 @@
 # Linguinator
 
+[![Version](https://img.shields.io/badge/version-1.0.0-blue)](https://gitlab.com/uncoded-bytes/Linguinator/-/tags/v1.0.0)
+[![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
+[![Docker image](https://img.shields.io/badge/docker-registry.gitlab.com%2Funcoded--bytes%2Flinguinator-2496ED?logo=docker&logoColor=white)](https://gitlab.com/uncoded-bytes/Linguinator/container_registry)
+
 Local document translation workbench powered by OPUS-MT.
 
 ![Linguinator UI](docs/screenshot.png)
 
 Open `http://localhost:5051/` (or your configured `LINGUINATOR_PORT`/reverse-proxy URL) once the
 container is running.
+
+## Contents
+
+- [Languages](#languages)
+- [Usage](#usage)
+- [License](#license)
+- [AI use](#ai-use)
+- [Links](#links)
 
 ## Languages
 
@@ -57,3 +69,10 @@ model's own license and training-data rights.
 
 Most of this project's code was written with AI assistance (Claude Code). Commits and design
 decisions were reviewed by the maintainer.
+
+## Links
+
+- [Wiki](https://gitlab.com/uncoded-bytes/Linguinator/-/wikis/home) — API reference, environment
+  variables, where data is stored.
+- [Issues](https://gitlab.com/uncoded-bytes/Linguinator/-/issues)
+- [Container registry](https://gitlab.com/uncoded-bytes/Linguinator/container_registry)
