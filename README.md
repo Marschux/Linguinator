@@ -23,8 +23,6 @@ Input tabs: `Text Field` (paste text), `Text` (plain text/structured text files)
 `DOC File` (DOCX/ODT), `PowerPoint` (PPTX), `CSV File` (CSV/XLSX, optionally limited to selected
 columns), `PDF`. File tabs need `Load File` before translating.
 
-![Translating text](docs/screenshot-translate.png)
-
 ![Job history](docs/screenshot-history.png)
 
 Other notes:
