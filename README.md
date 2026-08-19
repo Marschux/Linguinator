@@ -11,14 +11,6 @@ Local document translation workbench powered by OPUS-MT.
 Open `http://localhost:5051/` (or your configured `LINGUINATOR_PORT`/reverse-proxy URL) once the
 container is running.
 
-## Contents
-
-- [Languages](#languages)
-- [Usage](#usage)
-- [License](#license)
-- [AI use](#ai-use)
-- [Links](#links)
-
 ## Languages
 
 English, German, French, Spanish, Italian, Dutch, Portuguese, Polish, Russian, Ukrainian, Swedish,
