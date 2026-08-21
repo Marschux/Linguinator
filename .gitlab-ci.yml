@@ -8,7 +8,7 @@ docker-image:
     IMAGE_LATEST: "$CI_REGISTRY_IMAGE:latest"
     IMAGE_SHA: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
   before_script:
-    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
   script:
     - docker build --pull --provenance=false -f docker/Dockerfile -t "$IMAGE_LATEST" -t "$IMAGE_SHA" .
     - docker push "$IMAGE_LATEST"
@@ -22,7 +22,7 @@ docker-release:
   variables:
     IMAGE_RELEASE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
   before_script:
-    - docker login -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
   script:
     - docker build --pull --provenance=false -f docker/Dockerfile -t "$IMAGE_RELEASE" .
     - docker push "$IMAGE_RELEASE"
