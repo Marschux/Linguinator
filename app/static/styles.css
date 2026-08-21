@@ -481,9 +481,16 @@
     .memory-card.selected { background: #7c3aed; border-color: #7c3aed; color: #fff; }
     .memory-card.error { background: #b3413d; border-color: #b3413d; color: #fff; animation: memory-shake .5s ease; }
     .memory-card.correct { background: #3d9142; border-color: #3d9142; color: #fff; animation: memory-flip .5s ease, memory-glow .5s ease; }
-    .memory-card.found { background: #3d9142; border-color: #3d9142; color: #fff; cursor: default; }
-    .memory-card.found-alt { background: #2c6b30; border-color: #2c6b30; }
     .memory-card-empty { background: none; border-color: transparent; cursor: default; }
+    .memory-grid.memory-recap { display: block; }
+    .memory-recap-row {
+      background: #000;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: #f2f5f8;
+      padding: .5rem .8rem;
+      margin-bottom: .4rem;
+    }
     .memory-board-wrap { position: relative; }
     #memoryWinText {
       align-items: center;

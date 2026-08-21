@@ -2215,16 +2215,16 @@ let languageData = null;
       const grid = memoryGrid;
       grid.innerHTML = "";
       if (memoryBoard.length && memoryBoard.every((cell) => !cell)) {
-        memoryFoundGroups.forEach((pair, pairIndex) => {
-          pair.forEach((display) => {
-            const card = document.createElement("div");
-            card.className = pairIndex % 2 ? "memory-card found found-alt" : "memory-card found";
-            card.textContent = display;
-            grid.appendChild(card);
-          });
+        grid.classList.add("memory-recap");
+        memoryFoundGroups.forEach((pair) => {
+          const row = document.createElement("div");
+          row.className = "memory-recap-row";
+          row.textContent = pair.join("  -  ");
+          grid.appendChild(row);
         });
         return;
       }
+      grid.classList.remove("memory-recap");
       memoryBoard.forEach((cell, index) => {
         if (!cell) {
           const placeholder = document.createElement("div");
