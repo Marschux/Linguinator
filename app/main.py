@@ -1,5 +1,6 @@
 # ... existing imports and setup code ...
 import base64
+import ctypes
 import gc
 import os
 import re
@@ -335,7 +336,7 @@ def normalized_root_path(value: str) -> str:
 
 ROOT_PATH = normalized_root_path(os.getenv("LINGUINATOR_ROOT_PATH", ""))
 
-app = FastAPI(title="Linguinator", version="1.0.5", root_path=ROOT_PATH)
+app = FastAPI(title="Linguinator", version="1.0.6", root_path=ROOT_PATH)
 app.mount("/static", StaticFiles(directory=APP_DIR / "static"), name="static")
 JOBS: Dict[str, Dict[str, Any]] = {}
 JOB_RUNNERS: Dict[str, Tuple[Callable[..., None], Tuple[Any, ...]]] = {}
@@ -467,6 +468,12 @@ def unload_model_cache() -> bool:
         load_model.cache_clear()
         load_tokenizer.cache_clear()
     gc.collect()
+    try:
+        # glibc keeps freed heap arenas rather than returning them to the OS, so RSS stays
+        # high after unload without this - no-op on non-glibc platforms (Windows/macOS dev).
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except OSError:
+        pass
     try:
         import torch as torch_module
     except ImportError:
