@@ -2,8 +2,6 @@
 .env.*
 !.env.example
 TODO.md
-mistake.md
-Onboarding Testbench.md
 .claude/
 CLAUDE.md
 __pycache__/
@@ -21,8 +19,6 @@ build/
 *.egg-info/
 .coverage
 htmlcov/
-.docker/
-docker-compose.override.yml
 *.log
 .DS_Store
 Thumbs.db
