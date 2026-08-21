@@ -11,6 +11,32 @@ Local document translation workbench powered by OPUS-MT.
 Open `http://localhost:5051/` (or your configured `LINGUINATOR_PORT`/reverse-proxy URL) once the
 container is running.
 
+## Installation with Docker
+
+1. Clone the repository and switch into its directory.
+2. Copy [`docker/.env.example`](docker/.env.example) to `.env` in the repository root and adjust
+   the settings, especially authentication before exposing the service.
+3. Make sure the external Docker network `proxy-net` exists (create it once with
+   `docker network create proxy-net`, or adjust [`docker/compose.yml`](docker/compose.yml) for your
+   setup).
+4. Start Linguinator:
+
+```bash
+docker compose -f docker/compose.yml pull
+docker compose -f docker/compose.yml up -d
+```
+
+Open `http://localhost:5051/` after the container becomes healthy. Useful maintenance commands:
+
+```bash
+docker compose -f docker/compose.yml logs -f linguinator
+docker compose -f docker/compose.yml restart linguinator
+docker compose -f docker/compose.yml down
+```
+
+The compose file uses the published image from the GitLab Container Registry. To build locally,
+append `--build` to the `up` command.
+
 ## Languages
 
 English, German, French, Spanish, Italian, Dutch, Portuguese, Polish, Russian, Ukrainian, Swedish,
