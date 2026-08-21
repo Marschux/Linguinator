@@ -1,6 +1,6 @@
 # Linguinator
 
-[![Version](https://img.shields.io/badge/version-1.0.2-blue)](https://gitlab.com/uncoded-bytes/Linguinator/-/tags/v1.0.2)
+[![Version](https://img.shields.io/gitlab/v/tag/uncoded-bytes/Linguinator?sort=semver&label=version)](https://gitlab.com/uncoded-bytes/Linguinator/-/tags)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 [![Docker image](https://img.shields.io/badge/docker-registry.gitlab.com%2Funcoded--bytes%2Flinguinator-2496ED?logo=docker&logoColor=white)](https://gitlab.com/uncoded-bytes/Linguinator/container_registry)
 
