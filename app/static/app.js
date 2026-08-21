@@ -2141,6 +2141,7 @@ let languageData = null;
     let memoryFound = 0; // pairs matched so far this round
     let memoryWrong = 0; // wrong attempts so far this round
     let memoryLastPair = ""; // the two words of the most recently matched pair, e.g. "Hund - dog"
+    let memoryFoundGroups = []; // [[word1, word2], ...] one entry per matched pair this round, in find order - shown as a recap once the board is cleared
     let memoryStartTime = 0; // Date.now() when the current round started
     let memoryWinElapsedMs = 0; // elapsed time when the round was won, for re-localizing the win text
     let memoryTimerInterval = null;
@@ -2180,6 +2181,7 @@ let languageData = null;
       memoryFound = 0;
       memoryWrong = 0;
       memoryLastPair = "";
+      memoryFoundGroups = [];
       memoryStartTime = Date.now();
       startMemoryTimer();
       while (memoryBoard.length < MEMORY_BOARD_SIZE && memoryReserve.length) {
@@ -2212,6 +2214,15 @@ let languageData = null;
     function renderMemoryBoard() {
       const grid = memoryGrid;
       grid.innerHTML = "";
+      if (memoryBoard.length && memoryBoard.every((cell) => !cell)) {
+        memoryFoundGroups.flat().forEach((display) => {
+          const card = document.createElement("div");
+          card.className = "memory-card found";
+          card.textContent = display;
+          grid.appendChild(card);
+        });
+        return;
+      }
       memoryBoard.forEach((cell, index) => {
         if (!cell) {
           const placeholder = document.createElement("div");
@@ -2362,14 +2373,14 @@ let languageData = null;
       const freedIndices = memoryBoard
         .map((cell, index) => (cell && cell.conceptId === conceptId ? index : -1))
         .filter((index) => index !== -1);
-      memoryLastPair = freedIndices
-        .map((index, i) => {
-          const cell = memoryBoard[index];
-          const word = memoryWordFor(cell);
-          const flag = MEMORY_FLAGS[cell.isUi ? currentUiLanguage : cell.lang] || "";
-          return i === 0 ? `${flag} ${word}` : `${word} ${flag}`;
-        })
+      const foundWords = freedIndices.map((index) => {
+        const cell = memoryBoard[index];
+        return {word: memoryWordFor(cell), flag: MEMORY_FLAGS[cell.isUi ? currentUiLanguage : cell.lang] || ""};
+      });
+      memoryLastPair = foundWords
+        .map(({word, flag}, i) => (i === 0 ? `${flag} ${word}` : `${word} ${flag}`))
         .join(" - ");
+      memoryFoundGroups.push(foundWords.map(({word, flag}) => `${flag} ${word}`));
       memorySelected = [];
       memoryFound += 1;
       if (memoryReserve.length) {
