@@ -2215,11 +2215,13 @@ let languageData = null;
       const grid = memoryGrid;
       grid.innerHTML = "";
       if (memoryBoard.length && memoryBoard.every((cell) => !cell)) {
-        memoryFoundGroups.flat().forEach((display) => {
-          const card = document.createElement("div");
-          card.className = "memory-card found";
-          card.textContent = display;
-          grid.appendChild(card);
+        memoryFoundGroups.forEach((pair, pairIndex) => {
+          pair.forEach((display) => {
+            const card = document.createElement("div");
+            card.className = pairIndex % 2 ? "memory-card found found-alt" : "memory-card found";
+            card.textContent = display;
+            grid.appendChild(card);
+          });
         });
         return;
       }
