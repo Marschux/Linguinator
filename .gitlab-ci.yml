@@ -3,7 +3,7 @@ stages:
 
 docker-image:
   stage: build
-  tags: [testbench]
+  tags: [homelab-runner]
   variables:
     IMAGE_LATEST: "$CI_REGISTRY_IMAGE:latest"
     IMAGE_SHA: "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
@@ -18,7 +18,7 @@ docker-image:
 
 docker-release:
   stage: build
-  tags: [testbench]
+  tags: [homelab-runner]
   variables:
     IMAGE_RELEASE: "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
   before_script:
