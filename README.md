@@ -44,14 +44,7 @@ Danish, Finnish, Greek, Hungarian, Bulgarian, Chinese, Japanese, Turkish, Latin 
 Pairs with a dedicated bilingual model (`app/opus_pairs.json`, ~170 pairs, shown per selection in
 the UI and via `/languages`) translate better than the multilingual fallback the rest use.
 
-## Usage
 
-Pick a source/target language and an input tab, then `Translate Input`. `Pause`/`Resume`/`Stop`
-work mid-job; `Download` once it lands in history.
-
-Input tabs: `Text Field` (paste text), `Text` (plain text/structured text files), `Markdown`,
-`DOC File` (DOCX/ODT), `PowerPoint` (PPTX), `CSV File` (CSV/XLSX, optionally limited to selected
-columns), `PDF`. File tabs need `Load File` before translating.
 
 ![Job history](docs/screenshot-history.png)
 
