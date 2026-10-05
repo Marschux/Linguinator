@@ -1,6 +1,6 @@
 services:
   linguinator:
-    image: registry.gitlab.com/uncoded-bytes/linguinator:latest
+    image: ghcr.io/marschux/linguinator:latest
     build:
       context: ..
       dockerfile: docker/Dockerfile

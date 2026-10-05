@@ -1,8 +1,8 @@
 # Linguinator
 
-[![Version](https://img.shields.io/gitlab/v/tag/uncoded-bytes/Linguinator?sort=semver&label=version)](https://gitlab.com/uncoded-bytes/Linguinator/-/tags)
+[![Version](https://img.shields.io/github/v/tag/Marschux/Linguinator?sort=semver&label=version)](https://github.com/Marschux/Linguinator/tags)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
-[![Docker image](https://img.shields.io/badge/docker-registry.gitlab.com%2Funcoded--bytes%2Flinguinator-2496ED?logo=docker&logoColor=white)](https://gitlab.com/uncoded-bytes/Linguinator/container_registry)
+[![Docker image](https://img.shields.io/badge/docker-ghcr.io%2Fmarschux%2Flinguinator-2496ED?logo=docker&logoColor=white)](https://github.com/Marschux/Linguinator/pkgs/container/linguinator)
 
 Local document translation workbench powered by OPUS-MT.
 
@@ -34,7 +34,7 @@ docker compose -f docker/compose.yml restart linguinator
 docker compose -f docker/compose.yml down
 ```
 
-The compose file uses the published image from the GitLab Container Registry. To build locally,
+The compose file uses the published image from the GitHub Container Registry. To build locally,
 append `--build` to the `up` command.
 
 ## Languages
@@ -121,7 +121,7 @@ decisions were reviewed by the maintainer.
 
 ## Links
 
-- [Wiki](https://gitlab.com/uncoded-bytes/Linguinator/-/wikis/home) — API reference, environment
+- [Wiki](https://github.com/Marschux/Linguinator/wiki) — API reference, environment
   variables, where data is stored.
-- [Issues](https://gitlab.com/uncoded-bytes/Linguinator/-/issues)
-- [Container registry](https://gitlab.com/uncoded-bytes/Linguinator/container_registry)
+- [Issues](https://github.com/Marschux/Linguinator/issues)
+- [Container registry](https://github.com/Marschux/Linguinator/pkgs/container/linguinator)
