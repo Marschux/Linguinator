@@ -1,6 +1,6 @@
 # Linguinator
 
-[![Version](https://img.shields.io/github/v/tag/Marschux/Linguinator?sort=semver&label=version)](https://github.com/Marschux/Linguinator/tags)
+[![Version](https://img.shields.io/badge/version-1.0.7-blue)](https://github.com/Marschux/Linguinator/tags)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue)](LICENSE)
 [![Docker image](https://img.shields.io/badge/docker-ghcr.io%2Fmarschux%2Flinguinator-2496ED?logo=docker&logoColor=white)](https://github.com/Marschux/Linguinator/pkgs/container/linguinator)
 
