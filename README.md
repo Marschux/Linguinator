@@ -21,7 +21,7 @@ container is running.
 | Disk | 0.3 to 1 GB per downloaded model |
 | Network | Only for the first use of a language pair (model download) |
 
-## Installation with Docker
+## To Build your Own Image
 
 1. Save [`docker/compose.yml`](docker/compose.yml) into an empty folder. No clone needed, the
    compose file uses the published image.
@@ -32,9 +32,6 @@ container is running.
 ```bash
 docker compose up -d
 ```
-
-In a stack manager that keeps a `.env` next to the compose file, such as Dockhand, paste the
-compose file and the contents of `.env.example` into a new stack instead.
 
 Open `http://localhost:5051/` after the container becomes healthy. Useful maintenance commands:
 
