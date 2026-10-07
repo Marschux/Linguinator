@@ -14,8 +14,10 @@ services:
       - history:/data/history
     environment:
       HF_HOME: /cache/huggingface
-    networks:
-      - proxy-net
+    # --- Reverse proxy: uncomment the 2 lines below and the block at the end of this file ---
+    # networks:
+    #   - proxy-net
+    # --- end reverse proxy ---
     logging:
       driver: json-file
       options:
@@ -43,6 +45,8 @@ volumes:
   history:
     driver: local
 
-networks:
-  proxy-net:
-    external: true
+# --- Reverse proxy: an existing network shared with the proxy (docker network create proxy-net) ---
+# networks:
+#   proxy-net:
+#     external: true
+# --- end reverse proxy ---

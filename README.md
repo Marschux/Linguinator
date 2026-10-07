@@ -26,10 +26,7 @@ container is running.
 1. Clone the repository and switch into its directory.
 2. Copy [`docker/.env.example`](docker/.env.example) to `.env` in the repository root and adjust
    the settings, especially authentication before exposing the service.
-3. Make sure the external Docker network `proxy-net` exists (create it once with
-   `docker network create proxy-net`, or adjust [`docker/compose.yml`](docker/compose.yml) for your
-   setup).
-4. Start Linguinator:
+3. Start Linguinator:
 
 ```bash
 docker compose -f docker/compose.yml pull
@@ -66,6 +63,8 @@ Other notes:
   retention time.
 - GPU: uncomment the `deploy` block in `docker/compose.yml` (host needs the NVIDIA container
   runtime); CPU otherwise.
+- Reverse proxy: uncomment the two `networks` blocks in `docker/compose.yml` to join an existing
+  proxy network.
 
 ## License
 
