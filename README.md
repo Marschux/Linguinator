@@ -23,26 +23,29 @@ container is running.
 
 ## Installation with Docker
 
-1. Clone the repository and switch into its directory.
-2. Copy [`docker/.env.example`](docker/.env.example) to `.env` in the repository root and adjust
-   the settings, especially authentication before exposing the service.
-3. Start Linguinator:
+1. Save [`docker/compose.yml`](docker/compose.yml) into an empty folder. No clone needed, the
+   compose file uses the published image.
+2. Optional: save [`docker/.env.example`](docker/.env.example) next to it as `.env` and adjust the
+   settings, especially authentication before exposing the service.
+3. Start Linguinator in that folder:
 
 ```bash
-docker compose -f docker/compose.yml pull
-docker compose -f docker/compose.yml up -d
+docker compose up -d
 ```
+
+In a stack manager that keeps a `.env` next to the compose file, such as Dockhand, paste the
+compose file and the contents of `.env.example` into a new stack instead.
 
 Open `http://localhost:5051/` after the container becomes healthy. Useful maintenance commands:
 
 ```bash
-docker compose -f docker/compose.yml logs -f linguinator
-docker compose -f docker/compose.yml restart linguinator
-docker compose -f docker/compose.yml down
+docker compose logs -f linguinator
+docker compose pull && docker compose up -d
+docker compose down
 ```
 
-The compose file uses the published image from the GitHub Container Registry. To build locally,
-append `--build` to the `up` command.
+To build the image yourself, clone the repository and run
+`docker build -f docker/Dockerfile -t ghcr.io/marschux/linguinator:latest .` in its root.
 
 ## Languages
 

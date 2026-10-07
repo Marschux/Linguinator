@@ -1,12 +1,12 @@
 services:
   linguinator:
     image: ghcr.io/marschux/linguinator:latest
-    build:
-      context: ..
-      dockerfile: docker/Dockerfile
     container_name: linguinator
     restart: unless-stopped
-    env_file: ../.env
+    # Optional: without a .env next to this file the defaults apply.
+    env_file:
+      - path: .env
+        required: false
     ports:
       - "5051:5051"
     volumes:
