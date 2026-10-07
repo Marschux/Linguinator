@@ -355,7 +355,7 @@
     }
 
     .language-name { min-width: 0; overflow-wrap: anywhere; }
-    .language-option.downloaded .language-name::after { color: var(--ok-text); content: " ¹3"; }
+    .language-option.downloaded .language-name::after { color: var(--ok-text); content: " \2713"; }
     .language-code { color: var(--muted); font-size: .78rem; white-space: nowrap; }
 
     .language-option:hover,
