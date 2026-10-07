@@ -107,7 +107,5 @@ decisions were reviewed by the maintainer.
 
 ## Links
 
-- [Wiki](https://github.com/Marschux/Linguinator/wiki): API reference, environment
-  variables, where data is stored.
 - [Issues](https://github.com/Marschux/Linguinator/issues)
 - [Container registry](https://github.com/Marschux/Linguinator/pkgs/container/linguinator)
