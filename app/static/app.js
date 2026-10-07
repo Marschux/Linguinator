@@ -97,6 +97,12 @@ let languageData = null;
         tipReload: "Reload Linguinator.",
         tipUiLanguage: "Select the interface language.",
         tipTheme: "Toggle light/dark mode.",
+        models: "Models",
+        tipModels: "Show the downloaded translation models.",
+        modelsEmpty: "No models downloaded yet.",
+        modelsFallback: "Multilingual fallback",
+        modelsDelete: "Delete",
+        modelsConfirm: "Delete this model? It is downloaded again the next time it is needed.",
         tipTabTextarea: "Type text directly into the input field.",
         tipTabText: "Load and translate a TXT file, and also HTML, SRT, VTT, JSON, YAML, PO or XLIFF.",
         tipTabMarkdown: "Load and translate a Markdown file.",
@@ -129,7 +135,6 @@ let languageData = null;
         modelDedicated: "Dedicated model for this language pair.",
         modelFallback: "No dedicated model for this pair, using the multilingual fallback.",
         modelAutoDetect: "Detected automatically. Scans take longer, and a scan mixing two scripts needs the language set.",
-        modelDownloaded: "model already downloaded",
         autoDetect: "Auto-detect",
         memoryPairsFound: "Pairs found: {count} / {total}",
         memoryWrongCount: "Wrong: {count} / {total}",
@@ -209,6 +214,12 @@ let languageData = null;
         tipReload: "Linguinator neu laden.",
         tipUiLanguage: "Sprache der Oberfläche wählen.",
         tipTheme: "Zwischen hell und dunkel wechseln.",
+        models: "Modelle",
+        tipModels: "Heruntergeladene Übersetzungsmodelle anzeigen.",
+        modelsEmpty: "Noch keine Modelle heruntergeladen.",
+        modelsFallback: "Mehrsprachiges Fallback-Modell",
+        modelsDelete: "Löschen",
+        modelsConfirm: "Dieses Modell löschen? Es wird beim nächsten Gebrauch neu heruntergeladen.",
         tipTabTextarea: "Text direkt ins Eingabefeld tippen.",
         tipTabText: "TXT-Datei laden und übersetzen, ebenso HTML, SRT, VTT, JSON, YAML, PO oder XLIFF.",
         tipTabMarkdown: "Markdown-Datei laden und übersetzen.",
@@ -241,7 +252,6 @@ let languageData = null;
         modelDedicated: "Eigenes Modell für dieses Sprachpaar.",
         modelFallback: "Kein eigenes Modell für dieses Paar, nutzt den mehrsprachigen Fallback.",
         modelAutoDetect: "Wird automatisch erkannt. Scans dauern länger, bei zwei Schriften die Sprache selbst setzen.",
-        modelDownloaded: "Modell bereits heruntergeladen",
         autoDetect: "Automatisch erkennen",
         memoryPairsFound: "Gefundene Paare: {count} / {total}",
         memoryWrongCount: "Falsch: {count} / {total}",
@@ -321,6 +331,12 @@ let languageData = null;
         tipReload: "Recargar Linguinator.",
         tipUiLanguage: "Elegir el idioma de la interfaz.",
         tipTheme: "Cambiar entre modo claro y oscuro.",
+        models: "Modelos",
+        tipModels: "Mostrar los modelos de traducción descargados.",
+        modelsEmpty: "Aún no hay modelos descargados.",
+        modelsFallback: "Modelo multilingüe de reserva",
+        modelsDelete: "Eliminar",
+        modelsConfirm: "¿Eliminar este modelo? Se descargará de nuevo cuando haga falta.",
         tipTabTextarea: "Escribir texto directamente en el campo.",
         tipTabText: "Cargar y traducir un archivo TXT, también HTML, SRT, VTT, JSON, YAML, PO o XLIFF.",
         tipTabMarkdown: "Cargar y traducir un archivo Markdown.",
@@ -353,7 +369,6 @@ let languageData = null;
         modelDedicated: "Modelo dedicado para este par de idiomas.",
         modelFallback: "Sin modelo dedicado para este par, se usa el alternativo multilingüe.",
         modelAutoDetect: "Se detecta automáticamente. Los escaneos tardan más; si mezclan dos alfabetos, fija el idioma.",
-        modelDownloaded: "modelo ya descargado",
         autoDetect: "Detección automática",
         memoryPairsFound: "Pares encontrados: {count} / {total}",
         memoryWrongCount: "Errores: {count} / {total}",
@@ -433,6 +448,12 @@ let languageData = null;
         tipReload: "Recharger Linguinator.",
         tipUiLanguage: "Choisir la langue de l'interface.",
         tipTheme: "Basculer entre mode clair et sombre.",
+        models: "Modèles",
+        tipModels: "Afficher les modèles de traduction téléchargés.",
+        modelsEmpty: "Aucun modèle téléchargé pour l'instant.",
+        modelsFallback: "Modèle multilingue de secours",
+        modelsDelete: "Supprimer",
+        modelsConfirm: "Supprimer ce modèle ? Il sera téléchargé à nouveau au prochain besoin.",
         tipTabTextarea: "Saisir le texte directement dans le champ.",
         tipTabText: "Charger et traduire un fichier TXT, ainsi que HTML, SRT, VTT, JSON, YAML, PO ou XLIFF.",
         tipTabMarkdown: "Charger et traduire un fichier Markdown.",
@@ -465,7 +486,6 @@ let languageData = null;
         modelDedicated: "Modèle dédié pour cette paire de langues.",
         modelFallback: "Pas de modèle dédié pour cette paire, utilise le modèle multilingue.",
         modelAutoDetect: "Détectée automatiquement. Les scans prennent plus de temps; si deux écritures se mélangent, choisis la langue.",
-        modelDownloaded: "modèle déjà téléchargé",
         autoDetect: "Détection automatique",
         memoryPairsFound: "Paires trouvées : {count} / {total}",
         memoryWrongCount: "Erreurs : {count} / {total}",
@@ -634,6 +654,7 @@ let languageData = null;
       if (uiLanguage) uiLanguage.value = currentUiLanguage;
       setText(".subtle", "subtitle");
       setText('label[for="uiLanguage"]', "uiLanguage");
+      setText("#modelsButton", "models");
       setText('label[for="source"]', "source");
       setText('label[for="target"]', "target");
       setText('[data-input-tab="textarea"] .tab-label', "textField");
@@ -876,42 +897,72 @@ let languageData = null;
       });
       closeLanguageMenus();
       updateModelQualityHint();
-      updateDownloadedMarks();
     }
 
-    // A model belongs to a language pair, so an entry is marked against whatever the other
-    // picker holds. With the source on auto-detect the pair is unknown and nothing is marked.
-    function pairDownloaded(source, target) {
-      if (!languageData || source === AUTO_LANGUAGE.code || source === target) return false;
-      const has = (pairs) => (pairs || []).some((pair) => pair[0] === source && pair[1] === target);
-      return has(languageData.dedicated_pairs)
-        ? has(languageData.downloaded_pairs) : Boolean(languageData.fallback_downloaded);
-    }
+    const modelsField = document.getElementById("modelsField");
+    const modelsMenu = document.getElementById("modelsMenu");
+    let modelItems = [];
 
-    function updateDownloadedMarks() {
-      const source = document.getElementById("source").value;
-      const target = document.getElementById("target").value;
-      for (const id of ["source", "target"]) {
-        document.querySelectorAll("#" + id + "Menu .language-option").forEach((option) => {
-          const code = option.dataset.code;
-          const downloaded = id === "source" ? pairDownloaded(code, target) : pairDownloaded(source, code);
-          option.classList.toggle("downloaded", downloaded);
-          const title = t("selectLanguage", {language: formatLanguageLabel(code)});
-          option.title = downloaded ? title + " (" + t("modelDownloaded") + ")" : title;
-        });
+    function renderModelsMenu(items, error) {
+      modelItems = items;
+      modelsMenu.innerHTML = "";
+      const note = (text) => {
+        const line = document.createElement("div");
+        line.className = "models-note";
+        line.textContent = text;
+        modelsMenu.appendChild(line);
+      };
+      if (error) note(error);
+      if (!items.length) note(t("modelsEmpty"));
+      for (const item of items) {
+        const row = document.createElement("div");
+        row.className = "models-row";
+        const name = document.createElement("span");
+        name.className = "models-name";
+        name.textContent = item.fallback
+          ? "🌐 " + t("modelsFallback")
+          : formatLanguageLabel(item.source) + " → " + formatLanguageLabel(item.target);
+        const size = document.createElement("span");
+        size.className = "models-size";
+        size.textContent = formatBytes(item.size);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "secondary";
+        button.textContent = t("modelsDelete");
+        button.title = t("modelsDelete") + ": " + name.textContent;
+        button.addEventListener("click", () => deleteModel(item));
+        row.append(name, size, button);
+        modelsMenu.appendChild(row);
       }
     }
 
-    // A finished job may have fetched a model, so the marks are read again without rebuilding
-    // the pickers.
-    async function refreshDownloadedModels() {
-      const response = await fetch("languages");
-      if (!response.ok || !languageData) return;
-      const data = await response.json();
-      languageData.downloaded_pairs = data.downloaded_pairs;
-      languageData.fallback_downloaded = data.fallback_downloaded;
-      updateDownloadedMarks();
+    async function loadModelsMenu() {
+      const response = await fetch("models");
+      if (response.ok) renderModelsMenu((await response.json()).items);
     }
+
+    async function deleteModel(item) {
+      if (!window.confirm(t("modelsConfirm"))) return;
+      const path = item.fallback
+        ? "models/fallback"
+        : "models/" + encodeURIComponent(item.source) + "/" + encodeURIComponent(item.target);
+      const response = await fetch(path, {method: "DELETE"});
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) renderModelsMenu(data.items);
+      else renderModelsMenu(modelItems, data.detail || String(response.status));
+    }
+
+    document.getElementById("modelsButton").addEventListener("click", () => {
+      const open = modelsField.classList.toggle("open");
+      document.getElementById("modelsButton").setAttribute("aria-expanded", String(open));
+      if (open) loadModelsMenu().catch(() => {});
+    });
+    document.addEventListener("click", (event) => {
+      if (!event.target.closest("#modelsField")) {
+        modelsField.classList.remove("open");
+        document.getElementById("modelsButton").setAttribute("aria-expanded", "false");
+      }
+    });
 
     const modelQualityHintElement = document.getElementById("modelQualityHint");
 
@@ -2765,7 +2816,7 @@ let languageData = null;
       }
       if (hasNewlyCompleted) {
         loadHistory();
-        refreshDownloadedModels().catch(() => {});
+        if (modelsField.classList.contains("open")) loadModelsMenu().catch(() => {});
       }
       renderQueueRows();
     }
@@ -2784,6 +2835,10 @@ let languageData = null;
       main.appendChild(document.createElement("div")).className = "queue-title";
       main.appendChild(document.createElement("div")).className = "queue-meta";
       main.appendChild(document.createElement("div")).className = "queue-progress";
+      const download = main.appendChild(document.createElement("div"));
+      download.className = "queue-download hidden";
+      download.setAttribute("role", "progressbar");
+      download.appendChild(document.createElement("div")).className = "queue-download-fill";
       row.appendChild(document.createElement("div")); // ring placeholder, replaced in updateQueueRow
       row.appendChild(main);
       const actions = document.createElement("div");
@@ -2839,6 +2894,15 @@ let languageData = null;
         eta,
         job.message || "",
       ].filter(Boolean).join(" | ");
+      // A model fetched on first use gets a bar of its own, the row keeps counting chunks.
+      const download = row.querySelector(".queue-download");
+      const downloading = job.status === "running" && job.downloading != null;
+      download.classList.toggle("hidden", !downloading);
+      if (downloading) {
+        const share = Math.max(0, Math.min(100, Number(job.downloading) || 0));
+        download.firstChild.style.width = share + "%";
+        download.setAttribute("aria-valuenow", String(Math.round(share)));
+      }
       const cancelButton = row.querySelector(".queue-actions button");
       cancelButton.textContent = t("cancel");
       cancelButton.title = t("cancel");

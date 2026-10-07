@@ -456,11 +456,15 @@ def model_download_size(model_id: str) -> int:
     return next((sizes[name] for name in MODEL_WEIGHT_FILES if sizes.get(name)), 0)
 
 
+def model_cache_dir(model_id: str) -> Path:
+    from huggingface_hub.constants import HF_HUB_CACHE
+    return Path(HF_HUB_CACHE) / ("models--" + model_id.replace("/", "--"))
+
+
 def model_cache_bytes(model_id: str) -> int:
     """What is on disk for a model so far, the unfinished download included."""
-    from huggingface_hub.constants import HF_HUB_CACHE
     total = 0
-    for blob in (Path(HF_HUB_CACHE) / ("models--" + model_id.replace("/", "--")) / "blobs").glob("*"):
+    for blob in (model_cache_dir(model_id) / "blobs").glob("*"):
         try:
             total += blob.stat().st_size
         except OSError:
@@ -498,7 +502,32 @@ def report_model_download(model_id: str):
     finally:
         done.set()
         watcher.join()
-        update_job(job_id, downloading=None, percent=0, message="Loading model")
+        update_job(job_id, downloading=None, message="Loading model")
+
+
+def downloaded_models() -> List[Dict[str, Any]]:
+    """Every model on disk: the fallback first, then the dedicated pairs."""
+    models = []
+    if model_is_downloaded(FALLBACK_MODEL_ID):
+        models.append({"fallback": True, "size": model_cache_bytes(FALLBACK_MODEL_ID)})
+    for key, entry in OPUS_PAIRS.items():
+        source, _, target = key.partition(">")
+        if source in CORE_LANGUAGES and target in CORE_LANGUAGES and model_is_downloaded(entry["model_id"]):
+            models.append({
+                "source": CORE_LANGUAGES[source],
+                "target": CORE_LANGUAGES[target],
+                "size": model_cache_bytes(entry["model_id"]),
+            })
+    return models
+
+
+def delete_downloaded_model(model_id: str) -> None:
+    with JOBS_LOCK:
+        if any(job.get("status") == "running" for job in JOBS.values()):
+            raise HTTPException(status_code=409, detail="A translation is running. Try again when it has finished.")
+    # The model in memory may be this one, and it would be reloaded from files that are gone.
+    unload_model_cache()
+    shutil.rmtree(model_cache_dir(model_id), ignore_errors=True)
 
 
 @lru_cache(maxsize=MODEL_CACHE_SIZE)
@@ -1830,10 +1859,7 @@ def update_job(job_id: str, **values):
         current = job.get("current") or 0
         total = job.get("total") or 0
         started_at = job.get("started_at")
-        if job.get("downloading") is not None:
-            # A model download in front of the first chunk owns the bar until it is done.
-            job["percent"] = job["downloading"]
-        elif total:
+        if total:
             percent = (current / total) * 100
             if job.get("status") == "running" and current >= total:
                 # Every chunk translated, but a PDF job still has to render the result -
@@ -6034,14 +6060,10 @@ def health():
 @app.get("/languages")
 def languages():
     dedicated_pairs = []
-    downloaded_pairs = []
-    for key, entry in OPUS_PAIRS.items():
+    for key in OPUS_PAIRS:
         source, _, target = key.partition(">")
         if source in CORE_LANGUAGES and target in CORE_LANGUAGES:
-            pair = [CORE_LANGUAGES[source], CORE_LANGUAGES[target]]
-            dedicated_pairs.append(pair)
-            if model_is_downloaded(entry["model_id"]):
-                downloaded_pairs.append(pair)
+            dedicated_pairs.append([CORE_LANGUAGES[source], CORE_LANGUAGES[target]])
     return {
         # The picker starts on auto-detect; DEFAULT_SOURCE is only where failed detection lands.
         "source_default": AUTO_SOURCE,
@@ -6050,11 +6072,31 @@ def languages():
         "languages": [{"code": code, "name": code} for code in language_codes()],
         "favorites": FAVORITE_LANGUAGES,
         "dedicated_pairs": dedicated_pairs,
-        # Which models are on disk already: the dedicated pairs among them, and the fallback
-        # every other pair uses.
-        "downloaded_pairs": downloaded_pairs,
-        "fallback_downloaded": model_is_downloaded(FALLBACK_MODEL_ID),
     }
+
+
+@app.get("/models")
+def models():
+    return {"items": downloaded_models()}
+
+
+@app.delete("/models/fallback")
+def delete_fallback_model():
+    delete_downloaded_model(FALLBACK_MODEL_ID)
+    return {"items": downloaded_models()}
+
+
+@app.delete("/models/{source}/{target}")
+def delete_pair_model(source: str, target: str):
+    ensure_known_language(source)
+    ensure_known_language(target)
+    # The id comes from the pair table, never from the request, so nothing outside the model
+    # cache can be named.
+    entry = OPUS_PAIRS.get(f"{iso_639_1(source)}>{iso_639_1(target)}")
+    if not entry:
+        raise HTTPException(status_code=404, detail="No dedicated model for this language pair")
+    delete_downloaded_model(entry["model_id"])
+    return {"items": downloaded_models()}
 
 
 @app.get("/jobs")

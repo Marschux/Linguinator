@@ -3540,7 +3540,7 @@ class MainTests(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir.parent, ignore_errors=True)
 
-    def test_model_download_owns_the_progress_bar_until_it_is_done(self):
+    def test_model_download_is_reported_next_to_the_chunk_progress(self):
         temp_dir = test_temp_dir()
         try:
             with patch.object(main, "JOBS_DIR", temp_dir):
@@ -3557,18 +3557,16 @@ class MainTests(unittest.TestCase):
                             patch.object(main, "model_cache_bytes", return_value=50):
                         with main.report_model_download("some/model"):
                             deadline = time.time() + 5
-                            while not main.get_job(job_id)["percent"] and time.time() < deadline:
+                            while not main.get_job(job_id)["downloading"] and time.time() < deadline:
                                 time.sleep(0.05)
-                            seen.append(main.get_job(job_id)["percent"])
-                            # A chunk update in the meantime must not take the bar back.
-                            main.update_job(job_id, current=0, message="Translating 0 / 10 chunks")
-                            seen.append(main.get_job(job_id)["percent"])
+                            job = main.get_job(job_id)
+                            # The download has a bar of its own, the chunk count is left alone.
+                            seen.append((job["downloading"], job["percent"]))
                 finally:
                     main.ACTIVE_JOB.id = None
 
-                self.assertEqual(seen, [25.0, 25.0])
+                self.assertEqual(seen, [(25.0, 0.0)])
                 self.assertIsNone(main.get_job(job_id)["downloading"])
-                self.assertEqual(main.get_job(job_id)["percent"], 0.0)
 
                 # Outside a job, and for a model that is there already, nothing is reported.
                 with patch.object(main, "model_download_size", side_effect=AssertionError("asked the hub")):
@@ -3577,14 +3575,38 @@ class MainTests(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir.parent, ignore_errors=True)
 
-    def test_languages_route_reports_which_models_are_downloaded(self):
+    def test_models_route_lists_and_deletes_downloaded_models(self):
+        temp_dir = test_temp_dir()
         pair_model = main.OPUS_PAIRS["en>de"]["model_id"]
-        with patch.object(main, "model_is_downloaded", side_effect=lambda model_id: model_id == pair_model):
-            payload = TestClient(main.app).get("/languages").json()
+        cache_dir = lambda model_id: temp_dir / model_id.replace("/", "--")
+        (cache_dir(pair_model) / "blobs").mkdir(parents=True)
+        (cache_dir(pair_model) / "blobs" / "weights").write_bytes(b"x" * 10)
+        client = TestClient(main.app)
+        try:
+            with patch.object(main, "JOBS_DIR", temp_dir / "jobs"), \
+                    patch.object(main, "model_cache_dir", side_effect=cache_dir), \
+                    patch.object(main, "model_is_downloaded", side_effect=lambda model_id: cache_dir(model_id).exists()):
+                with main.JOBS_LOCK:
+                    main.JOBS.clear()
+                    main.JOB_RUNNERS.clear()
+                self.assertEqual(
+                    client.get("/models").json(),
+                    {"items": [{"source": "eng_Latn", "target": "deu_Latn", "size": 10}]},
+                )
+                # Not a language code, and a pair that only ever uses the fallback.
+                self.assertEqual(client.delete("/models/..--etc/deu_Latn").status_code, 400)
+                self.assertEqual(client.delete("/models/lat_Latn/fin_Latn").status_code, 404)
 
-        self.assertIn(["eng_Latn", "deu_Latn"], payload["downloaded_pairs"])
-        self.assertTrue(all(pair in payload["dedicated_pairs"] for pair in payload["downloaded_pairs"]))
-        self.assertFalse(payload["fallback_downloaded"])
+                job_id = main.create_job("translate", "eng_Latn", "deu_Latn", "text")
+                main.update_job(job_id, status="running")
+                self.assertEqual(client.delete("/models/eng_Latn/deu_Latn").status_code, 409)
+                self.assertTrue(cache_dir(pair_model).exists())
+
+                main.update_job(job_id, status="complete")
+                self.assertEqual(client.delete("/models/eng_Latn/deu_Latn").json(), {"items": []})
+                self.assertFalse(cache_dir(pair_model).exists())
+        finally:
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
 
     def test_update_job_caps_percent_below_complete_while_still_running(self):
         temp_dir = test_temp_dir()
