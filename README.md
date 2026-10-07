@@ -11,6 +11,15 @@ Local document translation workbench powered by OPUS-MT.
 Open `http://localhost:5051/` (or your configured `LINGUINATOR_PORT`/reverse-proxy URL) once the
 container is running.
 
+## System requirements
+
+- Docker with Compose on an x86-64 host. The published image is built for `linux/amd64` only.
+- Internet access the first time a language pair is used: its model is downloaded from Hugging
+  Face into the `hf-cache` volume, roughly 0.3 to 1 GB per model.
+- Enough memory for one model at a time. The fallback model's weights are about 1 GB, and it is
+  unloaded again after `LINGUINATOR_MODEL_IDLE_SECONDS` without a job.
+- No GPU needed, translation runs on the CPU.
+
 ## Installation with Docker
 
 1. Clone the repository and switch into its directory.
