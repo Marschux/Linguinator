@@ -66,10 +66,12 @@ MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
 MAX_ZIP_UNCOMPRESSED_BYTES = MAX_FILE_BYTES * 10
 # In hours, because a day is a coarse setting for a workbench whose history is a convenience,
 # not an archive. LINGUINATOR_HISTORY_DAYS is still read where the new one is unset, so an
-# existing .env does not silently start meaning something else.
-HISTORY_HOURS = int(env_value("LINGUINATOR_HISTORY_HOURS", "")
-                    or int(env_value("LINGUINATOR_HISTORY_DAYS", "0") or 0) * 24
-                    or 24)
+# existing .env does not silently start meaning something else. "none" keeps history for good.
+HISTORY_HOURS: Optional[int] = None
+if env_value("LINGUINATOR_HISTORY_HOURS", "").strip().lower() != "none":
+    HISTORY_HOURS = int(env_value("LINGUINATOR_HISTORY_HOURS", "")
+                        or int(env_value("LINGUINATOR_HISTORY_DAYS", "0") or 0) * 24
+                        or 24)
 # Fixed, because the compose volume is mounted here: a different path would write into the
 # container filesystem and be gone with the next restart.
 HISTORY_DIR = Path("/data/history")
@@ -1560,6 +1562,8 @@ def cleanup_history():
     half-deleted entry from an earlier pass finally disappears.
     """
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    if HISTORY_HOURS is None:
+        return
     cutoff = time.time() - (HISTORY_HOURS * 3600)
     expired = {path.name[:-len(".json")] for path in HISTORY_DIR.glob("*.json")
                if path.stat().st_mtime < cutoff}

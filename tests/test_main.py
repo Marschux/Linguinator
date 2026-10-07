@@ -3332,6 +3332,20 @@ class MainTests(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir.parent, ignore_errors=True)
 
+    def test_cleanup_history_keeps_everything_when_retention_is_none(self):
+        temp_dir = test_temp_dir()
+        try:
+            old_file = temp_dir / "old.md"
+            old_file.write_text("old", encoding="utf-8")
+            os.utime(old_file, (0, 0))
+
+            with patch.object(main, "HISTORY_DIR", temp_dir), patch.object(main, "HISTORY_HOURS", None):
+                main.cleanup_history()
+
+            self.assertTrue(old_file.exists())
+        finally:
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
     def test_history_items_include_file_size(self):
         temp_dir = test_temp_dir()
         try:
