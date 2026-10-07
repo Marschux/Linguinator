@@ -96,12 +96,14 @@ let languageData = null;
         tipReload: "Reload Linguinator.",
         tipUiLanguage: "Select the interface language.",
         tipTheme: "Toggle light/dark mode.",
-        models: "Models",
-        tipModels: "Show the downloaded translation models.",
-        modelsEmpty: "No models downloaded yet.",
-        modelsFallback: "Multilingual fallback",
-        modelsDelete: "Delete",
+        legendSource: "✓ = the model for translating into {language} is already downloaded.",
+        legendTarget: "✓ = the model for translating from {language} is already downloaded.",
+        legendAuto: "Choose a source language to see which models are already downloaded.",
+        modelReady: "Already downloaded.",
+        modelNotReady: "Downloaded on first use.",
+        modelsDelete: "Delete the downloaded model",
         modelsConfirm: "Delete this model? It is downloaded again the next time it is needed.",
+        modelsConfirmFallback: "Delete the multilingual fallback model? It serves every language pair without a model of its own and is downloaded again the next time it is needed.",
         tipTabTextarea: "Type text directly into the input field.",
         tipTabText: "Load and translate a TXT file, and also HTML, SRT, VTT, JSON, YAML, PO or XLIFF.",
         tipTabMarkdown: "Load and translate a Markdown file.",
@@ -211,12 +213,14 @@ let languageData = null;
         tipReload: "Linguinator neu laden.",
         tipUiLanguage: "Sprache der Oberfläche wählen.",
         tipTheme: "Zwischen hell und dunkel wechseln.",
-        models: "Modelle",
-        tipModels: "Heruntergeladene Übersetzungsmodelle anzeigen.",
-        modelsEmpty: "Noch keine Modelle heruntergeladen.",
-        modelsFallback: "Mehrsprachiges Fallback-Modell",
-        modelsDelete: "Löschen",
+        legendSource: "✓ = das Modell für die Übersetzung nach {language} ist schon heruntergeladen.",
+        legendTarget: "✓ = das Modell für die Übersetzung aus {language} ist schon heruntergeladen.",
+        legendAuto: "Quellsprache wählen, um zu sehen, welche Modelle schon heruntergeladen sind.",
+        modelReady: "Bereits heruntergeladen.",
+        modelNotReady: "Wird beim ersten Gebrauch heruntergeladen.",
+        modelsDelete: "Heruntergeladenes Modell löschen",
         modelsConfirm: "Dieses Modell löschen? Es wird beim nächsten Gebrauch neu heruntergeladen.",
+        modelsConfirmFallback: "Das mehrsprachige Fallback-Modell löschen? Es bedient alle Sprachpaare ohne eigenes Modell und wird beim nächsten Gebrauch neu heruntergeladen.",
         tipTabTextarea: "Text direkt ins Eingabefeld tippen.",
         tipTabText: "TXT-Datei laden und übersetzen, ebenso HTML, SRT, VTT, JSON, YAML, PO oder XLIFF.",
         tipTabMarkdown: "Markdown-Datei laden und übersetzen.",
@@ -326,12 +330,14 @@ let languageData = null;
         tipReload: "Recargar Linguinator.",
         tipUiLanguage: "Elegir el idioma de la interfaz.",
         tipTheme: "Cambiar entre modo claro y oscuro.",
-        models: "Modelos",
-        tipModels: "Mostrar los modelos de traducción descargados.",
-        modelsEmpty: "Aún no hay modelos descargados.",
-        modelsFallback: "Modelo multilingüe de reserva",
-        modelsDelete: "Eliminar",
+        legendSource: "✓ = el modelo para traducir a {language} ya está descargado.",
+        legendTarget: "✓ = el modelo para traducir desde {language} ya está descargado.",
+        legendAuto: "Elige un idioma de origen para ver qué modelos ya están descargados.",
+        modelReady: "Ya descargado.",
+        modelNotReady: "Se descarga en el primer uso.",
+        modelsDelete: "Eliminar el modelo descargado",
         modelsConfirm: "¿Eliminar este modelo? Se descargará de nuevo cuando haga falta.",
+        modelsConfirmFallback: "¿Eliminar el modelo multilingüe de reserva? Sirve a todos los pares sin modelo propio y se descargará de nuevo cuando haga falta.",
         tipTabTextarea: "Escribir texto directamente en el campo.",
         tipTabText: "Cargar y traducir un archivo TXT, también HTML, SRT, VTT, JSON, YAML, PO o XLIFF.",
         tipTabMarkdown: "Cargar y traducir un archivo Markdown.",
@@ -441,12 +447,14 @@ let languageData = null;
         tipReload: "Recharger Linguinator.",
         tipUiLanguage: "Choisir la langue de l'interface.",
         tipTheme: "Basculer entre mode clair et sombre.",
-        models: "Modèles",
-        tipModels: "Afficher les modèles de traduction téléchargés.",
-        modelsEmpty: "Aucun modèle téléchargé pour l'instant.",
-        modelsFallback: "Modèle multilingue de secours",
-        modelsDelete: "Supprimer",
+        legendSource: "✓ = le modèle pour traduire vers {language} est déjà téléchargé.",
+        legendTarget: "✓ = le modèle pour traduire depuis {language} est déjà téléchargé.",
+        legendAuto: "Choisis une langue source pour voir quels modèles sont déjà téléchargés.",
+        modelReady: "Déjà téléchargé.",
+        modelNotReady: "Téléchargé à la première utilisation.",
+        modelsDelete: "Supprimer le modèle téléchargé",
         modelsConfirm: "Supprimer ce modèle ? Il sera téléchargé à nouveau au prochain besoin.",
+        modelsConfirmFallback: "Supprimer le modèle multilingue de secours ? Il sert toutes les paires sans modèle dédié et sera téléchargé à nouveau au prochain besoin.",
         tipTabTextarea: "Saisir le texte directement dans le champ.",
         tipTabText: "Charger et traduire un fichier TXT, ainsi que HTML, SRT, VTT, JSON, YAML, PO ou XLIFF.",
         tipTabMarkdown: "Charger et traduire un fichier Markdown.",
@@ -646,7 +654,6 @@ let languageData = null;
       if (uiLanguage) uiLanguage.value = currentUiLanguage;
       setText(".subtle", "subtitle");
       setText('label[for="uiLanguage"]', "uiLanguage");
-      setText("#modelsButton", "models");
       setText('label[for="source"]', "source");
       setText('label[for="target"]', "target");
       setText('[data-input-tab="textarea"] .tab-label', "textField");
@@ -887,72 +894,69 @@ let languageData = null;
       });
       closeLanguageMenus();
       updateModelQualityHint();
+      updateDownloadedMarks();
     }
 
-    const modelsField = document.getElementById("modelsField");
-    const modelsMenu = document.getElementById("modelsMenu");
-    let modelItems = [];
+    // A model belongs to a language pair, so a language is marked against whatever the other
+    // picker holds. The line at the top of each menu says which language that is.
+    function pairIsDedicated(source, target) {
+      return ((languageData && languageData.dedicated_pairs) || [])
+        .some((pair) => pair[0] === source && pair[1] === target);
+    }
 
-    function renderModelsMenu(items, error) {
-      modelItems = items;
-      modelsMenu.innerHTML = "";
-      const note = (text) => {
-        const line = document.createElement("div");
-        line.className = "models-note";
-        line.textContent = text;
-        modelsMenu.appendChild(line);
-      };
-      if (error) note(error);
-      if (!items.length) note(t("modelsEmpty"));
-      for (const item of items) {
-        const row = document.createElement("div");
-        row.className = "models-row";
-        const name = document.createElement("span");
-        name.className = "models-name";
-        name.textContent = item.fallback
-          ? "🌐 " + t("modelsFallback")
-          : formatLanguageLabel(item.source) + " → " + formatLanguageLabel(item.target);
-        const size = document.createElement("span");
-        size.className = "models-size";
-        size.textContent = formatBytes(item.size);
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "secondary";
-        button.textContent = t("modelsDelete");
-        button.title = t("modelsDelete") + ": " + name.textContent;
-        button.addEventListener("click", () => deleteModel(item));
-        row.append(name, size, button);
-        modelsMenu.appendChild(row);
+    function pairDownloaded(source, target) {
+      if (!languageData || source === AUTO_LANGUAGE.code || source === target) return false;
+      if (!pairIsDedicated(source, target)) return Boolean(languageData.fallback_downloaded);
+      return (languageData.downloaded_pairs || []).some((pair) => pair[0] === source && pair[1] === target);
+    }
+
+    function updateDownloadedMarks() {
+      const source = document.getElementById("source").value;
+      const target = document.getElementById("target").value;
+      for (const id of ["source", "target"]) {
+        const menu = document.getElementById(id + "Menu");
+        const legend = menu.querySelector(".language-legend");
+        if (legend) {
+          if (id === "source") legend.textContent = t("legendSource", {language: formatLanguageLabel(target)});
+          else if (source === AUTO_LANGUAGE.code) legend.textContent = t("legendAuto");
+          else legend.textContent = t("legendTarget", {language: formatLanguageLabel(source)});
+        }
+        menu.querySelectorAll(".language-option").forEach((option) => {
+          const code = option.dataset.code;
+          option.classList.toggle(
+            "downloaded", id === "source" ? pairDownloaded(code, target) : pairDownloaded(source, code));
+        });
       }
     }
 
-    async function loadModelsMenu() {
-      const response = await fetch("models");
-      if (response.ok) renderModelsMenu((await response.json()).items);
+    function applyDownloadedState(data) {
+      languageData.downloaded_pairs = data.downloaded_pairs;
+      languageData.fallback_downloaded = data.fallback_downloaded;
+      updateDownloadedMarks();
+      updateModelQualityHint();
     }
 
-    async function deleteModel(item) {
-      if (!window.confirm(t("modelsConfirm"))) return;
-      const path = item.fallback
-        ? "models/fallback"
-        : "models/" + encodeURIComponent(item.source) + "/" + encodeURIComponent(item.target);
+    // A finished job may have fetched a model, so the marks are read again without rebuilding
+    // the pickers.
+    async function refreshDownloadedModels() {
+      const response = await fetch("languages");
+      if (response.ok && languageData) applyDownloadedState(await response.json());
+    }
+
+    // The model for the selected source and the given target. A pair without a model of its own
+    // runs on the fallback, so deleting there removes the fallback.
+    async function deleteModel(target) {
+      const source = document.getElementById("source").value;
+      const dedicated = pairIsDedicated(source, target);
+      if (!window.confirm(t(dedicated ? "modelsConfirm" : "modelsConfirmFallback"))) return;
+      const path = dedicated
+        ? "models/" + encodeURIComponent(source) + "/" + encodeURIComponent(target)
+        : "models/fallback";
       const response = await fetch(path, {method: "DELETE"});
       const data = await response.json().catch(() => ({}));
-      if (response.ok) renderModelsMenu(data.items);
-      else renderModelsMenu(modelItems, data.detail || String(response.status));
+      if (response.ok) applyDownloadedState(data);
+      else window.alert(data.detail || String(response.status));
     }
-
-    document.getElementById("modelsButton").addEventListener("click", () => {
-      const open = modelsField.classList.toggle("open");
-      document.getElementById("modelsButton").setAttribute("aria-expanded", String(open));
-      if (open) loadModelsMenu().catch(() => {});
-    });
-    document.addEventListener("click", (event) => {
-      if (!event.target.closest("#modelsField")) {
-        modelsField.classList.remove("open");
-        document.getElementById("modelsButton").setAttribute("aria-expanded", "false");
-      }
-    });
 
     const modelQualityHintElement = document.getElementById("modelQualityHint");
 
@@ -970,6 +974,9 @@ let languageData = null;
       }
       const dedicated = pairs.some((pair) => pair[0] === source && pair[1] === target);
       hint.textContent = t(dedicated ? "modelDedicated" : "modelFallback");
+      if (source !== target) {
+        hint.textContent += " " + t(pairDownloaded(source, target) ? "modelReady" : "modelNotReady");
+      }
       hint.classList.toggle("hint-dedicated", dedicated);
       hint.classList.toggle("hint-fallback", !dedicated);
     }
@@ -994,7 +1001,32 @@ let languageData = null;
       option.title = t("selectLanguage", {language: label});
       option.innerHTML =
         '<span class="language-name">' + escapeHtml(label) + '</span>' +
+        '<span class="language-ready" aria-hidden="true">✓</span>' +
         '<span class="language-code">' + escapeHtml(language.code) + '</span>';
+      // Only where a model is picked by its target: the bin deletes the model for the selected
+      // source and this language. A span, because a button cannot sit inside a button.
+      if (id === "target") {
+        const remove = document.createElement("span");
+        remove.className = "language-delete";
+        remove.setAttribute("role", "button");
+        remove.tabIndex = 0;
+        remove.title = t("modelsDelete");
+        remove.setAttribute("aria-label", t("modelsDelete") + ": " + label);
+        remove.innerHTML =
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>' +
+          '</svg>';
+        const run = (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          deleteModel(language.code);
+        };
+        remove.addEventListener("click", run);
+        remove.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") run(event);
+        });
+        option.insertBefore(remove, option.lastChild);
+      }
       option.classList.toggle("active", language.code === selectedValue);
       option.addEventListener("click", () => {
         setPickerValue(id, language.code);
@@ -1038,6 +1070,7 @@ let languageData = null;
       search.addEventListener("click", (event) => event.stopPropagation());
       search.addEventListener("input", () => filterLanguageMenu(menu, search.value));
       menu.appendChild(search);
+      menu.appendChild(document.createElement("div")).className = "language-legend";
 
       addLanguageGroup(menu, t("favorites"));
       for (const language of favorites) {
@@ -1072,7 +1105,7 @@ let languageData = null;
       let currentGroup = null;
       let currentGroupHasMatch = false;
       for (const child of menu.children) {
-        if (child.classList.contains("language-search")) continue;
+        if (child.classList.contains("language-search") || child.classList.contains("language-legend")) continue;
         if (child.classList.contains("language-divider")) {
           child.classList.toggle("hidden", Boolean(normalized));
           continue;
@@ -2806,7 +2839,7 @@ let languageData = null;
       }
       if (hasNewlyCompleted) {
         loadHistory();
-        if (modelsField.classList.contains("open")) loadModelsMenu().catch(() => {});
+        refreshDownloadedModels().catch(() => {});
       }
       renderQueueRows();
     }

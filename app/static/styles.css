@@ -321,30 +321,6 @@
 
     .language-field.open .language-menu { display: block; }
 
-    .models-field { position: relative; }
-    .models-menu {
-      background: var(--panel-soft);
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      box-shadow: 0 20px 50px rgba(0, 0, 0, .45);
-      display: none;
-      max-height: 50vh;
-      max-width: calc(100vw - 2rem);
-      min-width: 21rem;
-      overflow-y: auto;
-      padding: .35rem;
-      position: absolute;
-      right: 0;
-      top: calc(100% + .35rem);
-      z-index: 20;
-    }
-    .models-field.open .models-menu { display: block; }
-    .models-row { align-items: center; display: flex; gap: .75rem; padding: .3rem .45rem; }
-    .models-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-    .models-size,
-    .models-note { color: var(--muted); font-size: .85rem; }
-    .models-size { white-space: nowrap; }
-    .models-note { padding: .45rem; }
 
     .language-search {
       background: var(--panel-soft);
@@ -379,7 +355,21 @@
       width: 100%;
     }
 
-    .language-name { min-width: 0; overflow-wrap: anywhere; }
+    .language-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+    .language-legend { color: var(--muted); font-size: .78rem; padding: .4rem .55rem .2rem; }
+    .language-ready,
+    .language-delete { display: none; }
+    .language-option.downloaded .language-ready { color: var(--ok-text); display: inline; }
+    .language-option.downloaded .language-delete {
+      align-items: center;
+      border-radius: 6px;
+      color: var(--muted);
+      display: inline-flex;
+      padding: .2rem;
+    }
+    .language-delete:hover,
+    .language-delete:focus-visible { background: rgba(239, 68, 68, .2); color: var(--text); }
+    .language-delete svg { height: 1rem; width: 1rem; }
     .language-code { color: var(--muted); font-size: .78rem; white-space: nowrap; }
 
     .language-option:hover,
@@ -945,7 +935,6 @@
       }
 
       .header-controls { width: 100%; }
-      .models-menu { left: 0; min-width: 0; right: auto; width: calc(100vw - 2rem); }
 
       h1 { font-size: 2rem; }
       .subtle { font-size: .92rem; }

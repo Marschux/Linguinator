@@ -507,20 +507,15 @@ def report_model_download(model_id: str):
         update_job(job_id, downloading=None, message="Loading model")
 
 
-def downloaded_models() -> List[Dict[str, Any]]:
-    """Every model on disk: the fallback first, then the dedicated pairs."""
-    models = []
-    if model_is_downloaded(FALLBACK_MODEL_ID):
-        models.append({"fallback": True, "size": model_cache_bytes(FALLBACK_MODEL_ID)})
+def downloaded_state() -> Dict[str, Any]:
+    """Which models are on disk: the dedicated pairs among them, and the fallback every other
+    pair uses."""
+    pairs = []
     for key, entry in OPUS_PAIRS.items():
         source, _, target = key.partition(">")
         if source in CORE_LANGUAGES and target in CORE_LANGUAGES and model_is_downloaded(entry["model_id"]):
-            models.append({
-                "source": CORE_LANGUAGES[source],
-                "target": CORE_LANGUAGES[target],
-                "size": model_cache_bytes(entry["model_id"]),
-            })
-    return models
+            pairs.append([CORE_LANGUAGES[source], CORE_LANGUAGES[target]])
+    return {"downloaded_pairs": pairs, "fallback_downloaded": model_is_downloaded(FALLBACK_MODEL_ID)}
 
 
 def delete_downloaded_model(model_id: str) -> None:
@@ -6076,18 +6071,14 @@ def languages():
         "languages": [{"code": code, "name": code} for code in language_codes()],
         "favorites": FAVORITE_LANGUAGES,
         "dedicated_pairs": dedicated_pairs,
+        **downloaded_state(),
     }
-
-
-@app.get("/models")
-def models():
-    return {"items": downloaded_models()}
 
 
 @app.delete("/models/fallback")
 def delete_fallback_model():
     delete_downloaded_model(FALLBACK_MODEL_ID)
-    return {"items": downloaded_models()}
+    return downloaded_state()
 
 
 @app.delete("/models/{source}/{target}")
@@ -6100,7 +6091,7 @@ def delete_pair_model(source: str, target: str):
     if not entry:
         raise HTTPException(status_code=404, detail="No dedicated model for this language pair")
     delete_downloaded_model(entry["model_id"])
-    return {"items": downloaded_models()}
+    return downloaded_state()
 
 
 @app.get("/jobs")

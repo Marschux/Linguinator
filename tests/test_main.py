@@ -3589,7 +3589,7 @@ class MainTests(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir.parent, ignore_errors=True)
 
-    def test_models_route_lists_and_deletes_downloaded_models(self):
+    def test_downloaded_models_are_listed_and_can_be_deleted(self):
         temp_dir = test_temp_dir()
         pair_model = main.OPUS_PAIRS["en>de"]["model_id"]
         cache_dir = lambda model_id: temp_dir / model_id.replace("/", "--")
@@ -3603,10 +3603,9 @@ class MainTests(unittest.TestCase):
                 with main.JOBS_LOCK:
                     main.JOBS.clear()
                     main.JOB_RUNNERS.clear()
-                self.assertEqual(
-                    client.get("/models").json(),
-                    {"items": [{"source": "eng_Latn", "target": "deu_Latn", "size": 10}]},
-                )
+                listed = client.get("/languages").json()
+                self.assertEqual(listed["downloaded_pairs"], [["eng_Latn", "deu_Latn"]])
+                self.assertFalse(listed["fallback_downloaded"])
                 # Not a language code, and a pair that only ever uses the fallback.
                 self.assertEqual(client.delete("/models/..--etc/deu_Latn").status_code, 400)
                 self.assertEqual(client.delete("/models/lat_Latn/fin_Latn").status_code, 404)
@@ -3617,7 +3616,10 @@ class MainTests(unittest.TestCase):
                 self.assertTrue(cache_dir(pair_model).exists())
 
                 main.update_job(job_id, status="complete")
-                self.assertEqual(client.delete("/models/eng_Latn/deu_Latn").json(), {"items": []})
+                self.assertEqual(
+                    client.delete("/models/eng_Latn/deu_Latn").json(),
+                    {"downloaded_pairs": [], "fallback_downloaded": False},
+                )
                 self.assertFalse(cache_dir(pair_model).exists())
         finally:
             shutil.rmtree(temp_dir.parent, ignore_errors=True)
