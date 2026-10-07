@@ -40,11 +40,9 @@ append `--build` to the `up` command.
 ## Languages
 
 English, German, French, Spanish, Italian, Dutch, Portuguese, Polish, Russian, Ukrainian, Swedish,
-Danish, Finnish, Greek, Hungarian, Bulgarian, Chinese, Japanese, Turkish, Latin — any pair works.
+Danish, Finnish, Greek, Hungarian, Bulgarian, Chinese, Japanese, Turkish and Latin. Any pair works.
 Pairs with a dedicated bilingual model (`app/opus_pairs.json`, ~170 pairs, shown per selection in
 the UI and via `/languages`) translate better than the multilingual fallback the rest use.
-
-
 
 ![Job history](docs/screenshot-history.png)
 
@@ -114,7 +112,7 @@ decisions were reviewed by the maintainer.
 
 ## Links
 
-- [Wiki](https://github.com/Marschux/Linguinator/wiki) — API reference, environment
+- [Wiki](https://github.com/Marschux/Linguinator/wiki): API reference, environment
   variables, where data is stored.
 - [Issues](https://github.com/Marschux/Linguinator/issues)
 - [Container registry](https://github.com/Marschux/Linguinator/pkgs/container/linguinator)

@@ -1472,7 +1472,7 @@ def cleanup_history():
     cutoff = time.time() - (HISTORY_HOURS * 3600)
     expired = {path.name[:-len(".json")] for path in HISTORY_DIR.glob("*.json")
                if path.stat().st_mtime < cutoff}
-    # ponytail: entries x files per pass, fine at the few hundred a retention window holds.
+    # Entries x files per pass, fine at the few hundred a retention window holds.
     for path in HISTORY_DIR.iterdir():
         if not path.is_file():
             continue
@@ -2687,11 +2687,11 @@ def pdf_page_runs(page, rules: Optional[List[Dict[str, float]]] = None,
     widget's original value, see pdf_page_widget_values.
     """
     runs: List[Dict[str, Any]] = []
-    # ponytail: O(runs^2) per page, a few hundred runs at most; index by row if a page ever
+    # O(runs^2) per page, a few hundred runs at most; index by row if a page ever
     # shows up where it isn't.
     boxes: List[Any] = []
     inverse = ~pdf_page_flip_matrix(page)
-    # ponytail: rawdict carries a dict per character, heavier than dict on long documents;
+    # Rawdict carries a dict per character, heavier than dict on long documents;
     # narrow it to pages that hold right-to-left text if extraction ever shows up in a profile.
     for block in page.get_text("rawdict")["blocks"]:
         for line in block.get("lines", []):
@@ -3409,7 +3409,7 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
             # that same frame - /Rotate is left on the merged page for the viewer to apply once, to
             # both the kept original content and the overlay together.
             box = page.mediabox
-            # ponytail: AcroForm widgets keep their original text on a rotated page - widget.rect's
+            # AcroForm widgets keep their original text on a rotated page - widget.rect's
             # own rotation convention isn't verified against pdf_page_flip_matrix yet, and a rotated
             # scan with a text field is a narrow case. Lift this once that's checked.
             rotated = page.rotation % 360 != 0
@@ -3565,7 +3565,7 @@ def paragraph_floor(paragraph: Dict[str, Any], others: List[Dict[str, Any]],
     shrinking it instead left the last paragraph of a column visibly smaller than the ones
     above it.
     """
-    # ponytail: O(paragraphs^2) per page, fine at the few dozen a page holds; index by column if
+    # O(paragraphs^2) per page, fine at the few dozen a page holds; index by column if
     # a document ever shows up where it isn't.
     left = min(line["x"] for line in paragraph["lines"])
     right = max(line["right"] for line in paragraph["lines"])
@@ -4129,7 +4129,7 @@ def level_table_sizes(paragraphs: List[Dict[str, Any]], bases: List[float], targ
     - the same left edge one above the other, which joins the rows of a table into the table. Only
       between paragraphs that are cells to begin with, so ordinary body text is never caught.
     """
-    # ponytail: O(n²) pairwise comparison over a page's paragraphs, switch to a spatial index if a
+    # O(n²) pairwise comparison over a page's paragraphs, switch to a spatial index if a
     # document's tables ever make this the bottleneck.
     count = len(paragraphs)
     extent = [(min(line["x"] for line in item["lines"]),
