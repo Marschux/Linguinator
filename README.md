@@ -17,7 +17,7 @@ container is running.
 |---|---|
 | Platform | Docker with Compose, x86-64 (`linux/amd64`) |
 | CPU | Any, no GPU needed |
-| Memory | One model loaded at a time, up to about 1 GB |
+| Memory | 4 GB recommended |
 | Disk | 0.3 to 1 GB per downloaded model |
 | Network | Only for the first use of a language pair (model download) |
 
