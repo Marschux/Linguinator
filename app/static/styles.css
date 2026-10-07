@@ -563,18 +563,6 @@
       30%, 50%, 70% { transform: translateX(-5px); }
       40%, 60% { transform: translateX(5px); }
     }
-    /* Pause/Resume/Stop pack together on the left, Reset sits apart on the right (the auto
-       margin) - it deletes data, so it does not belong in the same cluster a misclick could
-       land in. */
-    .reset-history { display: flex; align-items: center; gap: .6rem; margin-left: auto; }
-    .history-select-all {
-      display: flex;
-      align-items: center;
-      gap: .4rem;
-      font-size: .85rem;
-      white-space: nowrap;
-      cursor: pointer;
-    }
     .tabs {
       /* A grid, not a flex row: every tab keeps the same width, including the ones on a second
          line. Flex made the last line stretch its few items across the full width. */
@@ -893,13 +881,9 @@
       text-align: center;
     }
 
-    /* Swaps the tick for a checkbox while deleting is in progress, same slot either way. */
-    .history-select { display: none; flex: 0 0 2.6rem; margin: 0 auto; }
-    #history.selecting .history-tick { display: none; }
-    #history.selecting .history-select { display: block; }
-    #history.selecting .history-row { cursor: pointer; }
-
     .history-main { min-width: 0; flex: 1 1 auto; }
+    .history-delete { align-items: center; display: inline-flex; padding: .45rem .55rem; }
+    .history-delete svg { height: 1.1rem; width: 1.1rem; }
     .history-meta { color: var(--muted); font-size: .85rem; margin-top: .15rem; overflow-wrap: anywhere; }
     .history-actions {
       align-items: center;

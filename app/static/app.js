@@ -49,9 +49,8 @@ let languageData = null;
         resume: "Resume",
         stop: "Stop",
         cancel: "Cancel",
-        historySelect: "Select",
-        historySelectAll: "Select all",
-        historyDeleteCount: "Delete ({count})",
+        historyDelete: "Delete",
+        historyDeleteConfirm: "Delete this translation and its files?",
         history: "History",
         noHistory: "No saved translations yet.",
         noHistoryMatch: "No history entries match this filter.",
@@ -126,7 +125,6 @@ let languageData = null;
         tipPause: "Pause the entire queue.",
         tipResume: "Resume the entire queue.",
         tipStop: "Cancel the entire queue.",
-        tipHistoryReset: "Select history entries to delete.",
         tipHistoryToggle: "Show or hide the history list.",
         tipHistoryFilter: "Filter history by filename or languages.",
         tipPrevPage: "Previous page.",
@@ -166,9 +164,8 @@ let languageData = null;
         resume: "Fortsetzen",
         stop: "Stoppen",
         cancel: "Abbrechen",
-        historySelect: "Auswählen",
-        historySelectAll: "Alle auswählen",
-        historyDeleteCount: "Löschen ({count})",
+        historyDelete: "Löschen",
+        historyDeleteConfirm: "Diese Übersetzung und ihre Dateien löschen?",
         history: "Verlauf",
         noHistory: "Noch keine gespeicherten Übersetzungen.",
         noHistoryMatch: "Kein Verlaufseintrag passt zu diesem Filter.",
@@ -243,7 +240,6 @@ let languageData = null;
         tipPause: "Gesamte Warteschlange pausieren.",
         tipResume: "Gesamte Warteschlange fortsetzen.",
         tipStop: "Gesamte Warteschlange abbrechen.",
-        tipHistoryReset: "Verlaufseinträge zum Löschen auswählen.",
         tipHistoryToggle: "Verlauf ein- oder ausklappen.",
         tipHistoryFilter: "Verlauf nach Dateiname oder Sprachen filtern.",
         tipPrevPage: "Vorherige Seite.",
@@ -283,9 +279,8 @@ let languageData = null;
         resume: "Continuar",
         stop: "Detener",
         cancel: "Cancelar",
-        historySelect: "Seleccionar",
-        historySelectAll: "Seleccionar todo",
-        historyDeleteCount: "Eliminar ({count})",
+        historyDelete: "Eliminar",
+        historyDeleteConfirm: "¿Eliminar esta traducción y sus archivos?",
         history: "Historial",
         noHistory: "Aún no hay traducciones guardadas.",
         noHistoryMatch: "Ningún elemento del historial coincide con este filtro.",
@@ -360,7 +355,6 @@ let languageData = null;
         tipPause: "Pausar toda la cola.",
         tipResume: "Continuar toda la cola.",
         tipStop: "Cancelar toda la cola.",
-        tipHistoryReset: "Selecciona entradas del historial para eliminar.",
         tipHistoryToggle: "Mostrar u ocultar el historial.",
         tipHistoryFilter: "Filtrar el historial por nombre o idiomas.",
         tipPrevPage: "Página anterior.",
@@ -400,9 +394,8 @@ let languageData = null;
         resume: "Reprendre",
         stop: "Arrêter",
         cancel: "Annuler",
-        historySelect: "Sélectionner",
-        historySelectAll: "Tout sélectionner",
-        historyDeleteCount: "Supprimer ({count})",
+        historyDelete: "Supprimer",
+        historyDeleteConfirm: "Supprimer cette traduction et ses fichiers ?",
         history: "Historique",
         noHistory: "Aucune traduction enregistrée.",
         noHistoryMatch: "Aucun élément de l'historique ne correspond à ce filtre.",
@@ -477,7 +470,6 @@ let languageData = null;
         tipPause: "Mettre toute la file en pause.",
         tipResume: "Reprendre toute la file.",
         tipStop: "Annuler toute la file.",
-        tipHistoryReset: "Sélectionner des entrées de l'historique à supprimer.",
         tipHistoryToggle: "Afficher ou masquer l'historique.",
         tipHistoryFilter: "Filtrer l'historique par nom ou langues.",
         tipPrevPage: "Page précédente.",
@@ -671,8 +663,6 @@ let languageData = null;
       setText("#pauseJob", "pause");
       setText("#resumeJob", "resume");
       setText("#stopJob", "stop");
-      updateHistoryDeleteButton();
-      setText("#historySelectAllLabel span", "historySelectAll");
       setText('label[for="history"]', "history");
       setTitle("#uiLanguage", "uiLanguage");
       for (const element of document.querySelectorAll("[data-title-key]")) {
@@ -3189,70 +3179,11 @@ let languageData = null;
       return (bytes / 1024 / 1024).toFixed(1) + " MB";
     }
 
-    // Picking entries to delete, rather than "keep the N most recent": the button doubles as the
-    // mode switch (Select -> Delete (N) / Cancel) so there is no separate popover to open, close
-    // or click outside of.
-    let historySelecting = false;
-    let selectedHistoryIds = new Set();
-
-    function updateHistoryDeleteButton() {
-      const button = document.getElementById("resetHistory");
-      const selectAllLabel = document.getElementById("historySelectAllLabel");
-      if (!historySelecting) {
-        button.textContent = t("historySelect");
-        selectAllLabel.classList.add("invisible");
-        return;
-      }
-      selectAllLabel.classList.remove("invisible");
-      button.textContent = selectedHistoryIds.size
-        ? t("historyDeleteCount", {count: selectedHistoryIds.size})
-        : t("cancel");
-      const allIds = filteredHistoryItems().map((item) => item.id);
-      document.getElementById("historySelectAll").checked =
-        allIds.length > 0 && allIds.every((id) => selectedHistoryIds.has(id));
-    }
-
-    function toggleHistorySelection(id) {
-      if (selectedHistoryIds.has(id)) selectedHistoryIds.delete(id);
-      else selectedHistoryIds.add(id);
-      updateHistoryDeleteButton();
-    }
-
-    function exitHistorySelection() {
-      historySelecting = false;
-      selectedHistoryIds.clear();
-      document.getElementById("history").classList.remove("selecting");
-      updateHistoryDeleteButton();
-    }
-
-    document.getElementById("historySelectAll").addEventListener("change", (event) => {
-      if (event.target.checked) {
-        for (const item of filteredHistoryItems()) selectedHistoryIds.add(item.id);
-      } else {
-        selectedHistoryIds.clear();
-      }
-      updateHistoryDeleteButton();
-      renderHistory();
-    });
-
-    document.getElementById("resetHistory").addEventListener("click", async () => {
-      if (!historySelecting) {
-        historySelecting = true;
-        document.getElementById("history").classList.add("selecting");
-        updateHistoryDeleteButton();
-        renderHistory();
-        return;
-      }
-      if (!selectedHistoryIds.size) {
-        exitHistorySelection();
-        renderHistory();
-        return;
-      }
-      const ids = [...selectedHistoryIds];
-      await Promise.all(ids.map((id) => fetch("history/" + encodeURIComponent(id), {method: "DELETE"})));
-      exitHistorySelection();
+    async function deleteHistoryItem(item) {
+      if (!window.confirm(t("historyDeleteConfirm"))) return;
+      await fetch("history/" + encodeURIComponent(item.id), {method: "DELETE"});
       await loadHistory();
-    });
+    }
 
     async function loadHistory() {
       const response = await fetch("history");
@@ -3341,19 +3272,10 @@ let languageData = null;
       if (lastCompletedJob && lastCompletedJob.history_id === item.id) {
         row.classList.add("history-row-own-current");
       }
-      // Same left column as the queue rows above, where a finished job carries the same tick -
-      // swapped for a checkbox in the same slot while deleting is in progress.
+      // Same left column as the queue rows above, where a finished job carries the same tick.
       const tick = document.createElement("span");
       tick.className = "history-tick";
       tick.textContent = "✓";
-      const select = document.createElement("input");
-      select.type = "checkbox";
-      select.className = "history-select";
-      select.checked = selectedHistoryIds.has(item.id);
-      select.addEventListener("click", (event) => {
-        event.stopPropagation();
-        toggleHistorySelection(item.id);
-      });
       row.dataset.fileType = fileTypeKey(item.source_extension, item.original_name);
       const main = document.createElement("div");
       main.className = "history-main";
@@ -3413,22 +3335,26 @@ let languageData = null;
       actions.className = "history-actions";
       actions.appendChild(format);
       actions.appendChild(download);
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "secondary history-delete";
+      remove.title = t("historyDelete") + ": " + (item.original_name || item.id);
+      remove.setAttribute("aria-label", remove.title);
+      remove.innerHTML =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+          '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>' +
+        '</svg>';
+      remove.addEventListener("click", () => deleteHistoryItem(item));
+      actions.appendChild(remove);
       row.appendChild(tick);
-      row.appendChild(select);
       row.appendChild(main);
       row.appendChild(actions);
       // Clicking a running job in the list above attaches it to this browser's tab title;
       // clicking a finished one here lets go of it again. The marking on the row stays, it says
-      // who started the job, not what the tab is showing. While deleting is in progress, a row
-      // click toggles its checkbox instead - the whole row is the easier target to hit.
-      row.title = historySelecting ? "" : t("unwatchJob");
+      // who started the job, not what the tab is showing.
+      row.title = t("unwatchJob");
       row.addEventListener("click", (event) => {
         if (event.target.closest(".history-actions") || event.target.closest("a")) return;
-        if (historySelecting) {
-          toggleHistorySelection(item.id);
-          renderHistory();
-          return;
-        }
         unwatchJob();
       });
       return row;
