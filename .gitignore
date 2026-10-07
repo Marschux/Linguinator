@@ -2,8 +2,6 @@
 .env.*
 !.env.example
 TODO.md
-.claude/
-CLAUDE.md
 __pycache__/
 *.pyc
 *.pyo
