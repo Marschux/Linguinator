@@ -745,14 +745,10 @@ FORM_RULE = re.compile(r"_{4,}")
 PDF_LIGATURES = {"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi",
                  "ﬄ": "ffl", "ﬅ": "st", "ﬆ": "st"}
 
-# The same ligatures again, from producers whose ToUnicode table points them at Latin Extended-B
-# instead: Stall-Kamera-System extracts "PosiƟon", "FestplaƩe", "SoŌware", and its translation then
-# carried the mojibake through ("läuŌ" came back as "läuÅ").
-#
-# Only ever between letters of a word, because every one of these is a real capital in its own
-# right: Ō carries the macron of Latin and of romanised Japanese, both languages this translates.
-# A legitimate Ō opens a word or stands in capitals, so requiring a lowercase letter in front of it
-# separates the two cleanly.
+# The same ligatures from producers whose ToUnicode table points them at Latin Extended-B
+# (Stall-Kamera-System: "PosiƟon", "FestplaƩe", "SoŌware"). Replaced only after a lowercase
+# letter, since each is a real capital elsewhere: Ō carries the macron of Latin and of romanised
+# Japanese.
 PDF_BROKEN_LIGATURES = {"Ɵ": "ti", "Ʃ": "tt", "Ō": "ft"}
 PDF_BROKEN_LIGATURE_RUN = re.compile(
     r"(?<=[a-zà-öø-ÿ])[" + "".join(PDF_BROKEN_LIGATURES) + r"]")
@@ -801,23 +797,13 @@ def expand_lowercase_ligatures(text: str, source: str) -> str:
 HALLUCINATION_LENGTH_FACTOR = 2.0
 HALLUCINATION_LENGTH_MARGIN = 15
 
-# The factor above counts characters, which only compares like with like as long as source and
-# target write a word in roughly as many of them. Han and kana do not: they carry a whole word in
-# one or two characters, so a faithful German translation of Japanese is several times its source
-# in length and the factor threw it away. Hoshi_no_Kagi came back with every heading, the opening
-# quote and three paragraphs left in Japanese for exactly this reason - not text lost in
-# extraction, text the guard discarded after the model had translated it correctly.
+# The factor counts characters, and Han and kana carry a whole word in one or two, so a faithful
+# German translation of Japanese is several times its source. Weighting such a character as 2.5
+# passes every genuine ja/zh -> de translation measured (x1.70 to x6.25, Aug 2026) and still
+# catches the training-data dumps, which run 100+ characters off a heading of ten.
 #
-# Measured (Aug 2026) against the fallback model, guard off, ja/zh -> de: genuine translations ran
-# x1.70 to x6.25 of their source ("星の鍵と幻影の森" -> "Der Schlüssel zu den Sternen und der
-# Schattenwald.", the tightest case at 8 characters in and 50 out). Weighting a Han or kana
-# character as 2.5 ordinary ones passes all of them and still catches the training-data dumps,
-# which run 100+ characters off a heading of ten.
-#
-# Hangul is deliberately *not* weighted. Measured the same way, ko -> de is not a translation
-# problem the guard should relax for: the model answers Korean with Bible boilerplate ("Und es
-# geschah, als der dritte Knabe diente...", x3.90, and one x34.30 degenerate loop). The guard is
-# what keeps those off the page, so Korean keeps the unweighted budget.
+# Hangul is deliberately unweighted: the model answers Korean with Bible boilerplate (x3.90, one
+# loop at x34.30), and the unweighted budget is what keeps that off the page.
 CJK_LENGTH_WEIGHT = 2.5
 # Hiragana and katakana, then the two Han blocks that carry ordinary text.
 CJK_DENSE_CHARS = re.compile(r"[぀-ヿ㐀-䶿一-鿿]")
@@ -2718,14 +2704,10 @@ def pdf_page_runs(page, rules: Optional[List[Dict[str, float]]] = None,
                     # Some generators dump a hidden duplicate of the page's text anchored at the
                     # origin (accessibility/search layer). It is never real, visible content.
                     continue
-                # Text drawn on top of text that is already there. Two sources of it: synthetic
-                # bold, where the same glyphs are painted twice at the same spot to fake a weight
-                # the font does not have (one copy is enough, or lines double up into
-                # "PPoowweerr"), and generators that leave a second full copy of the page's text
-                # behind, offset and often with a broken encoding. Only one of them can be the
-                # text the reader sees, so the first one drawn is kept and later ones covering
-                # the same ink are dropped: extracting both would translate the page twice and
-                # stamp the second translation across the first.
+                # Text drawn on top of text already there: synthetic bold paints the same glyphs
+                # twice ("PPoowweerr"), and some generators leave a second, offset copy of the
+                # page's text behind. The first one drawn is kept and later ones covering the same
+                # ink are dropped, or the page would be translated and stamped twice.
                 box = pymupdf.Rect(span["bbox"])
                 if widget_rects and any(overlaps_mostly(box, rect) for rect in widget_rects):
                     continue
@@ -2990,22 +2972,15 @@ def group_pdf_lines(runs: List[Dict[str, Any]],
             width = run.get("width") or pdf_measure_text(run["text"], run["size"])
             current = cells[-1] if cells else None
             gap = run["x"] - current["right"] if current else 0.0
-            # A rule to write an answer on is a field of the form, not the end of the sentence
-            # beside it. It is kept apart however close it sits, because the gap that normally
-            # tells cells apart is whatever the entry before it happened to leave: on the
-            # Powerupall answer sheet 27 of the 28 rules stood 44pt or more from their item and
-            # were kept, while item 13 has the longest wording on the page and left 9pt, so its
-            # rule was merged into the item, reflowed with the translation and moved.
-            # A rule drawn between the two is the page's own grid saying where the cell ends, and
-            # beats every measurement of the gap: the Index and Fehlerbedingung columns of
-            # MatterhornProtokoll stand 2pt apart, far inside anything a gap rule would catch.
+            # A rule to write an answer on is a form field and stays a cell of its own however
+            # close it sits (Powerupall item 13 leaves 9pt before its rule, the other 27 leave
+            # 44pt or more). A rule drawn between two runs marks the cell boundary whatever the
+            # gap: MatterhornProtokoll's Index and Fehlerbedingung columns stand 2pt apart.
             #
-            # A run opening one of the page's columns starts a cell of its own, but only where it
-            # is really set apart from what precedes it - half an em, more than a word space and
-            # less than the narrowest cell gap measured - and only after a cell holding more than
-            # a list marker or a number, which hangs to the left of its own text and belongs with
-            # it. Without both, a comma mid-sentence that happened to fall on a column split a
-            # Powerupall paragraph in two.
+            # A run opening one of the page's columns starts a cell only if it is set apart by
+            # half an em (more than a word space, less than the narrowest cell gap measured) and
+            # follows a cell holding more than a list marker or a number. Otherwise a comma that
+            # falls on a column splits a paragraph in two.
             column = (gap > 0.5 * run["size"]
                       and round(run["x"] * 2) / 2 in columns
                       and len(current["text"].strip()) > 3)
@@ -3101,16 +3076,12 @@ def typical_line_spacing(lines: List[Dict[str, Any]]) -> float:
 # 1.15-1.33x; every false candidate - MatterhornProtokoll's Index, Version and Abschnitt columns,
 # row to row - sat at 1.74-1.77x. 1.5 splits the two with room on both sides.
 PDF_LAYOUT_CONTINUATION_MAX_RATIO = 1.5
-# Share of a column's own lines that has to end at that column's single most common right edge,
-# and how wide that edge has to sit past the column's own left edge, before group_pdf_paragraphs
-# trusts a gap enough to look past the immediately preceding paragraph for it. Ratio alone still
-# lets two false positives through: a table column of repeated short words ("Objekt"/"Objekt")
-# hits a high share purely by having little to vary, and a page-number column hits 100% while
-# being a few points wide. Width alone still passes MatterhornProtokoll's Fehlerbedingung column
-# (191-349pt even on single-line rows). Measured (Aug 2026): Two_Column_Paper's two columns and
-# Powerupall page 72's indented paragraph opener sat at 86-93% repeat share and 209-486pt width;
-# every column of MatterhornProtokoll's tables and TOC, and Powerupall's own two list columns
-# (33-42%, ragged - each entry a different length), missed one or the other by a wide margin.
+# Share of a column's lines that must end at its most common right edge, and how far that edge
+# must sit past the column's left edge, before group_pdf_paragraphs looks past the immediately
+# preceding paragraph. Both are needed: a column of repeated short words or page numbers reaches
+# a high share while being narrow, and MatterhornProtokoll's Fehlerbedingung column is wide
+# (191-349pt) but ragged. Measured (Aug 2026): real body columns sat at 86-93% share and
+# 209-486pt width; table, TOC and list columns (33-42%) missed one or the other.
 PDF_LAYOUT_CONTINUATION_MIN_JUSTIFIED_SHARE = 0.5
 PDF_LAYOUT_CONTINUATION_MIN_WIDTH = 100.0
 
@@ -3251,23 +3222,16 @@ def group_pdf_paragraphs(lines: List[Dict[str, Any]],
         return x
 
     paragraphs: List[Dict[str, Any]] = []
-    # The paragraph most recently extended at each x, so a genuine paragraph split across an
-    # interleaving column (see group_pdf_lines) can still be found once its own immediate
-    # neighbour in the list turns out to belong to the other column. Guarded by the tighter
-    # PDF_LAYOUT_CONTINUATION_MAX_RATIO, and by one of two further conditions, each covering a
-    # different shape of interruption:
+    # The paragraph most recently extended at each x, so a paragraph split by an interleaving
+    # column (see group_pdf_lines) is still found. Guarded by PDF_LAYOUT_CONTINUATION_MAX_RATIO
+    # and one of two conditions:
     #
-    # - both x's are pdf_layout_justified_columns (real body text), for a paragraph already
-    #   several lines long that another column interleaves with, line after line.
-    # - the candidate's own column has_cell_border and the new line's row_is_partial, for a table
-    #   header cell wrapped to a second line, interrupted once by the rest of its own row. Neither
-    #   check alone is safe (measured against the full test corpus): a drawn border only proves
-    #   "this is a table", not "this line is a wrap" (Table_Across_Pages' own row-to-row gap is
-    #   every bit as tight as a wrapped cell's two lines), and row-completeness alone trusts
-    #   page_column_walls to know every real column, which it does not for an informal, ruleless
-    #   list (Powerupall page 85's two-column checklist). Required together, each rules out the
-    #   other's failure case: a real table's rows fill (close to) every column of it, and an
-    #   unruled list never has a border to begin with.
+    # - both x's are pdf_layout_justified_columns (real body text): a multi-line paragraph that
+    #   another column interleaves with.
+    # - the candidate's column has_cell_border and the new line's row_is_partial: a table header
+    #   cell wrapped to a second line. Both are required. A border alone only proves a table
+    #   (Table_Across_Pages' rows are as tight as a wrapped cell), and row_is_partial alone
+    #   misreads a ruleless list (Powerupall page 85's two-column checklist).
     last_by_x: Dict[int, Dict[str, Any]] = {}
     for line in lines:
         matched = None
@@ -3507,17 +3471,11 @@ def has_translatable_text(text: str) -> bool:
         return False
     if ROMAN_NUMERAL.fullmatch(stripped):
         return False
-    # Two characters are a whole sentence in a script that writes without spaces, so the
-    # two-letter bar has to count those characters and not the letters of a word.
-    #
-    # A single one is left alone, though, the same way a single Latin letter is. It carries as
-    # little for the model to work from as "iv" does, and the fallback answers it with whatever
-    # it likes: the closing line of Hoshi no Kagi is "— 完 —", "The End", and came back as
-    # "wieso ist das alles?". Length cannot catch that afterwards - measured (Aug 2026) over 263
-    # short pairs from four documents, the invented answer ran at 3.1 times its source while the
-    # longest genuine one ran at 5.0 ("RAM" to "Arbeitsspeicher"), so any threshold that rejects
-    # the one throws away the other. All genuine Japanese headings measured are three characters
-    # or more and keep being translated.
+    # In a script written without spaces two characters can be a whole sentence, so the
+    # two-letter bar counts those characters. A single one stays untranslated like a single
+    # Latin letter: the fallback answers it with anything ("— 完 —" came back as "wieso ist das
+    # alles?"), and length cannot catch that afterwards (Aug 2026, 263 short pairs: the invented
+    # answer ran at x3.1, the longest genuine one at x5.0, "RAM" to "Arbeitsspeicher").
     if len(CJK_DENSE_CHARS.findall(stripped)) > 1:
         return True
     return bool(re.search(r"[^\W\d_]{2,}", stripped))
@@ -3763,36 +3721,24 @@ def paragraph_line_limits(
                 # line - one word per line, where that line was the word "or".
                 continue
             if obstacle["x"] <= line["x"] < obstacle["right"]:
-                # The box the line starts in, whether it ends inside that box or runs out of it.
-                # Only this one counts as a wall: a shape merely standing to the right belongs to
-                # whatever is beside the line, and a short line has all sorts of things to its
-                # right that say nothing about the width the paragraph had.
+                # The box the line starts in is the only wall: a shape merely standing to the
+                # right says nothing about the paragraph's width.
                 #
-                # Stopped the same distance from the box's right edge as the paragraph starts from
-                # its left one, rather than at a flat two points: the box on page 76 of Powerupall
-                # insets its text by 10.5pt, and the translation filling it to within 2pt of the
-                # frame read as text pressed against the right side of a box that has room on the
-                # left.
-                # Only where the paragraph really sits against this box's left edge. Past an
-                # ordinary indent the two have nothing to do with each other: the "32 GB unified
-                # memory" cell of Systemrequirements is also enclosed by the background of its
-                # whole table row, which starts 307pt further left, and mirroring that (capped at
-                # PDF_LAYOUT_MAX_INDENT) took 40pt off the cell's right edge - enough to wrap a
-                # one-line cell into three and push them out under the row.
+                # The text stops as far from the box's right edge as it starts from the left one
+                # (Powerupall page 76 insets by 10.5pt), but only where the paragraph sits against
+                # this box's left edge. Past PDF_LAYOUT_MAX_INDENT the box is a wider background,
+                # like the table row behind Systemrequirements' "32 GB unified memory" cell, and
+                # the flat two points apply.
                 gap = own_left - obstacle["x"]
                 inset = gap if 2.0 <= gap <= PDF_LAYOUT_MAX_INDENT else 2.0
                 edge = obstacle["right"] - inset
                 wall = edge if wall is None else min(wall, edge)
             elif obstacle["x"] > line["x"] and obstacle["top"] - obstacle["bottom"] >= line["size"]:
-                # Only a shape at least as tall as the line it is supposed to stop. Anything
-                # flatter is an ornament standing near the text, not something set beside it: the
-                # 5pt rule next to the word "or" on Systemrequirements would otherwise set that
-                # whole paragraph one word per line. Height, not width - a picture narrower than
-                # the paragraph still blocks it, which measuring against the paragraph's own width
-                # got wrong, and let the translation back into the images of Stall-Kamera-System.
-                # Half an em of air, not the two points a neighbouring line is given: text set
-                # beside a picture keeps a visible gap to its frame, and at two points the body
-                # text of Powerupall page 86 read as pressed against the picture beside it.
+                # Only a shape at least as tall as the line stops it: the 5pt rule next to "or"
+                # on Systemrequirements would otherwise set that paragraph one word per line.
+                # Height and not width, because a picture narrower than the paragraph still
+                # blocks it (Stall-Kamera-System). Half an em of air, since text beside a picture
+                # keeps a visible gap to its frame.
                 limit = min(limit, obstacle["x"] - max(2.0, 0.5 * line["size"]))
         # This line's own ink, not the paragraph's widest: a line cannot be asked to wrap narrower
         # than the original already set it, but the fact that some *other* line of the paragraph
@@ -3930,15 +3876,10 @@ def reflow_paragraph(
             # is the only bound there is.
             return False
         lowest = lines[-1]["y"] - overflow_leading(size) * (count - len(lines))
-        # A line occupies roughly a quarter em below its baseline and nearly a full em above, so
-        # the lowest overflow baseline has to clear the next paragraph's baseline by that much.
-        # Against a box's lower edge only the descenders have to stay above it - keeping the full
-        # em there costs a roomy cell a line, and with it type size, for nothing.
-        # 1.15 only keeps ascenders/descenders from touching - enough to not overlap, not enough to
-        # read as a paragraph break. Measured on Landscape_Mixed_Pages page 3: the original sets
-        # paragraphs 21.5pt apart at 10pt body text, 2.15x the font size, against 1.35x for an
-        # ordinary line of the same paragraph - a real paragraph gap is close to double an ordinary
-        # line's leading, not merely clear of it.
+        # A line occupies about a quarter em below its baseline and nearly a full em above.
+        # Against a box's lower edge only the descenders have to clear it. Against the next
+        # paragraph the gap has to read as a paragraph break: Landscape_Mixed_Pages page 3 sets
+        # paragraphs 2.15x the font size apart, against 1.35x for a line within one.
         clearance = 0.3 if floor == box_floor else 2.0
         return lowest >= floor + clearance * size
 
@@ -3980,18 +3921,13 @@ def reflow_paragraph(
     while scale is None and len(wrapped) > len(lines) and size > tighten_to:
         size = max(size * 0.98, tighten_to)
         wrapped = wrap(size)
-    # A paragraph with a neighbour directly below it may shrink past the ordinary minimum rather
-    # than run into it. Overlapping text cannot be read at all, small text only reads small, so
-    # the trade is worth making - but only for the paragraph that needs it, which is why the
-    # document-wide scale in render_pdf_layout_overlay stays clamped at the ordinary minimum.
-    # Measured (Aug 2026) on the Powerupall pages reported as colliding: four paragraphs across
-    # pages 15, 50 and 92 still ran into the next one at 0.70 and needed 0.54 to 0.64.
+    # A paragraph with a neighbour directly below may shrink past the ordinary minimum, since
+    # overlapping text cannot be read at all. Only this paragraph does, the document-wide scale
+    # in render_pdf_layout_overlay stays clamped. Measured (Aug 2026) on Powerupall pages 15, 50
+    # and 92: four paragraphs still collided at 0.70 and needed 0.54 to 0.64.
     #
-    # Not for a CJK source, though: a German translation of Japanese or Chinese routinely needs
-    # several times the line count the dense source packed into the same width, and shrinking
-    # *that* down to 0.5 to avoid overflow reads as a typo, not a translation - Hoshi no Kagi came
-    # back with two paragraphs at 0.51 next to the rest of the page at 0.73. There the trade runs
-    # the other way: overflowing a couple of lines past the neighbour below is the smaller fault.
+    # A CJK source is exempt: its German translation needs several times the line count, and
+    # 0.51 next to a page at 0.73 (Hoshi no Kagi) looks worse than a couple of overflowing lines.
     source_text = " ".join(line["text"] for line in lines)
     crowds = floor is not None and not boxed and detect_pdf_script(source_text) != "cjk"
     lowest = base_size * (PDF_LAYOUT_CROWDED_MIN_SCALE if crowds else PDF_LAYOUT_MIN_SCALE)
@@ -4292,22 +4228,14 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
         cramped_pages.append(cramped)
         cramped = {}
 
-    # Every paragraph the document sets in one size is redrawn in one size. Each shrinks itself
-    # just enough to fit its own translation, which left body text at 0.7 next to body text at 1.0
-    # - first in the same column, and once that was settled per page, still from one page to the
-    # next: measured over the 92 text pages of Powerupall, body text set at 11.0 throughout came
-    # back between 7.7 and 11.0, with a different size on facing pages. Headings keep their own
-    # scale, they are a size of their own to begin with.
+    # Every paragraph the document sets in one size is redrawn in one size. Left to itself each
+    # shrinks just enough for its own translation: Powerupall's body text, 11.0 throughout, came
+    # back between 7.7 and 11.0 across its 92 pages. Headings keep their own scale.
     #
-    # The smallest scale the document needs, not an average of them: it is the only one every
-    # paragraph still fits in, and anything larger buys its evenness by pushing the densest pages
-    # into overflow, which is the more visible fault of the two.
-    # A paragraph too cramped for even that scale shrinks further on its own (see
-    # PDF_LAYOUT_CROWDED_MIN_SCALE), and side by side those came out at six different sizes across
-    # one row of the research table on page 50 of Powerupall. They are levelled with each other per
-    # page: the ones that had to go below the document's scale all take the smallest of them, while
-    # the ordinary paragraphs around them keep it. Per page and not per document, because one
-    # cramped table must not take the size of every cramped paragraph in the book with it.
+    # The smallest scale the document needs is used, since it is the only one every paragraph
+    # fits in. A paragraph too cramped even for that shrinks further (see
+    # PDF_LAYOUT_CROWDED_MIN_SCALE); those are levelled with each other per page, so one cramped
+    # table does not set the size of every cramped paragraph in the book.
     for page, reflowed, cramped in zip(pages, per_page, cramped_pages):
         bases = [paragraph_base_size(item[0]) for item in reflowed]
         targets = []
@@ -5759,14 +5687,10 @@ def run_text_job(
             # translate_markdown_document.
             result, chunk_count = translate_markdown_document(text, source, target, job_id)
         else:
-            # One paragraph per translate_batch entry, not the whole text in one translate_one
-            # call: translate_one/translate_batch sentence-split internally and rejoin with a
-            # single space, so a multi-paragraph text translated as one blob comes back with every
-            # blank line gone. Harmless for the Text Field's own output, but every original-format
-            # export (export_docx_with_translated_text and its siblings) maps translated_blocks()
-            # back onto the source by splitting on blank lines - measured on a 6-paragraph DOCX:
-            # the whole translation landed in paragraph 1, the other five kept their German text
-            # verbatim, since translated_blocks() saw only one block once the breaks were gone.
+            # One paragraph per translate_batch entry: translate_one/translate_batch rejoin
+            # sentences with a single space, so a multi-paragraph text sent as one piece loses
+            # its blank lines. The original-format exports map translated_blocks() back by
+            # splitting on those lines, and a 6-paragraph DOCX put everything into paragraph 1.
             paragraphs = [part for part in re.split(r"\n\s*\n", text.strip()) if part.strip()] or [text]
             update_job(job_id, total=len(paragraphs), message=f"Translating 0 / {len(paragraphs)} paragraphs")
             result = "\n\n".join(translate_chunks_batched(paragraphs, source, target, job_id, PDF_LAYOUT_BATCH_SIZE))
