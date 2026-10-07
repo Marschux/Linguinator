@@ -21,28 +21,14 @@ container is running.
 | Disk | 0.3 to 1 GB per downloaded model |
 | Network | Only for the first use of a language pair (model download) |
 
-## To Build your Own Image
+## Installation with Docker
 
-1. Save [`docker/compose.yml`](docker/compose.yml) into an empty folder. No clone needed, the
-   compose file uses the published image.
-2. Optional: save [`docker/.env.example`](docker/.env.example) next to it as `.env` and adjust the
-   settings, especially authentication before exposing the service.
-3. Start Linguinator in that folder:
+[`docker/compose.yml`](docker/compose.yml) runs the published image as it is. Settings are
+optional and go into a `.env` next to it, see [`docker/.env.example`](docker/.env.example). Turn on
+authentication before exposing the service.
 
-```bash
-docker compose up -d
-```
-
-Open `http://localhost:5051/` after the container becomes healthy. Useful maintenance commands:
-
-```bash
-docker compose logs -f linguinator
-docker compose pull && docker compose up -d
-docker compose down
-```
-
-To build the image yourself, clone the repository and run
-`docker build -f docker/Dockerfile -t ghcr.io/marschux/linguinator:latest .` in its root.
+To build the image yourself:
+`docker build -f docker/Dockerfile -t ghcr.io/marschux/linguinator:latest .`
 
 ## Languages
 
