@@ -129,6 +129,7 @@ let languageData = null;
         modelDedicated: "Dedicated model for this language pair.",
         modelFallback: "No dedicated model for this pair, using the multilingual fallback.",
         modelAutoDetect: "Detected automatically. Scans take longer, and a scan mixing two scripts needs the language set.",
+        modelDownloaded: "model already downloaded",
         autoDetect: "Auto-detect",
         memoryPairsFound: "Pairs found: {count} / {total}",
         memoryWrongCount: "Wrong: {count} / {total}",
@@ -240,6 +241,7 @@ let languageData = null;
         modelDedicated: "Eigenes Modell für dieses Sprachpaar.",
         modelFallback: "Kein eigenes Modell für dieses Paar, nutzt den mehrsprachigen Fallback.",
         modelAutoDetect: "Wird automatisch erkannt. Scans dauern länger, bei zwei Schriften die Sprache selbst setzen.",
+        modelDownloaded: "Modell bereits heruntergeladen",
         autoDetect: "Automatisch erkennen",
         memoryPairsFound: "Gefundene Paare: {count} / {total}",
         memoryWrongCount: "Falsch: {count} / {total}",
@@ -351,6 +353,7 @@ let languageData = null;
         modelDedicated: "Modelo dedicado para este par de idiomas.",
         modelFallback: "Sin modelo dedicado para este par, se usa el alternativo multilingüe.",
         modelAutoDetect: "Se detecta automáticamente. Los escaneos tardan más; si mezclan dos alfabetos, fija el idioma.",
+        modelDownloaded: "modelo ya descargado",
         autoDetect: "Detección automática",
         memoryPairsFound: "Pares encontrados: {count} / {total}",
         memoryWrongCount: "Errores: {count} / {total}",
@@ -462,6 +465,7 @@ let languageData = null;
         modelDedicated: "Modèle dédié pour cette paire de langues.",
         modelFallback: "Pas de modèle dédié pour cette paire, utilise le modèle multilingue.",
         modelAutoDetect: "Détectée automatiquement. Les scans prennent plus de temps; si deux écritures se mélangent, choisis la langue.",
+        modelDownloaded: "modèle déjà téléchargé",
         autoDetect: "Détection automatique",
         memoryPairsFound: "Paires trouvées : {count} / {total}",
         memoryWrongCount: "Erreurs : {count} / {total}",
@@ -872,6 +876,41 @@ let languageData = null;
       });
       closeLanguageMenus();
       updateModelQualityHint();
+      updateDownloadedMarks();
+    }
+
+    // A model belongs to a language pair, so an entry is marked against whatever the other
+    // picker holds. With the source on auto-detect the pair is unknown and nothing is marked.
+    function pairDownloaded(source, target) {
+      if (!languageData || source === AUTO_LANGUAGE.code || source === target) return false;
+      const has = (pairs) => (pairs || []).some((pair) => pair[0] === source && pair[1] === target);
+      return has(languageData.dedicated_pairs)
+        ? has(languageData.downloaded_pairs) : Boolean(languageData.fallback_downloaded);
+    }
+
+    function updateDownloadedMarks() {
+      const source = document.getElementById("source").value;
+      const target = document.getElementById("target").value;
+      for (const id of ["source", "target"]) {
+        document.querySelectorAll("#" + id + "Menu .language-option").forEach((option) => {
+          const code = option.dataset.code;
+          const downloaded = id === "source" ? pairDownloaded(code, target) : pairDownloaded(source, code);
+          option.classList.toggle("downloaded", downloaded);
+          const title = t("selectLanguage", {language: formatLanguageLabel(code)});
+          option.title = downloaded ? title + " (" + t("modelDownloaded") + ")" : title;
+        });
+      }
+    }
+
+    // A finished job may have fetched a model, so the marks are read again without rebuilding
+    // the pickers.
+    async function refreshDownloadedModels() {
+      const response = await fetch("languages");
+      if (!response.ok || !languageData) return;
+      const data = await response.json();
+      languageData.downloaded_pairs = data.downloaded_pairs;
+      languageData.fallback_downloaded = data.fallback_downloaded;
+      updateDownloadedMarks();
     }
 
     const modelQualityHintElement = document.getElementById("modelQualityHint");
@@ -2724,7 +2763,10 @@ let languageData = null;
           hasNewlyCompleted = true;
         }
       }
-      if (hasNewlyCompleted) loadHistory();
+      if (hasNewlyCompleted) {
+        loadHistory();
+        refreshDownloadedModels().catch(() => {});
+      }
       renderQueueRows();
     }
 

@@ -3540,6 +3540,52 @@ class MainTests(unittest.TestCase):
         finally:
             shutil.rmtree(temp_dir.parent, ignore_errors=True)
 
+    def test_model_download_owns_the_progress_bar_until_it_is_done(self):
+        temp_dir = test_temp_dir()
+        try:
+            with patch.object(main, "JOBS_DIR", temp_dir):
+                with main.JOBS_LOCK:
+                    main.JOBS.clear()
+                    main.JOB_RUNNERS.clear()
+                job_id = main.create_job("translate", "eng_Latn", "deu_Latn", "text")
+                main.update_job(job_id, status="running", total=10, current=0)
+                seen = []
+                main.ACTIVE_JOB.id = job_id
+                try:
+                    with patch.object(main, "model_is_downloaded", return_value=False), \
+                            patch.object(main, "model_download_size", return_value=200), \
+                            patch.object(main, "model_cache_bytes", return_value=50):
+                        with main.report_model_download("some/model"):
+                            deadline = time.time() + 5
+                            while not main.get_job(job_id)["percent"] and time.time() < deadline:
+                                time.sleep(0.05)
+                            seen.append(main.get_job(job_id)["percent"])
+                            # A chunk update in the meantime must not take the bar back.
+                            main.update_job(job_id, current=0, message="Translating 0 / 10 chunks")
+                            seen.append(main.get_job(job_id)["percent"])
+                finally:
+                    main.ACTIVE_JOB.id = None
+
+                self.assertEqual(seen, [25.0, 25.0])
+                self.assertIsNone(main.get_job(job_id)["downloading"])
+                self.assertEqual(main.get_job(job_id)["percent"], 0.0)
+
+                # Outside a job, and for a model that is there already, nothing is reported.
+                with patch.object(main, "model_download_size", side_effect=AssertionError("asked the hub")):
+                    with main.report_model_download("some/model"):
+                        pass
+        finally:
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
+    def test_languages_route_reports_which_models_are_downloaded(self):
+        pair_model = main.OPUS_PAIRS["en>de"]["model_id"]
+        with patch.object(main, "model_is_downloaded", side_effect=lambda model_id: model_id == pair_model):
+            payload = TestClient(main.app).get("/languages").json()
+
+        self.assertIn(["eng_Latn", "deu_Latn"], payload["downloaded_pairs"])
+        self.assertTrue(all(pair in payload["dedicated_pairs"] for pair in payload["downloaded_pairs"]))
+        self.assertFalse(payload["fallback_downloaded"])
+
     def test_update_job_caps_percent_below_complete_while_still_running(self):
         temp_dir = test_temp_dir()
         try:

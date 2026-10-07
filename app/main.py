@@ -16,6 +16,7 @@ import unicodedata
 import uuid
 import zipfile
 from collections import Counter
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from functools import lru_cache
@@ -43,6 +44,9 @@ import pymupdf
 from pypdf import PdfReader, PdfWriter
 
 DetectorFactory.seed = 0  # deterministic detection results across runs
+# Xet transfers assemble a file elsewhere and drop it into the cache in one piece at the very
+# end, which leaves report_model_download nothing to measure until the download is over.
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 
 
 def env_value(name: str, default: str) -> str:
@@ -349,6 +353,9 @@ QUEUE_WORKERS_STARTED = False
 # the same job, unless the job just reached a terminal status.
 JOB_PERSIST_MIN_INTERVAL_SECONDS = 2.0
 JOB_LAST_PERSISTED_AT: Dict[str, float] = {}
+# The job the current worker thread is running, so a model download deep inside a translation
+# call can report into that job's queue row.
+ACTIVE_JOB = threading.local()
 MODEL_LOCK = threading.RLock()
 MODEL_ACTIVE_USERS = 0
 MODEL_LAST_USED = 0.0
@@ -426,6 +433,74 @@ def load_tokenizer(model_id: str):
     return AutoTokenizer.from_pretrained(model_id)
 
 
+# transformers fetches the first of these the repository has.
+MODEL_WEIGHT_FILES = ("model.safetensors", "pytorch_model.bin")
+
+
+def model_is_downloaded(model_id: str) -> bool:
+    try:
+        from huggingface_hub import try_to_load_from_cache
+    except ImportError:
+        return False
+    return any(isinstance(try_to_load_from_cache(model_id, name), str) for name in MODEL_WEIGHT_FILES)
+
+
+def model_download_size(model_id: str) -> int:
+    """Bytes of the weights file a first load fetches, 0 when the hub does not say."""
+    try:
+        from huggingface_hub import HfApi
+        info = HfApi().model_info(model_id, files_metadata=True, timeout=10)
+        sizes = {entry.rfilename: entry.size or 0 for entry in info.siblings}
+    except Exception:
+        return 0
+    return next((sizes[name] for name in MODEL_WEIGHT_FILES if sizes.get(name)), 0)
+
+
+def model_cache_bytes(model_id: str) -> int:
+    """What is on disk for a model so far, the unfinished download included."""
+    from huggingface_hub.constants import HF_HUB_CACHE
+    total = 0
+    for blob in (Path(HF_HUB_CACHE) / ("models--" + model_id.replace("/", "--")) / "blobs").glob("*"):
+        try:
+            total += blob.stat().st_size
+        except OSError:
+            # Renamed from *.incomplete between the listing and the stat.
+            continue
+    return total
+
+
+@contextmanager
+def report_model_download(model_id: str):
+    """Show a first-time model download in the running job's queue row. The hub reports no
+    progress to its caller, so the growing cache directory is measured instead."""
+    job_id = getattr(ACTIVE_JOB, "id", None)
+    if not job_id or model_is_downloaded(model_id):
+        yield
+        return
+    size = model_download_size(model_id)
+    megabyte = 1024 * 1024
+    done = threading.Event()
+
+    def watch():
+        while not done.wait(0.5):
+            have = model_cache_bytes(model_id)
+            if size:
+                update_job(job_id, downloading=min(99.0, round(have / size * 100, 1)),
+                           message=f"Downloading model {have // megabyte} / {size // megabyte} MB")
+            else:
+                update_job(job_id, message=f"Downloading model {have // megabyte} MB")
+
+    update_job(job_id, downloading=0, message="Downloading model")
+    watcher = threading.Thread(target=watch, daemon=True)
+    watcher.start()
+    try:
+        yield
+    finally:
+        done.set()
+        watcher.join()
+        update_job(job_id, downloading=None, percent=0, message="Loading model")
+
+
 @lru_cache(maxsize=MODEL_CACHE_SIZE)
 def load_model(model_id: str):
     try:
@@ -435,8 +510,9 @@ def load_model(model_id: str):
         raise RuntimeError("torch and transformers are required for translation") from exc
     configure_torch_threads(torch)
     device = selected_device()
-    tokenizer = load_tokenizer(model_id)
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
+    with report_model_download(model_id):
+        tokenizer = load_tokenizer(model_id)
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
     model.to(device)
     model.eval()
     return tokenizer, model, device, torch
@@ -1653,6 +1729,7 @@ def load_persisted_jobs():
                 if job.get("status") == "running":
                     job["status"] = "queued"
                     job["message"] = "Requeued after restart"
+                    job["downloading"] = None
                     job["started_at"] = None
                 job.setdefault("result", None)
                 job.setdefault("error", None)
@@ -1753,7 +1830,10 @@ def update_job(job_id: str, **values):
         current = job.get("current") or 0
         total = job.get("total") or 0
         started_at = job.get("started_at")
-        if total:
+        if job.get("downloading") is not None:
+            # A model download in front of the first chunk owns the bar until it is done.
+            job["percent"] = job["downloading"]
+        elif total:
             percent = (current / total) * 100
             if job.get("status") == "running" and current >= total:
                 # Every chunk translated, but a PDF job still has to render the result -
@@ -1901,7 +1981,11 @@ def job_worker_loop():
                 job["started_at"] = time.time()
             persist_job(job)
         runner, args = runner_data
-        runner(*args)
+        ACTIVE_JOB.id = job_id
+        try:
+            runner(*args)
+        finally:
+            ACTIVE_JOB.id = None
         with JOBS_CONDITION:
             JOB_RUNNERS.pop(job["id"], None)
             JOBS_CONDITION.notify_all()
@@ -5950,10 +6034,14 @@ def health():
 @app.get("/languages")
 def languages():
     dedicated_pairs = []
-    for key in OPUS_PAIRS:
+    downloaded_pairs = []
+    for key, entry in OPUS_PAIRS.items():
         source, _, target = key.partition(">")
         if source in CORE_LANGUAGES and target in CORE_LANGUAGES:
-            dedicated_pairs.append([CORE_LANGUAGES[source], CORE_LANGUAGES[target]])
+            pair = [CORE_LANGUAGES[source], CORE_LANGUAGES[target]]
+            dedicated_pairs.append(pair)
+            if model_is_downloaded(entry["model_id"]):
+                downloaded_pairs.append(pair)
     return {
         # The picker starts on auto-detect; DEFAULT_SOURCE is only where failed detection lands.
         "source_default": AUTO_SOURCE,
@@ -5962,6 +6050,10 @@ def languages():
         "languages": [{"code": code, "name": code} for code in language_codes()],
         "favorites": FAVORITE_LANGUAGES,
         "dedicated_pairs": dedicated_pairs,
+        # Which models are on disk already: the dedicated pairs among them, and the fallback
+        # every other pair uses.
+        "downloaded_pairs": downloaded_pairs,
+        "fallback_downloaded": model_is_downloaded(FALLBACK_MODEL_ID),
     }
 
 
