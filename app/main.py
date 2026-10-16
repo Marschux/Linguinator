@@ -2283,8 +2283,13 @@ def ocr_page_osd(image_path: Path) -> Tuple[str, float]:
 
 
 def ocr_page_script(image_path: Path) -> str:
-    """The script OSD sees in a page image ("Latin", "Cyrillic", …), empty when it cannot tell."""
-    return ocr_page_osd(image_path)[0]
+    """The script OSD sees in a page image ("Latin", "Cyrillic", …), empty when it cannot tell.
+
+    A low-confidence guess counts as no answer: a sparse Latin title page read as Cyrillic sent the
+    probe to ukr, langdetect said Ukrainian, and every later page was read in Ukrainian.
+    """
+    script, confidence = ocr_page_osd(image_path)
+    return script if confidence >= OCR_SCRIPT_MIN_CONFIDENCE else ""
 
 
 def ocr_script_is_usable(script: str) -> bool:

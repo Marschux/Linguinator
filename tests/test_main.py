@@ -1062,6 +1062,11 @@ class MainTests(unittest.TestCase):
         with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout=report)):
             self.assertEqual(main.ocr_page_script(Path("page.png")), "Cyrillic")
 
+    def test_ocr_page_script_drops_a_low_confidence_guess(self):
+        # A sparse Danish/English title page guessed as Cyrillic locked a whole score to Ukrainian.
+        with patch.object(main, "ocr_page_osd", return_value=("Cyrillic", 1.67)):
+            self.assertEqual(main.ocr_page_script(Path("page.png")), "")
+
     def test_ocr_page_osd_reads_the_confidence_too(self):
         report = "Page number: 0\nOrientation in degrees: 0\nScript: Cyrillic\nScript confidence: 3.4\n"
         with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout=report)):
