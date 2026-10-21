@@ -1,7 +1,9 @@
 fastapi==0.116.1
 uvicorn[standard]==0.35.0
 langdetect==1.0.9
-transformers==4.54.1
+# 4.56+ for the CTranslate2 converter, which passes `dtype=` to from_pretrained.
+transformers==4.57.1
+ctranslate2==4.8.3
 sentencepiece==0.2.0
 pypdf==5.9.0
 pymupdf==1.28.2

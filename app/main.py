@@ -88,7 +88,7 @@ JOB_WORKERS = 1
 def container_cpu_limit(path: str = "/sys/fs/cgroup/cpu.max") -> int:
     """How many CPUs the container's cgroup quota allows, 0 when it sets none.
 
-    Torch otherwise starts one thread per core it can see, and a container limited to fewer
+    The translator otherwise starts one thread per core it can see, and a container limited to fewer
     (`--cpus 4` on a 6-core host) gets throttled for running more: measured 119 s against 81 s
     for the same 206 sentences once the threads matched the quota.
     """
@@ -435,15 +435,10 @@ def selected_device():
     """The GPU when there is one, otherwise the CPU. Nothing to configure: asking for cuda on a
     host without a GPU only ever meant a silent fall back to cpu anyway."""
     try:
-        import torch
-    except ImportError:
+        import ctranslate2
+        return "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
+    except Exception:
         return "cpu"
-    return "cuda" if torch.cuda.is_available() else "cpu"
-
-
-def configure_torch_threads(torch_module):
-    if CPU_THREADS > 0 and hasattr(torch_module, "set_num_threads"):
-        torch_module.set_num_threads(CPU_THREADS)
 
 
 @lru_cache(maxsize=MODEL_CACHE_SIZE)
@@ -545,23 +540,51 @@ def delete_downloaded_model(model_id: str) -> None:
     # The model in memory may be this one, and it would be reloaded from files that are gone.
     unload_model_cache()
     shutil.rmtree(model_cache_dir(model_id), ignore_errors=True)
+    shutil.rmtree(converted_model_dir(model_id), ignore_errors=True)
+
+
+def converted_model_dir(model_id: str) -> Path:
+    """Where a model's CTranslate2 copy lives, next to the hub cache so it shares its volume."""
+    from huggingface_hub.constants import HF_HUB_CACHE
+    return Path(HF_HUB_CACHE).parent / "ctranslate2" / model_id.replace("/", "--")
+
+
+def convert_model(model_id: str) -> Path:
+    """The model in CTranslate2's format, converted from the hub weights on first use.
+
+    Translation runs on CTranslate2 rather than transformers: measured 21.10.2026 on
+    opus-mt-en-de, 175 sentences on 4 cores, 2.6x faster one sentence at a time and 4.1x in
+    batches of 8, where transformers gained nothing from batching. Kept at float32: int8 was
+    faster still (12.9x) but visibly worse ("Unsere Magd, Moira" for "Our Handmaid's friend,
+    Moira"), float32 only differed in variants like "Gospel-Sängerin"/"Gospelsängerin".
+    """
+    target = converted_model_dir(model_id)
+    if (target / "model.bin").exists():
+        return target
+    import ctranslate2
+    # Converted beside the target and renamed at the end, so an interrupted conversion is never
+    # mistaken for a finished one.
+    partial = target.with_name(target.name + ".partial")
+    shutil.rmtree(partial, ignore_errors=True)
+    ctranslate2.converters.TransformersConverter(model_id).convert(str(partial), force=True)
+    shutil.rmtree(target, ignore_errors=True)
+    partial.rename(target)
+    # The converter held the whole torch model; give that back before the translator loads.
+    gc.collect()
+    return target
 
 
 @lru_cache(maxsize=MODEL_CACHE_SIZE)
 def load_model(model_id: str):
     try:
-        import torch
-        from transformers import AutoModelForSeq2SeqLM
+        import ctranslate2
     except ImportError as exc:
-        raise RuntimeError("torch and transformers are required for translation") from exc
-    configure_torch_threads(torch)
-    device = selected_device()
+        raise RuntimeError("ctranslate2 is required for translation") from exc
     with report_model_download(model_id):
         tokenizer = load_tokenizer(model_id)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_id)
-    model.to(device)
-    model.eval()
-    return tokenizer, model, device, torch
+        path = convert_model(model_id)
+    translator = ctranslate2.Translator(str(path), device=selected_device(), intra_threads=max(CPU_THREADS, 0))
+    return tokenizer, translator
 
 
 def model_cache_loaded() -> bool:
@@ -596,13 +619,6 @@ def unload_model_cache() -> bool:
         ctypes.CDLL("libc.so.6").malloc_trim(0)
     except OSError:
         pass
-    try:
-        import torch as torch_module
-    except ImportError:
-        torch_module = None
-    cuda = getattr(torch_module, "cuda", None) if torch_module else None
-    if cuda and hasattr(cuda, "is_available") and hasattr(cuda, "empty_cache") and cuda.is_available():
-        cuda.empty_cache()
     return True
 
 
@@ -802,14 +818,25 @@ TRANSLATE_MAX_TOKENS = 512
 TRANSLATE_TEXT_TOKENS = TRANSLATE_MAX_TOKENS - 16
 
 
-def prepare_translation(
-    tokenizer, model_id: str, text: str, source: str, target: str
-) -> Tuple[Any, Dict[str, Any]]:
-    """Tokenizer inputs and model.generate() kwargs for this model's language convention."""
+def model_input(model_id: str, text: str, target: str) -> str:
+    """The text as this model expects it: the multilingual one needs the target's >>xxx<< in front."""
     if model_family(model_id) == "prefix":
-        text = f"{model_language_code(model_id, target)} {text}"
-    inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=TRANSLATE_MAX_TOKENS)
-    return inputs, {}
+        return f"{model_language_code(model_id, target)} {text}"
+    return text
+
+
+def run_translator(model_id: str, texts: List[str]) -> List[str]:
+    """One translator call for several sentences, each its own entry in the batch."""
+    tokenizer, translator = load_model(model_id)
+    # The explicit max_length matters: opus-mt-en-de/de-en leave model_max_length unset, so
+    # truncation=True alone is a no-op and a long piece overruns the model's positions.
+    batch = [tokenizer.convert_ids_to_tokens(
+        tokenizer(text, truncation=True, max_length=TRANSLATE_MAX_TOKENS).input_ids) for text in texts]
+    results = translator.translate_batch(
+        batch, beam_size=4, max_decoding_length=TRANSLATE_MAX_TOKENS, no_repeat_ngram_size=NO_REPEAT_NGRAM_SIZE,
+    )
+    return [tokenizer.decode(tokenizer.convert_tokens_to_ids(result.hypotheses[0]), skip_special_tokens=True)
+            for result in results]
 
 
 def language_codes():
@@ -1050,40 +1077,13 @@ def guard_hallucination(source: str, translated: str, target: str = "") -> str:
 
 
 def translate_one(text: str, source: str, target: str) -> str:
-    text = clean_source_text(text)
-    if not text:
-        return ""
-
-    model_id, _dedicated = resolve_model(source, target)
-    begin_model_use()
-    try:
-        tokenizer, model, device, torch_module = load_model(model_id)
-        results = []
-        for part in split_to_sentences(tokenizer, text):
-            inputs, generate_kwargs = prepare_translation(tokenizer, model_id, part, source, target)
-            inputs = inputs.to(device)
-
-            with torch_module.inference_mode():
-                generated = model.generate(
-                    **inputs,
-                    **generate_kwargs,
-                    max_new_tokens=TRANSLATE_MAX_TOKENS,
-                    num_beams=4,
-                    no_repeat_ngram_size=NO_REPEAT_NGRAM_SIZE,
-                )
-            decoded = tokenizer.batch_decode(generated, skip_special_tokens=True)[0]
-            # Guarded per sentence, because that is the unit the model invents in: one made-up
-            # sentence in the middle of a paragraph used to take the whole paragraph down with it.
-            results.append(guard_hallucination(part, decoded, target))
-        joined = normalize_translated_text(" ".join(part.strip() for part in results if part.strip()))
-        return guard_hallucination(text, joined, target)
-    finally:
-        end_model_use()
+    return translate_batch([text], source, target)[0]
 
 
 def translate_batch(texts: List[str], source: str, target: str) -> List[str]:
-    """Translate several short texts in a single model.generate() call (real tensor batching,
-    not string concatenation, so each result maps back to its input by position)."""
+    """Translate several texts in one translator call. Every sentence is its own entry in the
+    batch, never several in one (see split_to_sentences), and each result maps back to its text
+    by position."""
     texts = [clean_source_text(text) for text in texts]
     indices = [i for i, text in enumerate(texts) if text]
     if not indices:
@@ -1092,7 +1092,7 @@ def translate_batch(texts: List[str], source: str, target: str) -> List[str]:
     model_id, _dedicated = resolve_model(source, target)
     begin_model_use()
     try:
-        tokenizer, model, device, torch_module = load_model(model_id)
+        tokenizer, _translator = load_model(model_id)
         # A text too long for the model's window is split first, and its parts are joined back
         # up afterwards, so batching never silently truncates one of its entries.
         batch_texts: List[str] = []
@@ -1104,26 +1104,14 @@ def translate_batch(texts: List[str], source: str, target: str) -> List[str]:
         # Kept before the target-language prefix is glued on, so guard_hallucination below
         # measures against the sentence itself.
         sources = list(batch_texts)
-        if model_family(model_id) == "prefix":
-            prefix = model_language_code(model_id, target)
-            batch_texts = [f"{prefix} {text}" for text in batch_texts]
-        inputs = tokenizer(
-            batch_texts, return_tensors="pt", truncation=True, max_length=TRANSLATE_MAX_TOKENS, padding=True
-        ).to(device)
-
-        with torch_module.inference_mode():
-            generated = model.generate(
-                **inputs,
-                max_new_tokens=TRANSLATE_MAX_TOKENS,
-                num_beams=4,
-                no_repeat_ngram_size=NO_REPEAT_NGRAM_SIZE,
-            )
-        decoded = tokenizer.batch_decode(generated, skip_special_tokens=True)
+        decoded = run_translator(model_id, [model_input(model_id, text, target) for text in batch_texts])
     finally:
         end_model_use()
 
     parts: Dict[int, List[str]] = {}
     for owner, source_text, text in zip(owners, sources, decoded):
+        # Guarded per sentence, because that is the unit the model invents in: one made-up
+        # sentence in the middle of a paragraph used to take the whole paragraph down with it.
         text = guard_hallucination(source_text, text, target)
         if text.strip():
             parts.setdefault(owner, []).append(text.strip())

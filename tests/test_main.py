@@ -128,70 +128,34 @@ class FakeMuPdfPage:
         return {"blocks": [{"lines": lines}]}
 
 
-class FakeInputs(dict):
-    def to(self, device):
-        self["device"] = device
-        return self
-
-
 class FakeTokenizer:
+    """Just enough of a tokenizer for split_to_sentences and run_translator."""
+
     def __init__(self):
-        self.src_lang = None
+        self.seen = []
 
-    def __call__(self, text, return_tensors, truncation, max_length=None, padding=False):
-        return FakeInputs({"text": text, "return_tensors": return_tensors, "truncation": truncation, "max_length": max_length, "padding": padding})
+    def __call__(self, text, truncation=False, max_length=None):
+        self.seen.append((text, truncation, max_length))
+        return SimpleNamespace(input_ids=text.split())
 
-    def convert_tokens_to_ids(self, target):
-        return 42
+    def convert_ids_to_tokens(self, ids):
+        return list(ids)
 
-    def batch_decode(self, generated, skip_special_tokens):
-        return ["Uebersetzt"]
+    def convert_tokens_to_ids(self, tokens):
+        return list(tokens)
 
-
-class FakeModel:
-    def generate(self, **inputs):
-        return ["generated"]
-
-
-class FakeInferenceMode:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, traceback):
-        return False
+    def decode(self, ids, skip_special_tokens=False):
+        return " ".join(ids)
 
 
-class FakeTorch:
-    def inference_mode(self):
-        return FakeInferenceMode()
+class FakeTranslator:
+    def __init__(self, answer=lambda tokens: ["Uebersetzt"]):
+        self.answer = answer
+        self.calls = []
 
-
-class FakeCuda:
-    def __init__(self):
-        self.emptied = False
-
-    def is_available(self):
-        return True
-
-    def empty_cache(self):
-        self.emptied = True
-
-
-class FakeTorchWithCuda(FakeTorch):
-    def __init__(self):
-        self.cuda = FakeCuda()
-
-
-class FakeTorchWithThreads(FakeTorch):
-    def __init__(self):
-        self.threads = None
-        self.interop_threads = None
-
-    def set_num_threads(self, threads):
-        self.threads = threads
-
-    def set_num_interop_threads(self, threads):
-        self.interop_threads = threads
+    def translate_batch(self, batch, **options):
+        self.calls.append((batch, options))
+        return [SimpleNamespace(hypotheses=[self.answer(tokens)]) for tokens in batch]
 
 
 class FakeCacheInfo:
@@ -576,11 +540,20 @@ class MainTests(unittest.TestCase):
 
         self.assertIn('if (!countryCode || countryCode === "UN") return "🌐";', script)
 
-    def test_translate_one_uses_lazy_loaded_torch_module(self):
-        with patch.object(main, "load_model", return_value=(FakeTokenizer(), FakeModel(), "cpu", FakeTorch())):
-            translated = main.translate_one("Hello", "eng_Latn", "deu_Latn")
+    def test_run_translator_sends_each_text_as_its_own_capped_entry(self):
+        tokenizer, translator = FakeTokenizer(), FakeTranslator(lambda tokens: ["Hallo"] + tokens[1:])
 
-        self.assertEqual(translated, "Uebersetzt")
+        with patch.object(main, "load_model", return_value=(tokenizer, translator)):
+            translated = main.run_translator("Helsinki-NLP/opus-mt-en-de", ["Hello world", "Hello there"])
+
+        self.assertEqual(translated, ["Hallo world", "Hallo there"])
+        batch, options = translator.calls[0]
+        self.assertEqual(batch, [["Hello", "world"], ["Hello", "there"]])
+        self.assertEqual(options["beam_size"], 4)
+        # opus-mt-en-de/de-en leave model_max_length unset in their tokenizer config, which makes
+        # truncation=True alone a no-op; the cap has to be explicit or a long paragraph overruns
+        # the model's positions.
+        self.assertTrue(all(seen[1:] == (True, main.TRANSLATE_MAX_TOKENS) for seen in tokenizer.seen))
 
     def test_normalize_translated_text_inserts_missing_sentence_space(self):
         # OPUS-MT's detokenizer occasionally drops the space after sentence-ending punctuation.
@@ -592,48 +565,30 @@ class MainTests(unittest.TestCase):
         self.assertEqual(main.normalize_translated_text("Wirklich!Ja klar."), "Wirklich! Ja klar.")
 
     def test_translate_one_normalizes_missing_sentence_space(self):
-        tokenizer = FakeTokenizer()
-        tokenizer.batch_decode = lambda generated, skip_special_tokens: ["teilen.Wenn Sie"]
-
-        with patch.object(main, "load_model", return_value=(tokenizer, FakeModel(), "cpu", FakeTorch())):
-            translated = main.translate_one("Hello", "eng_Latn", "deu_Latn")
+        with patch.object(main, "load_model", return_value=(FakeTokenizer(), None)):
+            with patch.object(main, "run_translator", return_value=["teilen.Wenn Sie"]):
+                translated = main.translate_one("Hello", "eng_Latn", "deu_Latn")
 
         self.assertEqual(translated, "teilen. Wenn Sie")
 
     def test_one_invented_sentence_does_not_take_the_paragraph_with_it(self):
-        # The model invents per model call, and a call is one sentence. Guarding only the joined
-        # paragraph threw away a good translation because one sentence in it had run off.
-        answers = iter(["Der erste Satz.",
-                        "Der Präsident. — Das Wort hat die Fraktion der Europäischen Volkspartei."])
-        tokenizer = FakeTokenizer()
-        tokenizer.batch_decode = lambda generated, skip_special_tokens: [next(answers)]
+        # The model invents per sentence. Guarding only the joined paragraph threw away a good
+        # translation because one sentence in it had run off.
+        answers = ["Der erste Satz.", "Der Präsident. — Das Wort hat die Fraktion der Europäischen Volkspartei."]
 
-        with patch.object(main, "load_model", return_value=(tokenizer, FakeModel(), "cpu", FakeTorch())):
-            translated = main.translate_one("The first sentence. Watch TV.", "eng_Latn", "deu_Latn")
+        with patch.object(main, "load_model", return_value=(FakeTokenizer(), None)):
+            with patch.object(main, "run_translator", return_value=answers):
+                translated = main.translate_one("The first sentence. Watch TV.", "eng_Latn", "deu_Latn")
 
         self.assertEqual(translated, "Der erste Satz. Watch TV.")
 
     def test_translate_batch_maps_results_back_by_position_and_skips_empties(self):
-        seen_texts = {}
-
-        class RecordingTokenizer(FakeTokenizer):
-            def __call__(self, text, return_tensors, truncation, max_length=None, padding=False):
-                seen_texts["text"] = text
-                seen_texts["padding"] = padding
-                return FakeInputs({"text": text})
-
-            def batch_decode(self, generated, skip_special_tokens):
-                return ["Eins", "Zwei"]
-
-        model = FakeModel()
-        model.generate = lambda **inputs: ["g1", "g2"]
-
-        with patch.object(main, "load_model", return_value=(RecordingTokenizer(), model, "cpu", FakeTorch())):
-            translated = main.translate_batch(["Hello", "", "World"], "eng_Latn", "deu_Latn")
+        with patch.object(main, "load_model", return_value=(FakeTokenizer(), None)):
+            with patch.object(main, "run_translator", return_value=["Eins", "Zwei"]) as run:
+                translated = main.translate_batch(["Hello", "", "World"], "eng_Latn", "deu_Latn")
 
         self.assertEqual(translated, ["Eins", "", "Zwei"])
-        self.assertEqual(seen_texts["text"], ["Hello", "World"])
-        self.assertTrue(seen_texts["padding"])
+        self.assertEqual(run.call_args.args[1], ["Hello", "World"])
 
     def test_translate_batch_empty_input_skips_model_call(self):
         with patch.object(main, "load_model", side_effect=AssertionError("should not load a model")):
@@ -661,39 +616,10 @@ class MainTests(unittest.TestCase):
                 short = internal.split("_", 1)[0]
                 self.assertEqual(token, f">>{main.FALLBACK_LANGUAGE_ALIASES.get(short, short)}<<")
 
-    def test_prepare_translation_prefix_prepends_target_token(self):
-        tokenizer = FakeTokenizer()
-
-        inputs, generate_kwargs = main.prepare_translation(
-            tokenizer, "Helsinki-NLP/opus-mt-tc-bible-big-mul-mul", "Hello", "eng_Latn", "deu_Latn"
-        )
-
-        self.assertEqual(inputs["text"], ">>deu<< Hello")
-        self.assertEqual(generate_kwargs, {})
-        self.assertEqual(inputs["max_length"], main.TRANSLATE_MAX_TOKENS)
-
-    def test_prepare_translation_plain_sends_text_unchanged(self):
-        tokenizer = FakeTokenizer()
-
-        inputs, generate_kwargs = main.prepare_translation(
-            tokenizer, "Helsinki-NLP/opus-mt-en-de", "Hello", "eng_Latn", "deu_Latn"
-        )
-
-        self.assertEqual(inputs["text"], "Hello")
-        self.assertEqual(generate_kwargs, {})
-
-    def test_prepare_translation_caps_input_length_even_when_tokenizer_ignores_truncation(self):
-        # opus-mt-en-de/de-en leave model_max_length unset in their tokenizer config, which
-        # makes truncation=True alone a no-op; prepare_translation must cap explicitly or a
-        # long paragraph overruns the model's position embeddings ("index out of range in self").
-        tokenizer = FakeTokenizer()
-
-        inputs, _ = main.prepare_translation(
-            tokenizer, "Helsinki-NLP/opus-mt-en-de", "Hello " * 2000, "eng_Latn", "deu_Latn"
-        )
-
-        self.assertEqual(inputs["max_length"], main.TRANSLATE_MAX_TOKENS)
-        self.assertTrue(inputs["truncation"])
+    def test_model_input_prefixes_only_the_multilingual_model(self):
+        self.assertEqual(main.model_input("Helsinki-NLP/opus-mt-tc-bible-big-mul-mul", "Hello", "deu_Latn"),
+                         ">>deu<< Hello")
+        self.assertEqual(main.model_input("Helsinki-NLP/opus-mt-en-de", "Hello", "deu_Latn"), "Hello")
 
     def test_iso_639_1_looks_up_core_languages(self):
         self.assertEqual(main.iso_639_1("deu_Latn"), "de")
@@ -718,39 +644,35 @@ class MainTests(unittest.TestCase):
 
         def fake_load_model(model_id):
             seen_model_ids.append(model_id)
-            return FakeTokenizer(), FakeModel(), "cpu", FakeTorch()
+            return FakeTokenizer(), FakeTranslator()
 
         with patch.object(main, "OPUS_PAIRS", {"en>de": {"model_id": "Helsinki-NLP/opus-mt-en-de", "license": "x"}}):
             with patch.object(main, "load_model", fake_load_model):
                 main.translate_one("Hello", "eng_Latn", "deu_Latn")
 
-        self.assertEqual(seen_model_ids, ["Helsinki-NLP/opus-mt-en-de"])
+        self.assertEqual(set(seen_model_ids), {"Helsinki-NLP/opus-mt-en-de"})
 
     def test_language_codes_returns_core_languages(self):
         with patch.object(main, "CORE_LANGUAGES", {"en": "eng_Latn", "de": "deu_Latn"}):
             self.assertEqual(main.language_codes(), ["deu_Latn", "eng_Latn"])
 
     def test_model_idle_unload_clears_cached_model_after_timeout(self):
-        fake_torch = FakeTorchWithCuda()
-        model_loader = FakeCachedLoader((FakeTokenizer(), FakeModel(), "cuda", fake_torch))
+        model_loader = FakeCachedLoader((FakeTokenizer(), FakeTranslator()))
         tokenizer_loader = FakeCachedLoader(FakeTokenizer())
 
         with patch.object(main, "load_model", model_loader):
             with patch.object(main, "load_tokenizer", tokenizer_loader):
-                with patch.dict(sys.modules, {"torch": fake_torch}):
-                    with patch.object(main, "MODEL_IDLE_SECONDS", 1200):
-                        if True:
-                            with patch.object(main, "MODEL_ACTIVE_USERS", 0):
-                                with patch.object(main, "MODEL_LAST_USED", 100.0):
-                                    unloaded = main.unload_model_if_idle(now=1301.0)
+                with patch.object(main, "MODEL_IDLE_SECONDS", 1200):
+                    with patch.object(main, "MODEL_ACTIVE_USERS", 0):
+                        with patch.object(main, "MODEL_LAST_USED", 100.0):
+                            unloaded = main.unload_model_if_idle(now=1301.0)
 
         self.assertTrue(unloaded)
         self.assertTrue(model_loader.cleared)
         self.assertTrue(tokenizer_loader.cleared)
-        self.assertTrue(fake_torch.cuda.emptied)
 
     def test_model_idle_unload_keeps_recent_model_loaded(self):
-        model_loader = FakeCachedLoader((FakeTokenizer(), FakeModel(), "cpu", FakeTorch()))
+        model_loader = FakeCachedLoader((FakeTokenizer(), FakeTranslator()))
         tokenizer_loader = FakeCachedLoader(FakeTokenizer())
 
         with patch.object(main, "load_model", model_loader):
@@ -765,7 +687,7 @@ class MainTests(unittest.TestCase):
         self.assertFalse(tokenizer_loader.cleared)
 
     def test_model_idle_unload_skips_when_switched_off_or_active(self):
-        model_loader = FakeCachedLoader((FakeTokenizer(), FakeModel(), "cpu", FakeTorch()))
+        model_loader = FakeCachedLoader((FakeTokenizer(), FakeTranslator()))
         tokenizer_loader = FakeCachedLoader(FakeTokenizer())
 
         with patch.object(main, "load_model", model_loader):
@@ -3903,14 +3825,6 @@ class MainTests(unittest.TestCase):
                 main.JOBS.clear()
                 main.JOB_RUNNERS.clear()
             shutil.rmtree(temp_dir.parent, ignore_errors=True)
-
-    def test_configure_torch_threads_uses_env_values(self):
-        torch_module = FakeTorchWithThreads()
-
-        with patch.object(main, "CPU_THREADS", 3):
-            main.configure_torch_threads(torch_module)
-
-        self.assertEqual(torch_module.threads, 3)
 
     def test_container_cpu_limit_reads_the_cgroup_quota(self):
         temp_dir = test_temp_dir()
