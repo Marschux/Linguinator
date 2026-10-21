@@ -799,7 +799,7 @@ class MainTests(unittest.TestCase):
                 markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
 
         self.assertIn("OCR text", markdown)
-        mocked_ocr.assert_called_once_with(b"%PDF", 1, main.AUTO_SOURCE, noise=ANY)
+        mocked_ocr.assert_called_once_with(b"%PDF", 1, main.AUTO_SOURCE, lines=ANY)
 
     def test_favorite_languages_cap_at_three_plus_english(self):
         self.assertEqual(
@@ -930,7 +930,7 @@ class MainTests(unittest.TestCase):
         ]
         reads = []
 
-        def fake_read(image_path, script, noise=None):
+        def fake_read(image_path, script, lines=None):
             reads.append(script)
             return f"text in {script}"
 
@@ -1140,7 +1140,7 @@ class MainTests(unittest.TestCase):
             with patch.object(main, "ocr_pdf_page", return_value="OCR text") as mocked_ocr:
                 main.extract_pdf_markdown_from_bytes(b"%PDF", source="fra_Latn")
 
-        mocked_ocr.assert_called_once_with(b"%PDF", 1, "fra_Latn", noise=ANY)
+        mocked_ocr.assert_called_once_with(b"%PDF", 1, "fra_Latn", lines=ANY)
 
     def test_pdf_extraction_rereads_a_scanned_page_in_its_own_language(self):
         document = FakeDocument([FakePage(""), FakePage("")])
@@ -1168,6 +1168,85 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(main.ocr_noise_lines(tsv(score)), {"ne VV vv ve vy a", "iE h KI"})
         self.assertEqual(main.ocr_noise_lines(tsv(prose)), set())
+
+    def test_strip_leaders_drops_dotted_leaders_read_as_letters(self):
+        self.assertEqual(main.strip_leaders("Ofglen ceessesesessesesessesssesssssseesssestssesesenees soprano"),
+                         "Ofglen soprano")
+        self.assertEqual(main.strip_leaders("Pieixoto (ca. 40) ........ Nicht-Singen"), "Pieixoto (ca. 40) Nicht-Singen")
+        # Long real words are spread over many letters and stay.
+        self.assertEqual(main.strip_leaders("Indoktrinationszentren undergrundsbevaegelsen"),
+                         "Indoktrinationszentren undergrundsbevaegelsen")
+
+    def test_scan_layout_pages_set_lyrics_line_by_line_and_prose_by_paragraph(self):
+        document = pymupdf.open()
+        document.new_page(width=595, height=842)
+        document.new_page(width=595, height=842)
+        content = document.tobytes()
+
+        def line(text, top, par=(1, 1), conf=90, noise=False):
+            return {"text": text, "box": (200, top, 1200, top + 40), "par": par, "conf": conf,
+                    "noise": noise, "words": [(word, 40) for word in text.split()]}
+
+        ocr_pages = {
+            1: [line("ne VV vv ve vy a", 100, conf=40, noise=True),
+                line("hap-pi - ness or snow.", 200),
+                line("JAN. | CE —— | z =", 300)],
+            2: [line("Here the classes are run by Aunt", 100),
+                line("Lydia, who is strict.", 150),
+                line("we", 400, par=(2, 1), conf=30)],
+        }
+
+        score, prose = main.scan_layout_pages(content, ocr_pages)
+
+        # Notation and lines that are mostly not letters keep their original.
+        self.assertEqual([p["text"] for p in score["paragraphs"]], ["happiness or snow."])
+        self.assertTrue(score["paragraphs"][0]["own_size"])
+        self.assertEqual(len(score["obstacles"]), 1)
+        # Prose goes by tesseract's paragraphs; one it was unsure of (a logo read as "we") is left.
+        self.assertEqual([p["text"] for p in prose["paragraphs"]], ["Here the classes are run by Aunt Lydia, who is strict."])
+        self.assertEqual(len(prose["paragraphs"][0]["cover"]), 2)
+        self.assertTrue(prose["scan"])
+
+    def test_a_scan_sent_for_layout_is_overprinted_and_exported_from_history(self):
+        document = pymupdf.open()
+        # A text layer under the "scan" too, as on a page whose layer failed text_layer_is_trustworthy:
+        # covered pixels are not enough there, the words must not be findable in the result.
+        document.new_page(width=595, height=842).insert_text((100, 160), "Please restart the camera")
+        content = document.tobytes()
+        lines = [{"text": "Please restart the camera after changing the card.", "box": (200, 300, 1500, 340),
+                  "par": (1, 1), "conf": 92, "noise": False,
+                  "words": [(word, 40) for word in "Please restart the camera after changing the card.".split()]}]
+
+        def fake_extract(content, content_type, page_range, source, ocr_pages=None):
+            if ocr_pages is not None:
+                ocr_pages[1] = lines
+            return "# Page 1\n\n" + lines[0]["text"]
+
+        temp_dir = test_temp_dir()
+        try:
+            with patch.object(main, "HISTORY_DIR", temp_dir), patch.object(main, "JOBS_DIR", temp_dir / "jobs"):
+                with main.JOBS_LOCK:
+                    main.JOBS.clear()
+                    main.JOB_RUNNERS.clear()
+                job_id = main.create_job("translate-pdf-layout", "eng_Latn", "deu_Latn", "scan.pdf")
+                # No positioned text to go on, as on a scan (or a text layer that failed its check).
+                no_layout = main.HTTPException(status_code=422, detail="No positioned text found.")
+                with patch.object(main, "extract_pdf_layout", side_effect=no_layout), \
+                        patch.object(main, "extract_pdf_markdown_from_bytes", side_effect=fake_extract), \
+                        patch.object(main, "translate_chunks", return_value=["Bitte starten Sie die Kamera neu."]):
+                    main.run_pdf_layout_translate_job(job_id, content, "eng_Latn", "deu_Latn", "scan.pdf")
+                    job = main.get_job(job_id)
+                    history = main.history_item(job["history_id"])
+                    main.history_export_path(job["history_id"], "pdf").unlink()
+                    exported = main.export_original_history_content("pdf", content, job["result"], history["source_meta"])
+        finally:
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
+        self.assertEqual(job["status"], "complete")
+        self.assertEqual(history["source_meta"]["scan"], "true")
+        self.assertIn("Bitte starten Sie die Kamera neu.", pdf_text(exported))
+        self.assertNotIn("Please restart", pdf_text(exported))
+        self.assertEqual(pdf_page_count(exported), 1)
 
     def test_a_score_page_translates_only_its_sung_lines(self):
         page = "ne VV vv ve vy a\nhap-pi - ness or snow. May-be it is,\n33\nwere dif -rent _ I wish it were a - bout"

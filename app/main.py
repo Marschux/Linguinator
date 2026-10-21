@@ -2345,24 +2345,44 @@ OCR_NOISE_MAX_CONFIDENCE = 62
 OCR_NOISE_MIN_SHARE = 0.4
 
 
-def ocr_noise_lines(tsv: str) -> Set[str]:
-    """The lines of one tesseract read that are notation, not text - empty unless the image is
-    mostly made of them."""
-    lines: Dict[Tuple[str, str, str], List[Tuple[float, str]]] = {}
+def ocr_lines(tsv: str) -> List[Dict[str, Any]]:
+    """The lines of one tesseract read with their pixel box, mean word confidence and the
+    paragraph tesseract put them in; `noise` marks notation (see OCR_NOISE_MAX_CONFIDENCE),
+    only ever set when the image is mostly made of it."""
+    lines: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
     for row in tsv.splitlines()[1:]:
         columns = row.split("\t")
         if len(columns) >= 12 and int(columns[0]) == TSV_WORD_LEVEL and columns[11].strip():
-            lines.setdefault((columns[2], columns[3], columns[4]), []).append((float(columns[10]), columns[11]))
-    worded = [(" ".join(word for _, word in words), sum(conf for conf, _ in words) / len(words))
-              for words in lines.values()]
-    worded = [(text, conf) for text, conf in worded if has_translatable_text(text)]
-    noise = {text for text, conf in worded if conf < OCR_NOISE_MAX_CONFIDENCE}
-    return noise if len(noise) >= OCR_NOISE_MIN_SHARE * len(worded) > 0 else set()
+            left, top, width, height = (int(columns[column]) for column in (6, 7, 8, 9))
+            line = lines.setdefault((columns[2], columns[3], columns[4]), {
+                "words": [], "confs": [], "heights": [], "box": [left, top, left + width, top + height],
+                "par": (int(columns[2]), int(columns[3])),
+            })
+            line["words"].append(columns[11].strip())
+            line["heights"].append(height)
+            line["confs"].append(float(columns[10]))
+            box = line["box"]
+            box[0], box[1] = min(box[0], left), min(box[1], top)
+            box[2], box[3] = max(box[2], left + width), max(box[3], top + height)
+    found = [{"text": " ".join(line["words"]), "box": tuple(line["box"]), "par": line["par"],
+              "words": list(zip(line["words"], line["heights"])),
+              "conf": sum(line["confs"]) / len(line["confs"]), "noise": False} for line in lines.values()]
+    worded = [line for line in found if has_translatable_text(line["text"])]
+    low = [line for line in worded if line["conf"] < OCR_NOISE_MAX_CONFIDENCE]
+    if len(low) >= OCR_NOISE_MIN_SHARE * len(worded) > 0:
+        for line in low:
+            line["noise"] = True
+    return found
 
 
-def run_tesseract(image_path: Path, languages: str, noise: Optional[Set[str]] = None) -> str:
-    """Plain text of an image; with `noise`, its notation lines (ocr_noise_lines) are added to it."""
-    if noise is None:
+def ocr_noise_lines(tsv: str) -> Set[str]:
+    """The notation lines of one tesseract read, see ocr_lines."""
+    return {line["text"] for line in ocr_lines(tsv) if line["noise"]}
+
+
+def run_tesseract(image_path: Path, languages: str, lines: Optional[List[Dict[str, Any]]] = None) -> str:
+    """Plain text of an image; with `lines`, its positioned lines (ocr_lines) are added to it."""
+    if lines is None:
         return subprocess.run(
             ["tesseract", str(image_path), "stdout", "-l", languages],
             check=True,
@@ -2377,7 +2397,7 @@ def run_tesseract(image_path: Path, languages: str, noise: Optional[Set[str]] = 
         capture_output=True,
         text=True,
     )
-    noise.update(ocr_noise_lines(base.with_suffix(".tsv").read_text(encoding="utf-8")))
+    lines.extend(ocr_lines(base.with_suffix(".tsv").read_text(encoding="utf-8")))
     return base.with_suffix(".txt").read_text(encoding="utf-8").strip()
 
 
@@ -2597,7 +2617,8 @@ def ocr_page_blocks(image_path: Path, languages: str) -> List[Dict[str, Any]]:
     return found
 
 
-def ocr_read_with_detection(image_path: Path, script: str, noise: Optional[Set[str]] = None) -> str:
+def ocr_read_with_detection(image_path: Path, script: str,
+                            lines: Optional[List[Dict[str, Any]]] = None) -> str:
     """Read an image whose language is unknown, given the script it is printed in.
 
     Auto-detect on a scan is a chicken-and-egg: detection needs text, text needs OCR, OCR needs
@@ -2606,8 +2627,8 @@ def ocr_read_with_detection(image_path: Path, script: str, noise: Optional[Set[s
     language langdetect named.
     """
     probe = ocr_probe_languages(script)
-    # Each read collects its own notation lines; only those of the read that is kept count.
-    found = set() if noise is not None else None
+    # Each read collects its own lines; only those of the read that is kept count.
+    found = [] if lines is not None else None
     text = run_tesseract(image_path, probe, found)
     if not text:
         return text
@@ -2619,13 +2640,13 @@ def ocr_read_with_detection(image_path: Path, script: str, noise: Optional[Set[s
         code = ocr_language_code(detect_source_language(text))
         if code == read_with:
             break
-        candidate = set() if noise is not None else None
+        candidate = [] if lines is not None else None
         better = run_tesseract(image_path, code, candidate)
         if not better:
             break
         text, read_with, found = better, code, candidate
-    if noise is not None:
-        noise.update(found)
+    if lines is not None:
+        lines.extend(found)
     return text
 
 
@@ -2658,13 +2679,13 @@ def ocr_block_scripts(content: bytes, page_number: int, blocks: List[Dict[str, A
 
 
 def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE,
-                 noise: Optional[Set[str]] = None) -> str:
-    """One scanned page as text; `noise` collects its notation lines, see ocr_noise_lines."""
+                 lines: Optional[List[Dict[str, Any]]] = None) -> str:
+    """One scanned page as text; `lines` collects its positioned lines, see ocr_lines."""
     ensure_ocr_tools()
     with tempfile.TemporaryDirectory() as temp_dir:
         image_path = render_pdf_page(content, page_number, temp_dir)
         if source != AUTO_SOURCE:
-            return run_tesseract(image_path, ocr_language_code(source), noise=noise)
+            return run_tesseract(image_path, ocr_language_code(source), lines=lines)
 
         page_script = ocr_page_script(image_path)
         blocks = ocr_page_blocks(image_path, ocr_probe_languages(page_script))
@@ -2673,7 +2694,7 @@ def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE,
             # One script on the page, which is the normal case: read it in one go. Splitting a
             # page into blocks only to read each in the same language would cost several OCR
             # runs and lose the layout analysis' view of the whole page for nothing.
-            return ocr_read_with_detection(image_path, page_script, noise=noise)
+            return ocr_read_with_detection(image_path, page_script, lines=lines)
 
         # A mixed page. OSD picks one script for the whole image, so reading it in one go always
         # loses the other script's text: the majority wins and the rest is either dropped or
@@ -2683,7 +2704,17 @@ def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE,
         for index, (block, (script, region)) in enumerate(zip(blocks, block_scripts)):
             if region is None:
                 region = render_pdf_region(content, page_number, block["box"], temp_dir, f"read{index}")
-            text = ocr_read_with_detection(region, script, noise=noise)
+            region_lines: Optional[List[Dict[str, Any]]] = [] if lines is not None else None
+            text = ocr_read_with_detection(region, script, lines=region_lines)
+            if lines is not None:
+                # The block was rendered on its own, from its padded box clamped to the page, so
+                # its boxes count from there and not from the page's corner.
+                dx = max(0, block["box"][0] - OCR_REGION_PADDING)
+                dy = max(0, block["box"][1] - OCR_REGION_PADDING)
+                for line in region_lines:
+                    left, top, right, bottom = line["box"]
+                    lines.append({**line, "box": (left + dx, top + dy, right + dx, bottom + dy),
+                                  "par": (index, *line["par"])})
             if text.strip():
                 pieces.append(text.strip())
         return "\n\n".join(pieces)
@@ -2694,10 +2725,10 @@ def extract_pdf_markdown_from_bytes(
     content_type: str = "application/pdf",
     page_range: str = "",
     source: str = AUTO_SOURCE,
-    noise: Optional[Set[str]] = None,
+    ocr_pages: Optional[Dict[int, List[Dict[str, Any]]]] = None,
 ) -> str:
-    """The PDF as Markdown, one "# Page N" section per page; `noise` collects the notation lines
-    of scanned score pages (ocr_noise_lines), which a translation should leave alone."""
+    """The PDF as Markdown, one "# Page N" section per page; `ocr_pages` collects the positioned
+    lines of every page read by OCR (ocr_lines), by page number."""
     if content_type not in ("application/pdf", "application/octet-stream"):
         raise HTTPException(status_code=400, detail="Only PDF uploads are supported")
 
@@ -2729,8 +2760,8 @@ def extract_pdf_markdown_from_bytes(
                     trust_text_layer = text_layer_is_trustworthy(content, index, text)
                 needs_ocr = not trust_text_layer
             if needs_ocr:
-                page_noise: Set[str] = set()
-                ocr_text = ocr_pdf_page(content, index, source, noise=page_noise)
+                page_lines: List[Dict[str, Any]] = []
+                ocr_text = ocr_pdf_page(content, index, source, lines=page_lines)
                 if ocr_text and auto:
                     if source == AUTO_SOURCE:
                         # Keep what the first scanned page turned out to be: the pages after it then
@@ -2741,14 +2772,14 @@ def extract_pdf_markdown_from_bytes(
                         # read with English traineddata, lost every æ/ø/å ("fgdselsrate").
                         own = paragraph_language(ocr_text, source)
                         if own != source:
-                            reread_noise: Set[str] = set()
-                            reread = ocr_pdf_page(content, index, own, noise=reread_noise)
+                            reread_lines: List[Dict[str, Any]] = []
+                            reread = ocr_pdf_page(content, index, own, lines=reread_lines)
                             if reread:
-                                ocr_text, page_noise = reread, reread_noise
+                                ocr_text, page_lines = reread, reread_lines
                 if ocr_text:
                     text = ocr_text
-                    if noise is not None:
-                        noise.update(page_noise)
+                    if ocr_pages is not None:
+                        ocr_pages[index] = page_lines
 
             if text:
                 pages_with_text += 1
@@ -4265,6 +4296,27 @@ def redact_translated_text(content: bytes, pages: List[Dict[str, Any]], translat
             # lands in the neighbouring cell. On page 13 of MatterhornProtokoll the "Software" cell
             # ends 0.2pt before "21-001" begins, and the padded rectangle took the "2" with it.
             neighbours = [line for other in page_data["paragraphs"] for line in other["lines"]]
+            if page_data.get("scan"):
+                # Pixels in an image, not text: painted over in the paper's own colour. A page also
+                # lands here when its text layer did not match what is printed (see
+                # text_layer_is_trustworthy), and that text is deleted under the cover as well, so a
+                # search of the result does not turn up the original's words.
+                sample_dpi = 50
+                pixmap = page.get_pixmap(dpi=sample_dpi)
+                covers = []
+                for paragraph in page_data["paragraphs"]:
+                    if index < len(translations) and translations[index].strip():
+                        for rect, box in zip(paragraph["cover"], paragraph["cover_px"]):
+                            covers.append((rect, scan_background(pixmap, box, sample_dpi)))
+                            page.add_redact_annot(rect, fill=False)
+                    index += 1
+                if covers:
+                    page.apply_redactions(images=pymupdf.PDF_REDACT_IMAGE_NONE,
+                                          graphics=pymupdf.PDF_REDACT_LINE_ART_NONE,
+                                          text=pymupdf.PDF_REDACT_TEXT_REMOVE)
+                for rect, colour in covers:
+                    page.draw_rect(rect, color=None, fill=colour, overlay=True)
+                continue
             for paragraph in page_data["paragraphs"]:
                 # A paragraph without a translation keeps its original text rather than being
                 # erased with nothing put in its place. An untranslatable fragment (a table's numeric
@@ -4479,6 +4531,9 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
                 else:
                     reflowed.append((paragraph, text, floor, width_limit,
                                      box_floor, centre, placed))
+                    if paragraph.get("own_size"):
+                        index += 1
+                        continue
                     base = paragraph_base_size(paragraph)
                     key = round(base, 1)
                     # Clamped at the ordinary minimum: a paragraph that had to go below it is
@@ -4512,6 +4567,10 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
         bases = [paragraph_base_size(item[0]) for item in reflowed]
         targets = []
         for (paragraph, _, _, _, _, _, placed), base in zip(reflowed, bases):
+            if paragraph.get("own_size"):
+                # Fits its own line and nothing else's, see scan_layout_pages.
+                targets.append(placed[0]["size"])
+                continue
             scale = scales[round(base, 1)]
             if placed[0]["size"] < base * scale:
                 scale = cramped.get(round(base, 1), placed[0]["size"] / base)
@@ -6047,6 +6106,186 @@ def merge_cross_page_sentences(sections: List[Tuple[str, str]],
     return sections
 
 
+# Where a scanned line's glyphs sit relative to its font size: tesseract's box runs from the
+# tallest glyph the line actually has to its lowest one, so a line in capitals only is shorter
+# than one with ascenders and descenders, at the same size.
+OCR_GLYPH_TOP = {"ascender": 0.72, "x-height": 0.5}
+OCR_GLYPH_DESCENT = 0.22
+OCR_DESCENDERS = set("gjpqyQ(),;[]{}")
+OCR_ASCENDERS = set("bdfhklt0123456789ABCDEFGHIJKLMNOPRSTUVWXYZÄÖÜÆØÅ'\"!?/|")
+OCR_COVER_PADDING = 1.5
+OCR_FULL_HEIGHT = set("bdfhklABCDEFGHIJKLMNOPRSTUVWXYZÄÖÜÆØÅ0123456789")
+OCR_SIZE_SNAP = 0.15
+# A sung line between staves still has to be mostly letters once its syllables are joined, or it
+# is notation that happened to read with some confidence: "JAN. | CE —— | z =" (55 %) came back
+# as an invented "Was ist los?", while "not com - mit a - - dul - te - ry." joins to 95 %.
+OCR_SUNG_MIN_LETTERS = 0.75
+# The dotted leader of a contents page or cast list reads as dots or as a long run of a few
+# letters ("ceessesesessesesessesss..."), and the model then translates it like a word. Measured
+# on Ruders KA's cast list: in a leader the two most frequent letters make up 72-94 % of it, in
+# real words of 10+ letters (German compounds, Danish OCR) 22-42 %.
+OCR_LEADER_DOTS = re.compile(r"[.·…]{4,}")
+OCR_LEADER_MIN_LENGTH = 10
+OCR_LEADER_TOP_LETTERS = 0.6
+
+
+def strip_leaders(text: str) -> str:
+    def leader(word: str) -> bool:
+        word = word.lower()
+        top = sum(count for _, count in Counter(word).most_common(2))
+        return len(word) >= OCR_LEADER_MIN_LENGTH and top / len(word) >= OCR_LEADER_TOP_LETTERS
+    return " ".join(word for word in OCR_LEADER_DOTS.sub(" ", text).split() if not leader(word))
+
+
+def letter_share(text: str) -> float:
+    visible = [c for c in text if not c.isspace()]
+    return sum(c.isalpha() for c in visible) / len(visible) if visible else 0.0
+
+
+def glyph_extent(text: str) -> Tuple[float, float]:
+    """How far a piece of text reaches above and below the baseline, in em: which of its glyphs
+    rise (capitals, ascenders, digits) and which descend decide its box's height."""
+    top = OCR_GLYPH_TOP["ascender" if any(c in OCR_ASCENDERS for c in text) else "x-height"]
+    return top, OCR_GLYPH_DESCENT if any(c in OCR_DESCENDERS for c in text) else 0.0
+
+
+def scan_line(line: Dict[str, Any], rect: "pymupdf.Rect", flip: "pymupdf.Matrix") -> Dict[str, Any]:
+    """One scanned line in the shape extract_pdf_layout gives a text line, from its box in the
+    page's raw frame. The size is the median of what each word's own box says: one box that
+    reaches into the line above, or a stray mark read along with the line, would otherwise set
+    the whole line in a size far off its neighbours'."""
+    text = line["text"]
+    px_to_pt = rect.height / max(line["box"][3] - line["box"][1], 1)
+    # Only words that reach the full ascender height: "t" and "i" stop short of it, and counting
+    # "want" or "it" as full height set lyrics a third smaller than the print around them.
+    estimates = sorted(height * px_to_pt / sum(glyph_extent(word)) for word, height in line.get("words", [])
+                       if any(c in OCR_FULL_HEIGHT for c in word)) or [rect.height / sum(glyph_extent(text))]
+    size = estimates[len(estimates) // 2]
+    descent = glyph_extent(text)[1]
+    bottom = (pymupdf.Point(rect.x0, rect.y1) * flip).y
+    return {"text": text, "x": rect.x0, "right": rect.x1, "y": bottom + descent * size, "size": size,
+            "bold": False, "serif": False, "italic": False, "color": 0}
+
+
+def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]],
+                      page_range: str = "") -> List[Dict[str, Any]]:
+    """A scanned document in extract_pdf_layout's shape, from the lines OCR found, so
+    render_pdf_layout_overlay can set the translation where the text was printed.
+
+    A score page goes line by line, its notation left out (see plan_pdf_page); any other page goes
+    by tesseract's own paragraphs. Each paragraph also carries the boxes the original occupies,
+    `cover` in the raw frame and `cover_px` in OCR pixels, for redact_translated_text to paint
+    over: the text of a scan is pixels in an image, there is nothing to delete.
+    """
+    scale = 72.0 / OCR_DPI
+    with pymupdf.open(stream=content, filetype="pdf") as document:
+        pages = []
+        for number in parse_page_range(page_range, document.page_count):
+            page = document[number - 1]
+            flip = pdf_page_flip_matrix(page)
+            # ponytail: assumes the crop box sits at the media box's corner, as scans do.
+            to_raw = pymupdf.Matrix(scale, scale) * page.derotation_matrix
+            lines = ocr_pages.get(number) or []
+            score = any(line["noise"] for line in lines)
+            groups: Dict[Any, List[Dict[str, Any]]] = {}
+            for position, line in enumerate(lines):
+                if line["noise"] or not has_translatable_text(line["text"]):
+                    continue
+                groups.setdefault(position if score else line["par"], []).append(line)
+            paragraphs = []
+            for group in groups.values():
+                rects = [pymupdf.Rect(line["box"]) * to_raw for line in group]
+                if score:
+                    text = join_sung_syllables(group[0]["text"])
+                    if letter_share(text) < OCR_SUNG_MIN_LETTERS:
+                        continue
+                elif sum(line["conf"] for line in group) / len(group) < OCR_NOISE_MAX_CONFIDENCE:
+                    # Not text tesseract was sure of - a logo read as "we" was set back as a huge
+                    # "wir" - so the original stays where it is, untouched.
+                    continue
+                else:
+                    # A word broken at the end of a line is joined back up for the model.
+                    text = re.sub(r"(?<=[^\W\d_])-\s+(?=[a-zäöüæøåß])", "", " ".join(line["text"] for line in group))
+                    text = strip_leaders(text)
+                if not has_translatable_text(text):
+                    continue
+                paragraphs.append({
+                    "text": text,
+                    "lines": [scan_line(line, rect, flip) for line, rect in zip(group, rects)],
+                    "cover": [rect + (-OCR_COVER_PADDING, -OCR_COVER_PADDING, OCR_COVER_PADDING, OCR_COVER_PADDING)
+                              for rect in rects],
+                    "cover_px": [line["box"] for line in group],
+                })
+            obstacles = []
+            if paragraphs and not score:
+                # Each size is only an estimate from the boxes, a few tenths apart for the same body
+                # text, and render_pdf_layout_overlay levels sizes by their exact value: left alone,
+                # paragraphs of one body text came out in visibly different sizes. Anything within
+                # 15 % of the page's body size is that size; headings stand further apart.
+                sizes = sorted(line["size"] for paragraph in paragraphs for line in paragraph["lines"])
+                body = sizes[len(sizes) // 2]
+                for paragraph in paragraphs:
+                    own = sorted(line["size"] for line in paragraph["lines"])[len(paragraph["lines"]) // 2]
+                    if abs(own - body) <= OCR_SIZE_SNAP * body:
+                        own = body
+                    for line in paragraph["lines"]:
+                        line["size"] = own
+            if score and paragraphs:
+                # Sung lines are set in one size, the page's typical one: each size is only an
+                # estimate from its own box, and lyrics a point apart look careless. And each sits
+                # in a box of its own (see enclosing_box_bottom), so a longer translation shrinks
+                # to its line instead of wrapping into the staff below.
+                sizes = sorted(line["size"] for paragraph in paragraphs for line in paragraph["lines"])
+                size = sizes[len(sizes) // 2]
+                right = max(line["right"] for paragraph in paragraphs for line in paragraph["lines"])
+                for paragraph in paragraphs:
+                    # Levelled with nothing: render_pdf_layout_overlay gives every paragraph of one
+                    # size the smallest scale any of them needed in the whole document, and one long
+                    # lyric anywhere then set every other line a third smaller than its print.
+                    paragraph["own_size"] = True
+                    for line in paragraph["lines"]:
+                        line["size"] = size
+                        obstacles.append({"x": line["x"] - 1, "right": right, "top": line["y"] + size,
+                                          "bottom": line["y"] - OCR_GLYPH_DESCENT * size - 0.5})
+            pages.append({
+                "number": number, "width": float(page.mediabox.width), "height": float(page.mediabox.height),
+                "paragraphs": paragraphs, "obstacles": obstacles, "columns": [], "row_rules": [], "widgets": [],
+                "scan": True,
+            })
+        return pages
+
+
+def scan_background(pixmap: "pymupdf.Pixmap", box: Sequence[int], dpi: int) -> Tuple[float, float, float]:
+    """The paper colour around a box of OCR pixels, so the cover blends into a yellowed or grey
+    scan instead of standing out white: a bright value from a ring just outside it, since staff
+    lines and note stems run through that ring too and the median came out grey."""
+    factor = dpi / OCR_DPI
+    left, top, right, bottom = (int(round(value * factor)) for value in box)
+    ring = []
+    for x in range(left - 2, right + 3):
+        for y in (top - 2, bottom + 2):
+            if 0 <= x < pixmap.width and 0 <= y < pixmap.height:
+                ring.append(pixmap.pixel(x, y))
+    for y in range(top - 2, bottom + 3):
+        for x in (left - 2, right + 2):
+            if 0 <= x < pixmap.width and 0 <= y < pixmap.height:
+                ring.append(pixmap.pixel(x, y))
+    if not ring:
+        return (1.0, 1.0, 1.0)
+    channels = list(zip(*ring))[:3]
+    return tuple(sorted(channel)[int(len(channel) * 0.9)] / 255 for channel in channels)
+
+
+def export_scan_with_translated_text(content: bytes, translated_text: str, page_range: str = "",
+                                     source: str = AUTO_SOURCE) -> bytes:
+    """The history re-export of a scan overlay: read the pages again and zip the stored
+    translations back on by position, as export_pdf_layout_with_translated_text does."""
+    ocr_pages: Dict[int, List[Dict[str, Any]]] = {}
+    extract_pdf_markdown_from_bytes(content, "application/pdf", page_range, source, ocr_pages)
+    blocks = [block.strip() for block in translated_text.split("\n\n")]
+    return render_pdf_layout_overlay(content, scan_layout_pages(content, ocr_pages, page_range), blocks)
+
+
 def is_score_page(text: str, noise: Optional[Set[str]]) -> bool:
     """Whether OCR found notation lines on this page (ocr_noise_lines)."""
     return bool(noise) and any(line.strip() in noise for line in text.splitlines())
@@ -6103,12 +6342,34 @@ def run_pdf_translate_job(
         # so the message says why instead of letting the job look stuck.
         extracting = "Extracting PDF (detecting scan language)" if source == AUTO_SOURCE else "Extracting PDF"
         update_job(job_id, status="running", message=extracting, started_at=time.time())
-        noise: Set[str] = set()
-        markdown = extract_pdf_markdown_from_bytes(content, content_type, page_range, source, noise)
+        ocr_pages: Dict[int, List[Dict[str, Any]]] = {}
+        markdown = extract_pdf_markdown_from_bytes(content, content_type, page_range, source, ocr_pages)
+        noise = {line["text"] for lines in ocr_pages.values() for line in lines if line["noise"]}
+        requested_source = source
         mixed = source == AUTO_SOURCE
         if mixed:
             source = detect_source_language(markdown)
             update_job(job_id, source=source)
+        if layout_fallback and any(ocr_pages.values()):
+            # Asked for the original layout: set the translation onto the scanned pages themselves.
+            pages = scan_layout_pages(content, ocr_pages, page_range)
+            paragraphs = [paragraph["text"] for page in pages for paragraph in page["paragraphs"]]
+            update_job(job_id, total=len(paragraphs), message=f"Translating 0 / {len(paragraphs)} chunks")
+            translated = translate_chunks(paragraphs, source, target, job_id, mixed)
+            # One line per paragraph, so the re-export's split on blank lines stays exact.
+            result = "\n\n".join(re.sub(r"\s+", " ", text).strip() for text in translated)
+            meta = {"layout": "true", "scan": "true", "page_range": page_range, "scan_source": requested_source}
+            history_id = save_history("translate-pdf-layout", result, source, target, filename, content, "pdf", meta)
+            update_job(job_id, message="Rendering PDF")
+            try:
+                history_original_export(history_id, "pdf", content, result, meta)
+            except Exception:
+                # Same as the layout job: the translation is saved, the download builds it again.
+                pass
+            update_job(job_id, status="complete", message="Complete", current=len(paragraphs),
+                       result=result, history_id=history_id, finished_at=time.time())
+            cleanup_job_payload(job_id)
+            return
         markdown = expand_lowercase_ligatures(markdown, source)
         sections = merge_cross_page_sentences(pdf_sections(markdown), noise)
         planned = [(page_number, plan_pdf_page(page_text, noise)) for page_number, page_text in sections]
@@ -6494,6 +6755,9 @@ def export_original_history_content(extension: str, content: bytes, text: str, s
     if extension in ("xlf", "xliff"):
         return export_xliff_with_translated_text(content, text)
     if extension == "pdf":
+        if source_meta.get("scan") == "true":
+            return export_scan_with_translated_text(content, text, source_meta.get("page_range", ""),
+                                                    source_meta.get("scan_source", AUTO_SOURCE))
         if source_meta.get("layout") == "true":
             return export_pdf_layout_with_translated_text(content, text, source_meta.get("page_range", ""))
         return create_text_pdf(text, content)
