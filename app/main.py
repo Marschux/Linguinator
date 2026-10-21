@@ -83,7 +83,26 @@ HISTORY_TIMEZONE = env_value("LINGUINATOR_TIMEZONE", "Europe/Berlin")
 TIME_FORMAT = "12h" if env_value("LINGUINATOR_TIME_FORMAT", "24h").strip() == "12h" else "24h"
 # One job at a time: two jobs on different language pairs would each want their own model.
 JOB_WORKERS = 1
-CPU_THREADS = int(env_value("LINGUINATOR_CPU_THREADS", "0"))
+
+
+def container_cpu_limit(path: str = "/sys/fs/cgroup/cpu.max") -> int:
+    """How many CPUs the container's cgroup quota allows, 0 when it sets none.
+
+    Torch otherwise starts one thread per core it can see, and a container limited to fewer
+    (`--cpus 4` on a 6-core host) gets throttled for running more: measured 119 s against 81 s
+    for the same 206 sentences once the threads matched the quota.
+    """
+    # ponytail: cgroup v2 only; a v1 host keeps the library default as before.
+    try:
+        quota, period = open(path, encoding="utf-8").read().split()[:2]
+    except (OSError, ValueError):
+        return 0
+    if quota == "max":
+        return 0
+    return max(1, min(os.cpu_count() or 1, -(-int(quota) // int(period))))
+
+
+CPU_THREADS = int(env_value("LINGUINATOR_CPU_THREADS", "0")) or container_cpu_limit()
 # What the UI starts with; a browser that has been switched keeps its own choice.
 UI_LANGUAGE = env_value("LINGUINATOR_UI_LANGUAGE", "en")
 # Where detection lands when it fails. Not the UI's preselection, which is auto-detect.
@@ -668,8 +687,8 @@ PARAGRAPH_LANGUAGE_MIN_CHARS = 200
 PARAGRAPH_LANGUAGE_MIN_PROBABILITY = 0.9
 
 
-def paragraph_language(text: str, document_source: str) -> str:
-    """The language of one paragraph of a mixed document, the document's own when unsure."""
+def paragraph_language(text: str, document_source: Optional[str]) -> Optional[str]:
+    """The language of one paragraph of a mixed document, `document_source` when unsure."""
     if len(text.strip()) < PARAGRAPH_LANGUAGE_MIN_CHARS:
         return document_source
     try:
@@ -690,7 +709,7 @@ def paragraph_language(text: str, document_source: str) -> str:
 PARAGRAPH_LANGUAGE_MIN_WORDS = 3
 
 
-def language_among(text: str, candidates: Sequence[str], document_source: str) -> str:
+def language_among(text: str, candidates: Sequence[str], document_source: Optional[str]) -> Optional[str]:
     """The language of a short piece, chosen only among `candidates` (internal codes)."""
     if len(re.findall(r"[^\W\d_]{2,}", text)) < PARAGRAPH_LANGUAGE_MIN_WORDS:
         return document_source
@@ -717,17 +736,22 @@ def language_groups(chunks: List[str], source: str, target: str, mixed: bool) ->
     """
     if not mixed:
         return [(source, list(range(len(chunks))))]
-    languages = [paragraph_language(chunk, source) for chunk in chunks]
-    found = sorted(set(languages) | {source})
+    # None where detection is unsure, kept apart from a real answer: `source` itself can be a
+    # fallback (detect_source_language answers English for a language it has no model for, and the
+    # multilingual model still translates that text), which must not count as "already English".
+    detected = [paragraph_language(chunk, None) for chunk in chunks]
+    proven = {language for language in detected if language}
+    found = sorted(proven | {source})
     if len(found) > 1:
         # A document proven mixed: the pieces too short to tell on their own pick among its languages.
-        languages = [language if language != source else language_among(chunk, found, source)
-                     for chunk, language in zip(chunks, languages)]
+        detected = [language or language_among(chunk, found, None) for chunk, language in zip(chunks, detected)]
+    # A document shown to be in the target language as a whole keeps its unsure pieces too.
+    keep_unsure = source == target and target in proven
     groups: Dict[str, List[int]] = {}
-    for index, language in enumerate(languages):
-        if language == target and language != source:
+    for index, language in enumerate(detected):
+        if language == target or (language is None and keep_unsure):
             continue
-        groups.setdefault(language, []).append(index)
+        groups.setdefault(language or source, []).append(index)
     return list(groups.items())
 
 
@@ -3680,16 +3704,26 @@ def wrap_text_to_width(text: str, width: Union[float, Sequence[float]], size: fl
     separator = "" if cjk else " "
 
     lines: List[str] = []
-    current = ""
+    current, current_width, current_script = "", 0.0, ""
     for unit in units:
         candidate = current + separator + unit if current else unit
-        # Measured in the face the line will actually be drawn in: bold runs wider, so wrapping
-        # it against regular metrics fits too much per line and overflows the column.
-        if current and pdf_measure_text(candidate, size, bold, serif, italic) > widths[min(len(lines), len(widths) - 1)]:
+        # The line keeps the face its first non-Latin character picked (detect_pdf_script), so it
+        # only has to be measured whole when that changes; otherwise the new word's width is added.
+        # Measuring the growing line from scratch was a tenth of a layout job (Two_Column_Paper:
+        # 1.6 million glyph lookups). Bold runs wider, hence the face the line is drawn in.
+        script = current_script or detect_pdf_script(unit)
+        font = script_font(bold, script, serif, italic)
+        if current and script == current_script:
+            width_so_far = current_width + font.text_length(separator + unit, fontsize=size)
+        else:
+            width_so_far = font.text_length(candidate, fontsize=size)
+        if current and width_so_far > widths[min(len(lines), len(widths) - 1)]:
             lines.append(current)
-            current = unit
+            current, script = unit, detect_pdf_script(unit)
+            width_so_far = script_font(bold, script, serif, italic).text_length(unit, fontsize=size)
         else:
             current = candidate
+        current_width, current_script = width_so_far, script
     if current:
         lines.append(current)
     return lines or [""]

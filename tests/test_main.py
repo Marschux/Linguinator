@@ -1276,6 +1276,17 @@ class MainTests(unittest.TestCase):
         # Nothing proves the document mixed without the long Danish paragraph: nothing moves.
         self.assertEqual(single, [("eng_Latn", [0, 1, 2])])
 
+    def test_a_document_already_in_the_target_language_stays_as_it_is(self):
+        german = [GERMAN_PARAGRAPH, "Vertragsgegenstand ist die Lieferung von Ware."]
+        # Czech has no entry in CORE_LANGUAGES, so detection falls back to English - and the
+        # multilingual model still translates it, which "already English" would have prevented.
+        czech = ["Smluvní strany se dohodly, že dodávka zboží bude provedena v souladu s podmínkami "
+                 "uvedenými v této smlouvě a že kupující uhradí kupní cenu nejpozději do třiceti dnů "
+                 "od převzetí zboží na účet prodávajícího uvedený v záhlaví této smlouvy."]
+
+        self.assertEqual(main.language_groups(german, "deu_Latn", "deu_Latn", mixed=True), [])
+        self.assertEqual(main.language_groups(czech, "eng_Latn", "eng_Latn", mixed=True), [("eng_Latn", [0])])
+
     def test_translate_chunks_batched_groups_a_mixed_document_by_language(self):
         chunks = ["Hello", DANISH_PARAGRAPH, "World", GERMAN_PARAGRAPH]
         calls = []
@@ -3900,6 +3911,21 @@ class MainTests(unittest.TestCase):
             main.configure_torch_threads(torch_module)
 
         self.assertEqual(torch_module.threads, 3)
+
+    def test_container_cpu_limit_reads_the_cgroup_quota(self):
+        temp_dir = test_temp_dir()
+        try:
+            path = temp_dir / "cpu.max"
+            path.write_text("250000 100000\n")
+            with patch.object(main.os, "cpu_count", return_value=6):
+                limited = main.container_cpu_limit(str(path))
+            path.write_text("max 100000\n")
+            unlimited = main.container_cpu_limit(str(path))
+            missing = main.container_cpu_limit(str(temp_dir / "absent"))
+        finally:
+            shutil.rmtree(temp_dir.parent, ignore_errors=True)
+
+        self.assertEqual((limited, unlimited, missing), (3, 0, 0))
 
     def test_languages_endpoint_returns_core_languages_without_loading_a_model(self):
         client = TestClient(main.app)
