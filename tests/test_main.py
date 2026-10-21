@@ -1264,6 +1264,18 @@ class MainTests(unittest.TestCase):
         # Short pieces detect unreliably and stay with the document.
         self.assertEqual(main.paragraph_language("Artefakte sind als realer Inhalt getaggt.", "deu_Latn"), "deu_Latn")
 
+    def test_short_pieces_of_a_mixed_document_pick_among_its_languages(self):
+        chunks = [DANISH_PARAGRAPH, "lykke eller sne. Maske er den, Maske er den,",
+                  "happiness or snow. Maybe it is, Maybe it is,", "FORSTE AKT"]
+
+        groups = main.language_groups(chunks, "eng_Latn", "deu_Latn", mixed=True)
+        single = main.language_groups(chunks[1:], "eng_Latn", "deu_Latn", mixed=True)
+
+        # A heading of two words is too little to go on and stays with the document.
+        self.assertEqual(groups, [("dan_Latn", [0, 1]), ("eng_Latn", [2, 3])])
+        # Nothing proves the document mixed without the long Danish paragraph: nothing moves.
+        self.assertEqual(single, [("eng_Latn", [0, 1, 2])])
+
     def test_translate_chunks_batched_groups_a_mixed_document_by_language(self):
         chunks = ["Hello", DANISH_PARAGRAPH, "World", GERMAN_PARAGRAPH]
         calls = []
