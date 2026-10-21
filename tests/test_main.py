@@ -1207,6 +1207,21 @@ class MainTests(unittest.TestCase):
         self.assertEqual(len(prose["paragraphs"][0]["cover"]), 2)
         self.assertTrue(prose["scan"])
 
+    def test_a_bilingual_score_translates_only_its_documents_language(self):
+        def line(text, noise=False):
+            return {"text": text, "box": (0, 0, 10, 10), "par": (1, 1), "conf": 90, "noise": noise, "words": []}
+
+        lines = [line("ne VV vv ve vy a", noise=True),
+                 line("were dif -rent I wish it were a - bout love or sun - sets or"),
+                 line("var en an-den hvis ba-re den var om kær-lig-hed el-ler sol-ned-gang-e el-ler"),
+                 line("hap-pi - ness or snow. May-be it is, May-be it is,"),
+                 line("lyk-ke el-ler sne. Må-ske er den, Må-ske er den,")]
+
+        # The Danish lines keep their original; nothing proves Danish elsewhere in this document.
+        self.assertEqual(main.secondary_lyrics(lines, "eng_Latn", set()), {2, 4})
+        # With Danish as the document's language, the English lines are the other ones.
+        self.assertEqual(main.secondary_lyrics(lines, "dan_Latn", set()), {1, 3})
+
     def test_a_scan_sent_for_layout_is_overprinted_and_exported_from_history(self):
         document = pymupdf.open()
         # A text layer under the "scan" too, as on a page whose layer failed text_layer_is_trustworthy:

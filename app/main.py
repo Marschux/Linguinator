@@ -6167,17 +6167,63 @@ def scan_line(line: Dict[str, Any], rect: "pymupdf.Rect", flip: "pymupdf.Matrix"
             "bold": False, "serif": False, "italic": False, "color": 0}
 
 
+SECONDARY_LYRICS_MIN_SHARE = 0.2
+
+
+def secondary_lyrics(lines: List[Dict[str, Any]], source: str, proven: Set[str]) -> Set[int]:
+    """Positions of the sung lines a bilingual score prints in its other language.
+
+    A score that carries the libretto twice (Ruders KA: English, with the Danish under it) came
+    back with two near-identical German lines stacked under every system. Only the document's own
+    language is translated; the other keeps its original. Each line picks among the languages the
+    document has shown to hold (language_among, 15 of 15 lyric lines right on Ruders), and among
+    the page's own strongest ones, so a score with no long prose to prove its second language
+    still finds it.
+    """
+    candidates = set(proven) | {source}
+    # Each line votes on its own; a language most of a fifth of them name is on the page. The page
+    # read as one text only ever named whichever language had more lines.
+    votes: Counter = Counter()
+    sung = [join_sung_syllables(line["text"]) for line in lines if not line["noise"]]
+    for text in sung:
+        if len(re.findall(r"[^\W\d_]{2,}", text)) >= PARAGRAPH_LANGUAGE_MIN_WORDS:
+            try:
+                votes[CORE_LANGUAGES.get(detect(text).split("-", 1)[0])] += 1
+            except LangDetectException:
+                continue
+    candidates |= {language for language, count in votes.items()
+                   if language and count >= max(2, SECONDARY_LYRICS_MIN_SHARE * len(sung))}
+    if len(candidates) < 2:
+        return set()
+    others = set()
+    for position, line in enumerate(lines):
+        if line["noise"]:
+            continue
+        language = language_among(join_sung_syllables(line["text"]), sorted(candidates), None)
+        if language and language != source:
+            others.add(position)
+    return others
+
+
 def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]],
-                      page_range: str = "") -> List[Dict[str, Any]]:
+                      page_range: str = "", source: Optional[str] = None) -> List[Dict[str, Any]]:
     """A scanned document in extract_pdf_layout's shape, from the lines OCR found, so
     render_pdf_layout_overlay can set the translation where the text was printed.
 
     A score page goes line by line, its notation left out (see plan_pdf_page); any other page goes
     by tesseract's own paragraphs. Each paragraph also carries the boxes the original occupies,
     `cover` in the raw frame and `cover_px` in OCR pixels, for redact_translated_text to paint
-    over: the text of a scan is pixels in an image, there is nothing to delete.
+    over: the text of a scan is pixels in an image, there is nothing to delete. With `source`, a
+    score's lines in another language than the document's keep their original (secondary_lyrics).
     """
     scale = 72.0 / OCR_DPI
+    proven: Set[str] = set()
+    if source:
+        # What the prose of the document proves it holds, see paragraph_language.
+        for lines in ocr_pages.values():
+            if not any(line["noise"] for line in lines):
+                proven |= {language for language in (paragraph_language(" ".join(line["text"] for line in lines), None),)
+                           if language}
     with pymupdf.open(stream=content, filetype="pdf") as document:
         pages = []
         for number in parse_page_range(page_range, document.page_count):
@@ -6187,9 +6233,10 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
             to_raw = pymupdf.Matrix(scale, scale) * page.derotation_matrix
             lines = ocr_pages.get(number) or []
             score = any(line["noise"] for line in lines)
+            skip = secondary_lyrics(lines, source, proven) if score and source else set()
             groups: Dict[Any, List[Dict[str, Any]]] = {}
             for position, line in enumerate(lines):
-                if line["noise"] or not has_translatable_text(line["text"]):
+                if line["noise"] or position in skip or not has_translatable_text(line["text"]):
                     continue
                 groups.setdefault(position if score else line["par"], []).append(line)
             paragraphs = []
@@ -6239,6 +6286,10 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
                 size = sizes[len(sizes) // 2]
                 right = max(line["right"] for paragraph in paragraphs for line in paragraph["lines"])
                 for paragraph in paragraphs:
+                    # Music is engraved in a serif; the sung text set in a grotesk stood out from
+                    # every mark around it.
+                    for line in paragraph["lines"]:
+                        line["serif"] = True
                     # Levelled with nothing: render_pdf_layout_overlay gives every paragraph of one
                     # size the smallest scale any of them needed in the whole document, and one long
                     # lyric anywhere then set every other line a third smaller than its print.
@@ -6277,13 +6328,13 @@ def scan_background(pixmap: "pymupdf.Pixmap", box: Sequence[int], dpi: int) -> T
 
 
 def export_scan_with_translated_text(content: bytes, translated_text: str, page_range: str = "",
-                                     source: str = AUTO_SOURCE) -> bytes:
+                                     source: str = AUTO_SOURCE, language: Optional[str] = None) -> bytes:
     """The history re-export of a scan overlay: read the pages again and zip the stored
     translations back on by position, as export_pdf_layout_with_translated_text does."""
     ocr_pages: Dict[int, List[Dict[str, Any]]] = {}
     extract_pdf_markdown_from_bytes(content, "application/pdf", page_range, source, ocr_pages)
     blocks = [block.strip() for block in translated_text.split("\n\n")]
-    return render_pdf_layout_overlay(content, scan_layout_pages(content, ocr_pages, page_range), blocks)
+    return render_pdf_layout_overlay(content, scan_layout_pages(content, ocr_pages, page_range, language), blocks)
 
 
 def is_score_page(text: str, noise: Optional[Set[str]]) -> bool:
@@ -6352,13 +6403,14 @@ def run_pdf_translate_job(
             update_job(job_id, source=source)
         if layout_fallback and any(ocr_pages.values()):
             # Asked for the original layout: set the translation onto the scanned pages themselves.
-            pages = scan_layout_pages(content, ocr_pages, page_range)
+            pages = scan_layout_pages(content, ocr_pages, page_range, source)
             paragraphs = [paragraph["text"] for page in pages for paragraph in page["paragraphs"]]
             update_job(job_id, total=len(paragraphs), message=f"Translating 0 / {len(paragraphs)} chunks")
             translated = translate_chunks(paragraphs, source, target, job_id, mixed)
             # One line per paragraph, so the re-export's split on blank lines stays exact.
             result = "\n\n".join(re.sub(r"\s+", " ", text).strip() for text in translated)
-            meta = {"layout": "true", "scan": "true", "page_range": page_range, "scan_source": requested_source}
+            meta = {"layout": "true", "scan": "true", "page_range": page_range, "scan_source": requested_source,
+                    "scan_language": source}
             history_id = save_history("translate-pdf-layout", result, source, target, filename, content, "pdf", meta)
             update_job(job_id, message="Rendering PDF")
             try:
@@ -6757,7 +6809,8 @@ def export_original_history_content(extension: str, content: bytes, text: str, s
     if extension == "pdf":
         if source_meta.get("scan") == "true":
             return export_scan_with_translated_text(content, text, source_meta.get("page_range", ""),
-                                                    source_meta.get("scan_source", AUTO_SOURCE))
+                                                    source_meta.get("scan_source", AUTO_SOURCE),
+                                                    source_meta.get("scan_language"))
         if source_meta.get("layout") == "true":
             return export_pdf_layout_with_translated_text(content, text, source_meta.get("page_range", ""))
         return create_text_pdf(text, content)
