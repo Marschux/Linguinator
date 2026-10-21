@@ -1053,8 +1053,25 @@ HALLUCINATION_MARKUP = re.compile(r"==|\[\[|]]|\{\{|}}")
 NO_REPEAT_NGRAM_SIZE = 6
 
 
+# English curly double quotes make OPUS-MT stop mid-sentence: MatterhornProtokoll's "... von
+# “Software” zu “Mensch”, aktualisierte Beschreibung auf Seite 2, ..." came back as "Change the test
+# method at 2 test points from" and nothing else, in transformers and CTranslate2 alike. The same
+# sentence with German „ “, straight quotes or none came back whole, and the model answers in
+# straight quotes anyway. Apostrophes (’) are left alone; they caused no such loss.
+CURLY_DOUBLE_QUOTES = str.maketrans({"“": '"', "”": '"'})
+
+
+# Symbol and Wingdings glyphs come out of a PDF as Private Use characters (U+E000-U+F8FF), U+F0B7
+# being Word's bullet. The model has never seen one and puts something of its own in its place:
+# MatterhornProtokoll's "... erfüllt:  Die Schrift verwendet MacRomanEncoding" came back with a
+# "的" there, and guard_hallucination rightly threw the whole sentence away.
+# ponytail: every such glyph becomes a bullet; map more of them if icons (a phone, a mail) matter.
+PRIVATE_USE = re.compile("[-]")
+
+
 def clean_source_text(text: str) -> str:
-    return LEADER_RUN.sub(" ", text).strip()
+    text = PRIVATE_USE.sub("•", LEADER_RUN.sub(" ", text))
+    return text.translate(CURLY_DOUBLE_QUOTES).strip()
 
 
 def guard_hallucination(source: str, translated: str, target: str = "") -> str:

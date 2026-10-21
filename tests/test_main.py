@@ -1169,6 +1169,13 @@ class MainTests(unittest.TestCase):
         self.assertEqual(main.ocr_noise_lines(tsv(score)), {"ne VV vv ve vy a", "iE h KI"})
         self.assertEqual(main.ocr_noise_lines(tsv(prose)), set())
 
+    def test_clean_source_text_spares_the_model_quotes_and_glyphs_it_stops_or_invents_on(self):
+        # English curly quotes cut the translation off mid-sentence; a Symbol-font bullet came back
+        # as an invented CJK character. Apostrophes stay.
+        self.assertEqual(main.clean_source_text("von “Software” zu “Mensch”"), 'von "Software" zu "Mensch"')
+        self.assertEqual(main.clean_source_text("erfüllt:  Die Schrift"), "erfüllt: • Die Schrift")
+        self.assertEqual(main.clean_source_text("The Handmaid’s Tale"), "The Handmaid’s Tale")
+
     def test_strip_leaders_drops_dotted_leaders_read_as_letters(self):
         self.assertEqual(main.strip_leaders("Ofglen ceessesesessesesessesssesssssseesssestssesesenees soprano"),
                          "Ofglen soprano")
