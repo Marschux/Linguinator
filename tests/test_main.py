@@ -12,7 +12,7 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 from xml.etree import ElementTree
 
 import pymupdf
@@ -877,7 +877,7 @@ class MainTests(unittest.TestCase):
                 markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
 
         self.assertIn("OCR text", markdown)
-        mocked_ocr.assert_called_once_with(b"%PDF", 1, main.AUTO_SOURCE)
+        mocked_ocr.assert_called_once_with(b"%PDF", 1, main.AUTO_SOURCE, noise=ANY)
 
     def test_favorite_languages_cap_at_three_plus_english(self):
         self.assertEqual(
@@ -1008,7 +1008,7 @@ class MainTests(unittest.TestCase):
         ]
         reads = []
 
-        def fake_read(image_path, script):
+        def fake_read(image_path, script, noise=None):
             reads.append(script)
             return f"text in {script}"
 
@@ -1218,7 +1218,7 @@ class MainTests(unittest.TestCase):
             with patch.object(main, "ocr_pdf_page", return_value="OCR text") as mocked_ocr:
                 main.extract_pdf_markdown_from_bytes(b"%PDF", source="fra_Latn")
 
-        mocked_ocr.assert_called_once_with(b"%PDF", 1, "fra_Latn")
+        mocked_ocr.assert_called_once_with(b"%PDF", 1, "fra_Latn", noise=ANY)
 
     def test_pdf_extraction_rereads_a_scanned_page_in_its_own_language(self):
         document = FakeDocument([FakePage(""), FakePage("")])
@@ -1226,12 +1226,38 @@ class MainTests(unittest.TestCase):
 
         with patch.object(main.pymupdf, "open", return_value=document):
             with patch.object(main, "detect_source_language", return_value="eng_Latn"):
-                with patch.object(main, "ocr_pdf_page", side_effect=lambda *_args: next(reads)) as mocked_ocr:
+                with patch.object(main, "ocr_pdf_page", side_effect=lambda *_args, **_kwargs: next(reads)) as mocked_ocr:
                     markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
 
         self.assertEqual([call.args[2] for call in mocked_ocr.call_args_list],
                          [main.AUTO_SOURCE, "eng_Latn", "dan_Latn"])
         self.assertIn("dansk igen", markdown)
+
+    def test_ocr_noise_lines_only_on_a_page_made_mostly_of_notation(self):
+        def tsv(lines):
+            rows = ["level\tpage_num\tblock_num\tpar_num\tline_num\tword_num\tleft\ttop\twidth\theight\tconf\ttext"]
+            for number, (conf, text) in enumerate(lines, start=1):
+                rows += [f"5\t1\t1\t1\t{number}\t{i}\t0\t0\t1\t1\t{conf}\t{word}"
+                         for i, word in enumerate(text.split(), start=1)]
+            return "\n".join(rows)
+
+        score = [(54, "ne VV vv ve vy a"), (28, "iE h KI"), (83, "I want you to hear it be-cause"), (95, "& | |")]
+        prose = [(55, "ACT TWO")] + [(95, "Here the classes are run by Aunt Lydia.")] * 9
+
+        self.assertEqual(main.ocr_noise_lines(tsv(score)), {"ne VV vv ve vy a", "iE h KI"})
+        self.assertEqual(main.ocr_noise_lines(tsv(prose)), set())
+
+    def test_a_score_page_translates_only_its_sung_lines(self):
+        page = "ne VV vv ve vy a\nhap-pi - ness or snow. May-be it is,\n33\nwere dif -rent _ I wish it were a - bout"
+
+        self.assertEqual(main.plan_pdf_page(page, {"ne VV vv ve vy a"}), [
+            ("ne VV vv ve vy a", False),
+            ("happiness or snow. Maybe it is,", True),
+            ("33", False),
+            ("were difrent I wish it were about", True),
+        ])
+        # Without notation it is an ordinary page, hyphens and all.
+        self.assertEqual(main.plan_pdf_page(page, set()), [(page, True)])
 
     def test_paragraph_language_only_overrides_the_document_when_sure(self):
         self.assertEqual(main.paragraph_language(DANISH_PARAGRAPH, "eng_Latn"), "dan_Latn")

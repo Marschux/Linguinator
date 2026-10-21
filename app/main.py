@@ -2291,14 +2291,49 @@ TSV_WORD_LEVEL = 5
 OCR_BLOCK_MIN_CHARS = 100
 
 
-def run_tesseract(image_path: Path, languages: str) -> str:
-    result = subprocess.run(
-        ["tesseract", str(image_path), "stdout", "-l", languages],
+# A score page's OCR is mostly staff lines and noteheads read as letters ("ne VV vv ve vy a"),
+# with the sung text in between. Measured 21.10.2026 on Ruders KA, mean word confidence per line:
+# sung text 65-96, noise below 62. Only a page made mostly of such lines counts as a score page:
+# there they were 54-87 % of all lines with a word in them, on prose pages 12 % at most (a
+# heading, a dotted contents leader), and leaving one prose line out would tear its sentence.
+OCR_NOISE_MAX_CONFIDENCE = 62
+OCR_NOISE_MIN_SHARE = 0.4
+
+
+def ocr_noise_lines(tsv: str) -> Set[str]:
+    """The lines of one tesseract read that are notation, not text - empty unless the image is
+    mostly made of them."""
+    lines: Dict[Tuple[str, str, str], List[Tuple[float, str]]] = {}
+    for row in tsv.splitlines()[1:]:
+        columns = row.split("\t")
+        if len(columns) >= 12 and int(columns[0]) == TSV_WORD_LEVEL and columns[11].strip():
+            lines.setdefault((columns[2], columns[3], columns[4]), []).append((float(columns[10]), columns[11]))
+    worded = [(" ".join(word for _, word in words), sum(conf for conf, _ in words) / len(words))
+              for words in lines.values()]
+    worded = [(text, conf) for text, conf in worded if has_translatable_text(text)]
+    noise = {text for text, conf in worded if conf < OCR_NOISE_MAX_CONFIDENCE}
+    return noise if len(noise) >= OCR_NOISE_MIN_SHARE * len(worded) > 0 else set()
+
+
+def run_tesseract(image_path: Path, languages: str, noise: Optional[Set[str]] = None) -> str:
+    """Plain text of an image; with `noise`, its notation lines (ocr_noise_lines) are added to it."""
+    if noise is None:
+        return subprocess.run(
+            ["tesseract", str(image_path), "stdout", "-l", languages],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    # Text and confidences from one run, written to files: tesseract cannot put both on stdout.
+    base = image_path.with_name(f"{image_path.stem}-ocr")
+    subprocess.run(
+        ["tesseract", str(image_path), str(base), "-l", languages, "txt", "tsv"],
         check=True,
         capture_output=True,
         text=True,
     )
-    return result.stdout.strip()
+    noise.update(ocr_noise_lines(base.with_suffix(".tsv").read_text(encoding="utf-8")))
+    return base.with_suffix(".txt").read_text(encoding="utf-8").strip()
 
 
 def ocr_page_osd(image_path: Path) -> Tuple[str, float]:
@@ -2517,7 +2552,7 @@ def ocr_page_blocks(image_path: Path, languages: str) -> List[Dict[str, Any]]:
     return found
 
 
-def ocr_read_with_detection(image_path: Path, script: str) -> str:
+def ocr_read_with_detection(image_path: Path, script: str, noise: Optional[Set[str]] = None) -> str:
     """Read an image whose language is unknown, given the script it is printed in.
 
     Auto-detect on a scan is a chicken-and-egg: detection needs text, text needs OCR, OCR needs
@@ -2526,7 +2561,9 @@ def ocr_read_with_detection(image_path: Path, script: str) -> str:
     language langdetect named.
     """
     probe = ocr_probe_languages(script)
-    text = run_tesseract(image_path, probe)
+    # Each read collects its own notation lines; only those of the read that is kept count.
+    found = set() if noise is not None else None
+    text = run_tesseract(image_path, probe, found)
     if not text:
         return text
     read_with = probe
@@ -2537,10 +2574,13 @@ def ocr_read_with_detection(image_path: Path, script: str) -> str:
         code = ocr_language_code(detect_source_language(text))
         if code == read_with:
             break
-        better = run_tesseract(image_path, code)
+        candidate = set() if noise is not None else None
+        better = run_tesseract(image_path, code, candidate)
         if not better:
             break
-        text, read_with = better, code
+        text, read_with, found = better, code, candidate
+    if noise is not None:
+        noise.update(found)
     return text
 
 
@@ -2572,12 +2612,14 @@ def ocr_block_scripts(content: bytes, page_number: int, blocks: List[Dict[str, A
     return results
 
 
-def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE) -> str:
+def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE,
+                 noise: Optional[Set[str]] = None) -> str:
+    """One scanned page as text; `noise` collects its notation lines, see ocr_noise_lines."""
     ensure_ocr_tools()
     with tempfile.TemporaryDirectory() as temp_dir:
         image_path = render_pdf_page(content, page_number, temp_dir)
         if source != AUTO_SOURCE:
-            return run_tesseract(image_path, ocr_language_code(source))
+            return run_tesseract(image_path, ocr_language_code(source), noise=noise)
 
         page_script = ocr_page_script(image_path)
         blocks = ocr_page_blocks(image_path, ocr_probe_languages(page_script))
@@ -2586,7 +2628,7 @@ def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE) ->
             # One script on the page, which is the normal case: read it in one go. Splitting a
             # page into blocks only to read each in the same language would cost several OCR
             # runs and lose the layout analysis' view of the whole page for nothing.
-            return ocr_read_with_detection(image_path, page_script)
+            return ocr_read_with_detection(image_path, page_script, noise=noise)
 
         # A mixed page. OSD picks one script for the whole image, so reading it in one go always
         # loses the other script's text: the majority wins and the rest is either dropped or
@@ -2596,7 +2638,7 @@ def ocr_pdf_page(content: bytes, page_number: int, source: str = AUTO_SOURCE) ->
         for index, (block, (script, region)) in enumerate(zip(blocks, block_scripts)):
             if region is None:
                 region = render_pdf_region(content, page_number, block["box"], temp_dir, f"read{index}")
-            text = ocr_read_with_detection(region, script)
+            text = ocr_read_with_detection(region, script, noise=noise)
             if text.strip():
                 pieces.append(text.strip())
         return "\n\n".join(pieces)
@@ -2607,7 +2649,10 @@ def extract_pdf_markdown_from_bytes(
     content_type: str = "application/pdf",
     page_range: str = "",
     source: str = AUTO_SOURCE,
+    noise: Optional[Set[str]] = None,
 ) -> str:
+    """The PDF as Markdown, one "# Page N" section per page; `noise` collects the notation lines
+    of scanned score pages (ocr_noise_lines), which a translation should leave alone."""
     if content_type not in ("application/pdf", "application/octet-stream"):
         raise HTTPException(status_code=400, detail="Only PDF uploads are supported")
 
@@ -2639,7 +2684,8 @@ def extract_pdf_markdown_from_bytes(
                     trust_text_layer = text_layer_is_trustworthy(content, index, text)
                 needs_ocr = not trust_text_layer
             if needs_ocr:
-                ocr_text = ocr_pdf_page(content, index, source)
+                page_noise: Set[str] = set()
+                ocr_text = ocr_pdf_page(content, index, source, noise=page_noise)
                 if ocr_text and auto:
                     if source == AUTO_SOURCE:
                         # Keep what the first scanned page turned out to be: the pages after it then
@@ -2650,9 +2696,14 @@ def extract_pdf_markdown_from_bytes(
                         # read with English traineddata, lost every æ/ø/å ("fgdselsrate").
                         own = paragraph_language(ocr_text, source)
                         if own != source:
-                            ocr_text = ocr_pdf_page(content, index, own) or ocr_text
+                            reread_noise: Set[str] = set()
+                            reread = ocr_pdf_page(content, index, own, noise=reread_noise)
+                            if reread:
+                                ocr_text, page_noise = reread, reread_noise
                 if ocr_text:
                     text = ocr_text
+                    if noise is not None:
+                        noise.update(page_noise)
 
             if text:
                 pages_with_text += 1
@@ -5907,7 +5958,8 @@ def pdf_sections(markdown: str):
     return sections
 
 
-def merge_cross_page_sentences(sections: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+def merge_cross_page_sentences(sections: List[Tuple[str, str]],
+                               noise: Optional[Set[str]] = None) -> List[Tuple[str, str]]:
     """Move a page's trailing incomplete sentence onto the next page's text.
 
     Pages are joined with a hard break regardless of where a sentence actually ends, so a
@@ -5923,7 +5975,9 @@ def merge_cross_page_sentences(sections: List[Tuple[str, str]]) -> List[Tuple[st
     sections = list(sections)
     for index in range(len(sections) - 1):
         number, text = sections[index]
-        if not text:
+        # A score page is planned line by line (plan_pdf_page), a carried line would land in the
+        # middle of the next one's.
+        if not text or is_score_page(text, noise) or is_score_page(sections[index + 1][1], noise):
             continue
         matches = list(SENTENCE_END.finditer(text))
         cut = matches[-1].end() if matches else 0
@@ -5936,6 +5990,43 @@ def merge_cross_page_sentences(sections: List[Tuple[str, str]]) -> List[Tuple[st
         sections[index] = (number, text[:cut].strip())
         sections[index + 1] = (next_number, (carry + " " + next_text).strip())
     return sections
+
+
+def is_score_page(text: str, noise: Optional[Set[str]]) -> bool:
+    """Whether OCR found notation lines on this page (ocr_noise_lines)."""
+    return bool(noise) and any(line.strip() in noise for line in text.splitlines())
+
+
+# Sung text is printed in syllables under the notes ("be - lieve", "hap-pi - ness", "a - - dul -
+# te - ry"); the model takes each piece for a word ("lyk-ke el-ler sne" came back
+# "Glück-Kee-El-Schnee"). "_" runs are the lines a held syllable is drawn out with.
+SUNG_SYLLABLE_BREAK = re.compile(r"(?<=[^\W\d_])\s*-[\s-]*(?=[^\W\d_])")
+SUNG_EXTENSION = re.compile(r"\s*_+\s*")
+
+
+def join_sung_syllables(line: str) -> str:
+    return SUNG_SYLLABLE_BREAK.sub("", SUNG_EXTENSION.sub(" ", line)).strip()
+
+
+def plan_pdf_page(text: str, noise: Optional[Set[str]]) -> List[Tuple[str, bool]]:
+    """A page's pieces and whether each is to be translated.
+
+    A score page goes line by line: its notation lines keep their original and only the sung
+    text and directions between them reach the model. Sent as a whole, the notation came back
+    as invented words wrapped around the lyrics, and took most of the job's time (Ruders KA:
+    4 h estimated for 50 pages).
+    """
+    if not is_score_page(text, noise):
+        return [(chunk, True) for chunk in split_long_text(text, MAX_CHARS)]
+    pieces = []
+    for line in (line.strip() for line in text.splitlines()):
+        if not line:
+            continue
+        if line in noise or not has_translatable_text(line):
+            pieces.append((line, False))
+        else:
+            pieces.append((join_sung_syllables(line), True))
+    return pieces
 
 
 def run_pdf_translate_job(
@@ -5953,22 +6044,24 @@ def run_pdf_translate_job(
         # so the message says why instead of letting the job look stuck.
         extracting = "Extracting PDF (detecting scan language)" if source == AUTO_SOURCE else "Extracting PDF"
         update_job(job_id, status="running", message=extracting, started_at=time.time())
-        markdown = extract_pdf_markdown_from_bytes(content, content_type, page_range, source)
+        noise: Set[str] = set()
+        markdown = extract_pdf_markdown_from_bytes(content, content_type, page_range, source, noise)
         mixed = source == AUTO_SOURCE
         if mixed:
             source = detect_source_language(markdown)
             update_job(job_id, source=source)
         markdown = expand_lowercase_ligatures(markdown, source)
-        sections = merge_cross_page_sentences(pdf_sections(markdown))
-        planned = [(page_number, split_long_text(page_text, MAX_CHARS)) for page_number, page_text in sections]
-        total = sum(len(chunks) for _, chunks in planned)
+        sections = merge_cross_page_sentences(pdf_sections(markdown), noise)
+        planned = [(page_number, plan_pdf_page(page_text, noise)) for page_number, page_text in sections]
+        chunks = [piece for _, pieces in planned for piece, translate in pieces if translate]
+        total = len(chunks)
         update_job(job_id, total=total, message=f"Translating 0 / {total} chunks")
 
         # All pages in one call, so a mixed document is grouped by language across pages, not per page.
-        translated = iter(translate_chunks([chunk for _, chunks in planned for chunk in chunks],
-                                           source, target, job_id, mixed))
-        pages = [f"# Page {page_number}\n\n" + "\n\n".join(next(translated) for _ in chunks)
-                 for page_number, chunks in planned]
+        translated = iter(translate_chunks(chunks, source, target, job_id, mixed))
+        pages = [f"# Page {page_number}\n\n" + "\n\n".join(next(translated) if translate else piece
+                                                          for piece, translate in pieces)
+                 for page_number, pieces in planned]
 
         result = "\n\n".join(pages)
         history_id = save_history("pdf", result, source, target, filename, content, "pdf")
