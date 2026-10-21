@@ -416,38 +416,38 @@ class MainTests(unittest.TestCase):
         self.assertEqual(" ".join(chunks), text)
 
     def test_basic_auth_allows_requests_when_disabled(self):
-        with patch.object(main, "AUTH_ENABLED", False):
+        with patch.object(main.config, "AUTH_ENABLED", False):
             response = TestClient(main.app).get("/")
 
         self.assertEqual(response.status_code, 200)
 
     def test_basic_auth_rejects_missing_credentials_when_enabled(self):
-        with patch.object(main, "AUTH_ENABLED", True):
-            with patch.object(main, "AUTH_PASSWORD", "secret"):
+        with patch.object(main.config, "AUTH_ENABLED", True):
+            with patch.object(main.config, "AUTH_PASSWORD", "secret"):
                 response = TestClient(main.app).get("/")
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.headers["www-authenticate"], 'Basic realm="Linguinator"')
 
     def test_basic_auth_rejects_wrong_credentials(self):
-        with patch.object(main, "AUTH_ENABLED", True):
-            with patch.object(main, "AUTH_USERNAME", "admin"):
-                with patch.object(main, "AUTH_PASSWORD", "secret"):
+        with patch.object(main.config, "AUTH_ENABLED", True):
+            with patch.object(main.config, "AUTH_USERNAME", "admin"):
+                with patch.object(main.config, "AUTH_PASSWORD", "secret"):
                     response = TestClient(main.app).get("/", headers=self.auth_header(password="wrong"))
 
         self.assertEqual(response.status_code, 401)
 
     def test_basic_auth_accepts_configured_credentials(self):
-        with patch.object(main, "AUTH_ENABLED", True):
-            with patch.object(main, "AUTH_USERNAME", "admin"):
-                with patch.object(main, "AUTH_PASSWORD", "secret"):
+        with patch.object(main.config, "AUTH_ENABLED", True):
+            with patch.object(main.config, "AUTH_USERNAME", "admin"):
+                with patch.object(main.config, "AUTH_PASSWORD", "secret"):
                     response = TestClient(main.app).get("/", headers=self.auth_header())
 
         self.assertEqual(response.status_code, 200)
 
     def test_health_stays_public_when_basic_auth_is_enabled(self):
-        with patch.object(main, "AUTH_ENABLED", True):
-            with patch.object(main, "AUTH_PASSWORD", "secret"):
+        with patch.object(main.config, "AUTH_ENABLED", True):
+            with patch.object(main.config, "AUTH_PASSWORD", "secret"):
                 response = TestClient(main.app).get("/health")
 
         self.assertEqual(response.status_code, 200)
@@ -458,13 +458,13 @@ class MainTests(unittest.TestCase):
         self.assertEqual(response.json()["version"], main.app.version)
 
     def test_health_reports_time_format(self):
-        with patch.object(main, "TIME_FORMAT", "24h"):
+        with patch.object(main.config, "TIME_FORMAT", "24h"):
             response = TestClient(main.app).get("/health")
 
         self.assertEqual(response.json()["time_format"], "24h")
 
     def test_health_reports_proxy_configuration(self):
-        with patch.object(main, "ROOT_PATH", "/linguinator"):
+        with patch.object(main.config, "ROOT_PATH", "/linguinator"):
             response = TestClient(main.app).get("/health")
 
         self.assertEqual(response.status_code, 200)
@@ -543,7 +543,7 @@ class MainTests(unittest.TestCase):
     def test_run_translator_sends_each_text_as_its_own_capped_entry(self):
         tokenizer, translator = FakeTokenizer(), FakeTranslator(lambda tokens: ["Hallo"] + tokens[1:])
 
-        with patch.object(main, "load_model", return_value=(tokenizer, translator)):
+        with patch.object(main.models, "load_model", return_value=(tokenizer, translator)):
             translated = main.run_translator("Helsinki-NLP/opus-mt-en-de", ["Hello world", "Hello there"])
 
         self.assertEqual(translated, ["Hallo world", "Hallo there"])
@@ -565,8 +565,8 @@ class MainTests(unittest.TestCase):
         self.assertEqual(main.normalize_translated_text("Wirklich!Ja klar."), "Wirklich! Ja klar.")
 
     def test_translate_one_normalizes_missing_sentence_space(self):
-        with patch.object(main, "load_model", return_value=(FakeTokenizer(), None)):
-            with patch.object(main, "run_translator", return_value=["teilen.Wenn Sie"]):
+        with patch.object(main.models, "load_model", return_value=(FakeTokenizer(), None)):
+            with patch.object(main.translation, "run_translator", return_value=["teilen.Wenn Sie"]):
                 translated = main.translate_one("Hello", "eng_Latn", "deu_Latn")
 
         self.assertEqual(translated, "teilen. Wenn Sie")
@@ -576,22 +576,22 @@ class MainTests(unittest.TestCase):
         # translation because one sentence in it had run off.
         answers = ["Der erste Satz.", "Der Präsident. — Das Wort hat die Fraktion der Europäischen Volkspartei."]
 
-        with patch.object(main, "load_model", return_value=(FakeTokenizer(), None)):
-            with patch.object(main, "run_translator", return_value=answers):
+        with patch.object(main.models, "load_model", return_value=(FakeTokenizer(), None)):
+            with patch.object(main.translation, "run_translator", return_value=answers):
                 translated = main.translate_one("The first sentence. Watch TV.", "eng_Latn", "deu_Latn")
 
         self.assertEqual(translated, "Der erste Satz. Watch TV.")
 
     def test_translate_batch_maps_results_back_by_position_and_skips_empties(self):
-        with patch.object(main, "load_model", return_value=(FakeTokenizer(), None)):
-            with patch.object(main, "run_translator", return_value=["Eins", "Zwei"]) as run:
+        with patch.object(main.models, "load_model", return_value=(FakeTokenizer(), None)):
+            with patch.object(main.translation, "run_translator", return_value=["Eins", "Zwei"]) as run:
                 translated = main.translate_batch(["Hello", "", "World"], "eng_Latn", "deu_Latn")
 
         self.assertEqual(translated, ["Eins", "", "Zwei"])
         self.assertEqual(run.call_args.args[1], ["Hello", "World"])
 
     def test_translate_batch_empty_input_skips_model_call(self):
-        with patch.object(main, "load_model", side_effect=AssertionError("should not load a model")):
+        with patch.object(main.models, "load_model", side_effect=AssertionError("should not load a model")):
             translated = main.translate_batch(["", ""], "eng_Latn", "deu_Latn")
 
         self.assertEqual(translated, ["", ""])
@@ -626,14 +626,14 @@ class MainTests(unittest.TestCase):
         self.assertEqual(main.iso_639_1("eng_Latn"), "en")
 
     def test_resolve_model_prefers_dedicated_pair_over_fallback(self):
-        with patch.object(main, "OPUS_PAIRS", {"en>de": {"model_id": "Helsinki-NLP/opus-mt-en-de", "license": "cc-by-4.0"}}):
+        with patch.object(main.langs, "OPUS_PAIRS", {"en>de": {"model_id": "Helsinki-NLP/opus-mt-en-de", "license": "cc-by-4.0"}}):
             model_id, dedicated = main.resolve_model("eng_Latn", "deu_Latn")
 
         self.assertEqual(model_id, "Helsinki-NLP/opus-mt-en-de")
         self.assertTrue(dedicated)
 
     def test_resolve_model_falls_back_when_pair_not_curated(self):
-        with patch.object(main, "OPUS_PAIRS", {}):
+        with patch.object(main.langs, "OPUS_PAIRS", {}):
             model_id, dedicated = main.resolve_model("eng_Latn", "rus_Cyrl")
 
         self.assertEqual(model_id, main.FALLBACK_MODEL_ID)
@@ -646,25 +646,25 @@ class MainTests(unittest.TestCase):
             seen_model_ids.append(model_id)
             return FakeTokenizer(), FakeTranslator()
 
-        with patch.object(main, "OPUS_PAIRS", {"en>de": {"model_id": "Helsinki-NLP/opus-mt-en-de", "license": "x"}}):
-            with patch.object(main, "load_model", fake_load_model):
+        with patch.object(main.langs, "OPUS_PAIRS", {"en>de": {"model_id": "Helsinki-NLP/opus-mt-en-de", "license": "x"}}):
+            with patch.object(main.models, "load_model", fake_load_model):
                 main.translate_one("Hello", "eng_Latn", "deu_Latn")
 
         self.assertEqual(set(seen_model_ids), {"Helsinki-NLP/opus-mt-en-de"})
 
     def test_language_codes_returns_core_languages(self):
-        with patch.object(main, "CORE_LANGUAGES", {"en": "eng_Latn", "de": "deu_Latn"}):
+        with patch.object(main.langs, "CORE_LANGUAGES", {"en": "eng_Latn", "de": "deu_Latn"}):
             self.assertEqual(main.language_codes(), ["deu_Latn", "eng_Latn"])
 
     def test_model_idle_unload_clears_cached_model_after_timeout(self):
         model_loader = FakeCachedLoader((FakeTokenizer(), FakeTranslator()))
         tokenizer_loader = FakeCachedLoader(FakeTokenizer())
 
-        with patch.object(main, "load_model", model_loader):
-            with patch.object(main, "load_tokenizer", tokenizer_loader):
-                with patch.object(main, "MODEL_IDLE_SECONDS", 1200):
-                    with patch.object(main, "MODEL_ACTIVE_USERS", 0):
-                        with patch.object(main, "MODEL_LAST_USED", 100.0):
+        with patch.object(main.models, "load_model", model_loader):
+            with patch.object(main.models, "load_tokenizer", tokenizer_loader):
+                with patch.object(main.config, "MODEL_IDLE_SECONDS", 1200):
+                    with patch.object(main.models, "MODEL_ACTIVE_USERS", 0):
+                        with patch.object(main.models, "MODEL_LAST_USED", 100.0):
                             unloaded = main.unload_model_if_idle(now=1301.0)
 
         self.assertTrue(unloaded)
@@ -675,11 +675,11 @@ class MainTests(unittest.TestCase):
         model_loader = FakeCachedLoader((FakeTokenizer(), FakeTranslator()))
         tokenizer_loader = FakeCachedLoader(FakeTokenizer())
 
-        with patch.object(main, "load_model", model_loader):
-            with patch.object(main, "load_tokenizer", tokenizer_loader):
-                with patch.object(main, "MODEL_IDLE_SECONDS", 1200):
-                    with patch.object(main, "MODEL_ACTIVE_USERS", 0):
-                        with patch.object(main, "MODEL_LAST_USED", 100.0):
+        with patch.object(main.models, "load_model", model_loader):
+            with patch.object(main.models, "load_tokenizer", tokenizer_loader):
+                with patch.object(main.config, "MODEL_IDLE_SECONDS", 1200):
+                    with patch.object(main.models, "MODEL_ACTIVE_USERS", 0):
+                        with patch.object(main.models, "MODEL_LAST_USED", 100.0):
                             unloaded = main.unload_model_if_idle(now=1000.0)
 
         self.assertFalse(unloaded)
@@ -690,13 +690,13 @@ class MainTests(unittest.TestCase):
         model_loader = FakeCachedLoader((FakeTokenizer(), FakeTranslator()))
         tokenizer_loader = FakeCachedLoader(FakeTokenizer())
 
-        with patch.object(main, "load_model", model_loader):
-            with patch.object(main, "load_tokenizer", tokenizer_loader):
-                with patch.object(main, "MODEL_IDLE_SECONDS", 0):
+        with patch.object(main.models, "load_model", model_loader):
+            with patch.object(main.models, "load_tokenizer", tokenizer_loader):
+                with patch.object(main.config, "MODEL_IDLE_SECONDS", 0):
                     self.assertFalse(main.unload_model_if_idle(now=2000.0))
-                with patch.object(main, "MODEL_IDLE_SECONDS", 1200):
-                    with patch.object(main, "MODEL_ACTIVE_USERS", 1):
-                        with patch.object(main, "MODEL_LAST_USED", 100.0):
+                with patch.object(main.config, "MODEL_IDLE_SECONDS", 1200):
+                    with patch.object(main.models, "MODEL_ACTIVE_USERS", 1):
+                        with patch.object(main.models, "MODEL_LAST_USED", 100.0):
                             self.assertFalse(main.unload_model_if_idle(now=2000.0))
 
         self.assertFalse(model_loader.cleared)
@@ -706,7 +706,7 @@ class MainTests(unittest.TestCase):
         document = FakeDocument([FakePage("Hello PDF\n"), FakePage("")])
 
         with patch.object(main.pymupdf, "open", return_value=document):
-            with patch.object(main, "ocr_pdf_page", return_value=""):
+            with patch.object(main.ocr, "ocr_pdf_page", return_value=""):
                 markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
 
         self.assertIn("# Page 1", markdown)
@@ -718,7 +718,7 @@ class MainTests(unittest.TestCase):
         document = FakeDocument([FakePage("tiny")])
 
         with patch.object(main.pymupdf, "open", return_value=document):
-            with patch.object(main, "ocr_pdf_page", return_value=""):
+            with patch.object(main.ocr, "ocr_pdf_page", return_value=""):
                 markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
 
         self.assertIn("tiny", markdown)
@@ -776,7 +776,7 @@ class MainTests(unittest.TestCase):
         document = FakeDocument([FakePage(""), FakePage(None)])
 
         with patch.object(main.pymupdf, "open", return_value=document):
-            with patch.object(main, "ocr_pdf_page", return_value=""):
+            with patch.object(main.ocr, "ocr_pdf_page", return_value=""):
                 with self.assertRaises(HTTPException) as raised:
                     main.extract_pdf_markdown_from_bytes(b"%PDF")
 
@@ -795,7 +795,7 @@ class MainTests(unittest.TestCase):
         document = FakeDocument([FakePage("")])
 
         with patch.object(main.pymupdf, "open", return_value=document):
-            with patch.object(main, "ocr_pdf_page", return_value="OCR text") as mocked_ocr:
+            with patch.object(main.ocr, "ocr_pdf_page", return_value="OCR text") as mocked_ocr:
                 markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
 
         self.assertIn("OCR text", markdown)
@@ -836,7 +836,7 @@ class MainTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_ocr_language_code_maps_source_language_to_tesseract(self):
-        with patch.object(main, "installed_ocr_languages", return_value=("deu", "eng", "fra", "chi_sim")):
+        with patch.object(main.ocr, "installed_ocr_languages", return_value=("deu", "eng", "fra", "chi_sim")):
             self.assertEqual(main.ocr_language_code("deu_Latn"), "deu")
             self.assertEqual(main.ocr_language_code("fra_Latn"), "fra")
             # Tesseract names this differently than we do.
@@ -845,14 +845,14 @@ class MainTests(unittest.TestCase):
 
     def test_ocr_language_code_falls_back_when_the_package_is_missing(self):
         # An unknown -l aborts tesseract and takes the whole job with it.
-        with patch.object(main, "installed_ocr_languages", return_value=("deu", "eng")):
+        with patch.object(main.ocr, "installed_ocr_languages", return_value=("deu", "eng")):
             self.assertEqual(main.ocr_language_code("swe_Latn"), "eng")
 
     def test_ocr_pdf_page_reads_in_the_jobs_source_language(self):
         completed = SimpleNamespace(stdout="scanned text")
 
         with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
-            with patch.object(main, "installed_ocr_languages", return_value=("deu", "eng", "rus")):
+            with patch.object(main.ocr, "installed_ocr_languages", return_value=("deu", "eng", "rus")):
                 with patch.object(main.subprocess, "run", return_value=completed) as mocked_run:
                     main.ocr_pdf_page(b"%PDF", 1, "rus_Cyrl")
 
@@ -891,8 +891,8 @@ class MainTests(unittest.TestCase):
             {"box": (0, 0, 500, 300), "text": "x" * main.OCR_BLOCK_MIN_CHARS},
             {"box": (0, 400, 500, 440), "text": "kurz"},
         ]
-        with patch.object(main, "render_pdf_region", return_value=Path("crop.png")):
-            with patch.object(main, "ocr_page_script", return_value="Devanagari") as osd:
+        with patch.object(main.ocr, "render_pdf_region", return_value=Path("crop.png")):
+            with patch.object(main.ocr, "ocr_page_script", return_value="Devanagari") as osd:
                 results = main.ocr_block_scripts(b"%PDF", 1, blocks, "Latin", "/tmp")
 
         self.assertEqual([script for script, _region in results], ["Devanagari", "Latin"])
@@ -904,10 +904,10 @@ class MainTests(unittest.TestCase):
         # A Chinese page had a block come back "Korean". ocr_probe_languages can only answer
         # English for that, and reading Han as English returns nothing at all.
         blocks = [{"box": (0, 0, 500, 300), "text": "x" * main.OCR_BLOCK_MIN_CHARS}]
-        with patch.object(main, "render_pdf_region", return_value=Path("crop.png")):
+        with patch.object(main.ocr, "render_pdf_region", return_value=Path("crop.png")):
             for reported in ("Korean", "HanT", ""):
                 with self.subTest(script=reported):
-                    with patch.object(main, "ocr_page_script", return_value=reported):
+                    with patch.object(main.ocr, "ocr_page_script", return_value=reported):
                         self.assertEqual(
                             [script for script, _region in main.ocr_block_scripts(b"%PDF", 1, blocks, "Han", "/tmp")],
                             ["Han"],
@@ -935,13 +935,13 @@ class MainTests(unittest.TestCase):
             return f"text in {script}"
 
         with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
-            with patch.object(main, "render_pdf_page", return_value=Path("page.png")):
-                with patch.object(main, "render_pdf_region", return_value=Path("crop.png")):
-                    with patch.object(main, "ocr_page_script", return_value="Latin"):
-                        with patch.object(main, "ocr_page_blocks", return_value=blocks):
-                            with patch.object(main, "ocr_block_scripts",
+            with patch.object(main.ocr, "render_pdf_page", return_value=Path("page.png")):
+                with patch.object(main.ocr, "render_pdf_region", return_value=Path("crop.png")):
+                    with patch.object(main.ocr, "ocr_page_script", return_value="Latin"):
+                        with patch.object(main.ocr, "ocr_page_blocks", return_value=blocks):
+                            with patch.object(main.ocr, "ocr_block_scripts",
                                               return_value=[("Devanagari", None), ("Latin", None)]):
-                                with patch.object(main, "ocr_read_with_detection", fake_read):
+                                with patch.object(main.ocr, "ocr_read_with_detection", fake_read):
                                     text = main.ocr_pdf_page(b"%PDF", 1)
 
         self.assertEqual(reads, ["Devanagari", "Latin"])
@@ -953,11 +953,11 @@ class MainTests(unittest.TestCase):
         blocks = [{"box": (0, 0, 500, 300), "text": "x" * main.OCR_BLOCK_MIN_CHARS}] * 3
 
         with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
-            with patch.object(main, "render_pdf_page", return_value=Path("page.png")):
-                with patch.object(main, "ocr_page_script", return_value="Latin"):
-                    with patch.object(main, "ocr_page_blocks", return_value=blocks):
-                        with patch.object(main, "ocr_block_scripts", return_value=[("Latin", None)] * 3):
-                            with patch.object(main, "ocr_read_with_detection",
+            with patch.object(main.ocr, "render_pdf_page", return_value=Path("page.png")):
+                with patch.object(main.ocr, "ocr_page_script", return_value="Latin"):
+                    with patch.object(main.ocr, "ocr_page_blocks", return_value=blocks):
+                        with patch.object(main.ocr, "ocr_block_scripts", return_value=[("Latin", None)] * 3):
+                            with patch.object(main.ocr, "ocr_read_with_detection",
                                               return_value="whole page") as read:
                                 text = main.ocr_pdf_page(b"%PDF", 1)
 
@@ -966,7 +966,7 @@ class MainTests(unittest.TestCase):
 
     def test_ocr_probe_languages_stay_within_the_detected_script(self):
         installed = ("ara", "bul", "deu", "eng", "fra", "heb", "rus", "spa", "ukr")
-        with patch.object(main, "installed_ocr_languages", return_value=installed):
+        with patch.object(main.ocr, "installed_ocr_languages", return_value=installed):
             # Latin: English is in there, and never more than three.
             latin = main.ocr_probe_languages("Latin").split("+")
             self.assertIn("eng", latin)
@@ -982,7 +982,7 @@ class MainTests(unittest.TestCase):
     def test_ocr_probe_keeps_english_out_when_a_package_is_missing(self):
         # ukr has no package here. Falling back to eng for it would put a Latin language into
         # a Cyrillic probe, which is exactly what the probe is meant to avoid.
-        with patch.object(main, "installed_ocr_languages", return_value=("bul", "eng", "rus")):
+        with patch.object(main.ocr, "installed_ocr_languages", return_value=("bul", "eng", "rus")):
             self.assertEqual(main.ocr_probe_languages("Cyrillic"), "rus+bul")
 
     def test_installed_ocr_languages_drops_only_the_header(self):
@@ -999,7 +999,7 @@ class MainTests(unittest.TestCase):
 
     def test_ocr_page_script_drops_a_low_confidence_guess(self):
         # A sparse Danish/English title page guessed as Cyrillic locked a whole score to Ukrainian.
-        with patch.object(main, "ocr_page_osd", return_value=("Cyrillic", 1.67)):
+        with patch.object(main.ocr, "ocr_page_osd", return_value=("Cyrillic", 1.67)):
             self.assertEqual(main.ocr_page_script(Path("page.png")), "")
 
     def test_ocr_page_osd_reads_the_confidence_too(self):
@@ -1022,18 +1022,18 @@ class MainTests(unittest.TestCase):
         # A Hebrew page whose font maps to Latin: the text layer claims Latin, the page shows
         # Hebrew. Nothing in the file flags this, the fonts do carry a ToUnicode table.
         with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
-            with patch.object(main, "render_pdf_page", return_value=Path("page.png")):
-                with patch.object(main, "ocr_page_osd", return_value=("Hebrew", 12.22)):
+            with patch.object(main.ocr, "render_pdf_page", return_value=Path("page.png")):
+                with patch.object(main.ocr, "ocr_page_osd", return_value=("Hebrew", 12.22)):
                     self.assertFalse(main.text_layer_is_trustworthy(b"%PDF", 1, "hinmrg tilrdph"))
-                with patch.object(main, "ocr_page_osd", return_value=("Latin", 4.17)):
+                with patch.object(main.ocr, "ocr_page_osd", return_value=("Latin", 4.17)):
                     self.assertTrue(main.text_layer_is_trustworthy(b"%PDF", 1, "hinmrg tilrdph"))
                 # Japanese is written with Han characters, so those two never contradict.
-                with patch.object(main, "ocr_page_osd", return_value=("Japanese", 10.0)):
+                with patch.object(main.ocr, "ocr_page_osd", return_value=("Japanese", 10.0)):
                     self.assertTrue(main.text_layer_is_trustworthy(b"%PDF", 1, "作成日 東京都"))
                 # OSD silent, or a page without letters: nothing to contradict.
-                with patch.object(main, "ocr_page_osd", return_value=("", 0.0)):
+                with patch.object(main.ocr, "ocr_page_osd", return_value=("", 0.0)):
                     self.assertTrue(main.text_layer_is_trustworthy(b"%PDF", 1, "hinmrg tilrdph"))
-                with patch.object(main, "ocr_page_osd", return_value=("Hebrew", 12.22)):
+                with patch.object(main.ocr, "ocr_page_osd", return_value=("Hebrew", 12.22)):
                     self.assertTrue(main.text_layer_is_trustworthy(b"%PDF", 1, "12345"))
 
     def test_text_layer_is_trusted_when_osd_has_too_little_signal(self):
@@ -1041,13 +1041,13 @@ class MainTests(unittest.TestCase):
         # 0.42 and 1.67 - measured on the real fixture, too little real-letter signal to mean
         # anything, unlike a genuinely broken page (Hebrew at 2.50-12.22).
         with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
-            with patch.object(main, "render_pdf_page", return_value=Path("page.png")):
-                with patch.object(main, "ocr_page_osd", return_value=("Cyrillic", 0.42)):
+            with patch.object(main.ocr, "render_pdf_page", return_value=Path("page.png")):
+                with patch.object(main.ocr, "ocr_page_osd", return_value=("Cyrillic", 0.42)):
                     self.assertTrue(main.text_layer_is_trustworthy(b"%PDF", 1, "Tisch 12,50 EUR"))
-                with patch.object(main, "ocr_page_osd", return_value=("Cyrillic", 1.67)):
+                with patch.object(main.ocr, "ocr_page_osd", return_value=("Cyrillic", 1.67)):
                     self.assertTrue(main.text_layer_is_trustworthy(b"%PDF", 1, "Tisch 12,50 EUR"))
                 # Right at and above the threshold, a genuine mismatch is still caught.
-                with patch.object(main, "ocr_page_osd", return_value=("Hebrew", 2.50)):
+                with patch.object(main.ocr, "ocr_page_osd", return_value=("Hebrew", 2.50)):
                     self.assertFalse(main.text_layer_is_trustworthy(b"%PDF", 1, "hinmrg tilrdph"))
 
     def test_pdf_extraction_falls_back_to_ocr_for_a_lying_text_layer(self):
@@ -1055,8 +1055,8 @@ class MainTests(unittest.TestCase):
                                  FakePage("hinmrg lß tilrdph hqilbuprh und mehr text")])
 
         with patch.object(main.pymupdf, "open", return_value=document):
-            with patch.object(main, "text_layer_is_trustworthy", return_value=False) as checked:
-                with patch.object(main, "ocr_pdf_page", return_value="הרפובליקה") as mocked_ocr:
+            with patch.object(main.ocr, "text_layer_is_trustworthy", return_value=False) as checked:
+                with patch.object(main.ocr, "ocr_pdf_page", return_value="הרפובליקה") as mocked_ocr:
                     markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
 
         self.assertIn("הרפובליקה", markdown)
@@ -1066,11 +1066,11 @@ class MainTests(unittest.TestCase):
 
     def test_ocr_probe_reads_traditional_chinese_with_its_own_model(self):
         installed = ("chi_sim", "chi_tra", "deu", "eng", "fra")
-        with patch.object(main, "installed_ocr_languages", return_value=installed):
+        with patch.object(main.ocr, "installed_ocr_languages", return_value=installed):
             self.assertEqual(main.ocr_probe_languages("HanT"), "chi_tra+chi_sim")
             self.assertEqual(main.ocr_probe_languages("Han"), "chi_sim")
         # Without the package it must not appear, an unknown -l aborts tesseract.
-        with patch.object(main, "installed_ocr_languages", return_value=("chi_sim", "eng")):
+        with patch.object(main.ocr, "installed_ocr_languages", return_value=("chi_sim", "eng")):
             self.assertEqual(main.ocr_probe_languages("HanT"), "chi_sim")
 
     def test_ocr_page_script_lowers_the_osd_character_threshold(self):
@@ -1088,9 +1088,9 @@ class MainTests(unittest.TestCase):
 
     def test_auto_detect_reads_a_scan_twice(self):
         with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
-            with patch.object(main, "installed_ocr_languages", return_value=("deu", "eng", "fra")):
-                with patch.object(main, "ocr_page_script", return_value="Latin"):
-                    with patch.object(main, "run_tesseract", side_effect=["Der Vertrag wurde geprueft", "Der Vertrag wurde geprüft"]) as reads:
+            with patch.object(main.ocr, "installed_ocr_languages", return_value=("deu", "eng", "fra")):
+                with patch.object(main.ocr, "ocr_page_script", return_value="Latin"):
+                    with patch.object(main.ocr, "run_tesseract", side_effect=["Der Vertrag wurde geprueft", "Der Vertrag wurde geprüft"]) as reads:
                         with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout="")):
                             text = main.ocr_pdf_page(b"%PDF", 1)
 
@@ -1103,10 +1103,10 @@ class MainTests(unittest.TestCase):
         detections = iter(["dan_Latn", "swe_Latn", "swe_Latn"])
 
         with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
-            with patch.object(main, "installed_ocr_languages", return_value=("swe", "deu", "eng", "fra", "dan")):
-                with patch.object(main, "ocr_page_script", return_value="Latin"):
-                    with patch.object(main, "detect_source_language", side_effect=lambda _text: next(detections)):
-                        with patch.object(main, "run_tesseract", side_effect=["probe", "danish read", "swedish read"]) as reads:
+            with patch.object(main.ocr, "installed_ocr_languages", return_value=("swe", "deu", "eng", "fra", "dan")):
+                with patch.object(main.ocr, "ocr_page_script", return_value="Latin"):
+                    with patch.object(main.langs, "detect_source_language", side_effect=lambda _text: next(detections)):
+                        with patch.object(main.ocr, "run_tesseract", side_effect=["probe", "danish read", "swedish read"]) as reads:
                             with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout="")):
                                 text = main.ocr_pdf_page(b"%PDF", 1)
 
@@ -1115,9 +1115,9 @@ class MainTests(unittest.TestCase):
 
     def test_auto_detect_skips_the_second_read_when_the_probe_was_one_language(self):
         with patch.object(main.shutil, "which", return_value="/usr/bin/tesseract"):
-            with patch.object(main, "installed_ocr_languages", return_value=("eng", "jpn")):
-                with patch.object(main, "ocr_page_script", return_value="Japanese"):
-                    with patch.object(main, "run_tesseract", return_value="テキスト") as reads:
+            with patch.object(main.ocr, "installed_ocr_languages", return_value=("eng", "jpn")):
+                with patch.object(main.ocr, "ocr_page_script", return_value="Japanese"):
+                    with patch.object(main.ocr, "run_tesseract", return_value="テキスト") as reads:
                         with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout="")):
                             main.ocr_pdf_page(b"%PDF", 1)
 
@@ -1127,8 +1127,8 @@ class MainTests(unittest.TestCase):
         document = FakeDocument([FakePage(""), FakePage("")])
 
         with patch.object(main.pymupdf, "open", return_value=document):
-            with patch.object(main, "detect_source_language", return_value="fra_Latn"):
-                with patch.object(main, "ocr_pdf_page", return_value="texte") as mocked_ocr:
+            with patch.object(main.langs, "detect_source_language", return_value="fra_Latn"):
+                with patch.object(main.ocr, "ocr_pdf_page", return_value="texte") as mocked_ocr:
                     main.extract_pdf_markdown_from_bytes(b"%PDF")
 
         self.assertEqual([call.args[2] for call in mocked_ocr.call_args_list], [main.AUTO_SOURCE, "fra_Latn"])
@@ -1137,7 +1137,7 @@ class MainTests(unittest.TestCase):
         document = FakeDocument([FakePage("")])
 
         with patch.object(main.pymupdf, "open", return_value=document):
-            with patch.object(main, "ocr_pdf_page", return_value="OCR text") as mocked_ocr:
+            with patch.object(main.ocr, "ocr_pdf_page", return_value="OCR text") as mocked_ocr:
                 main.extract_pdf_markdown_from_bytes(b"%PDF", source="fra_Latn")
 
         mocked_ocr.assert_called_once_with(b"%PDF", 1, "fra_Latn", lines=ANY)
@@ -1147,8 +1147,8 @@ class MainTests(unittest.TestCase):
         reads = iter(["english", DANISH_PARAGRAPH, "dansk igen"])
 
         with patch.object(main.pymupdf, "open", return_value=document):
-            with patch.object(main, "detect_source_language", return_value="eng_Latn"):
-                with patch.object(main, "ocr_pdf_page", side_effect=lambda *_args, **_kwargs: next(reads)) as mocked_ocr:
+            with patch.object(main.langs, "detect_source_language", return_value="eng_Latn"):
+                with patch.object(main.ocr, "ocr_pdf_page", side_effect=lambda *_args, **_kwargs: next(reads)) as mocked_ocr:
                     markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
 
         self.assertEqual([call.args[2] for call in mocked_ocr.call_args_list],
@@ -1246,16 +1246,16 @@ class MainTests(unittest.TestCase):
 
         temp_dir = test_temp_dir()
         try:
-            with patch.object(main, "HISTORY_DIR", temp_dir), patch.object(main, "JOBS_DIR", temp_dir / "jobs"):
+            with patch.object(main.config, "HISTORY_DIR", temp_dir), patch.object(main.config, "JOBS_DIR", temp_dir / "jobs"):
                 with main.JOBS_LOCK:
                     main.JOBS.clear()
                     main.JOB_RUNNERS.clear()
                 job_id = main.create_job("translate-pdf-layout", "eng_Latn", "deu_Latn", "scan.pdf")
                 # No positioned text to go on, as on a scan (or a text layer that failed its check).
                 no_layout = main.HTTPException(status_code=422, detail="No positioned text found.")
-                with patch.object(main, "extract_pdf_layout", side_effect=no_layout), \
-                        patch.object(main, "extract_pdf_markdown_from_bytes", side_effect=fake_extract), \
-                        patch.object(main, "translate_chunks", return_value=["Bitte starten Sie die Kamera neu."]):
+                with patch.object(main.pdf_layout, "extract_pdf_layout", side_effect=no_layout), \
+                        patch.object(main.pdf_text, "extract_pdf_markdown_from_bytes", side_effect=fake_extract), \
+                        patch.object(main.translation, "translate_chunks", return_value=["Bitte starten Sie die Kamera neu."]):
                     main.run_pdf_layout_translate_job(job_id, content, "eng_Latn", "deu_Latn", "scan.pdf")
                     job = main.get_job(job_id)
                     history = main.history_item(job["history_id"])
@@ -1318,8 +1318,8 @@ class MainTests(unittest.TestCase):
             calls.append((source, len(texts)))
             return [f"{source}:{text[:5]}" for text in texts]
 
-        with patch.object(main, "translate_batch", side_effect=fake_batch), \
-                patch.object(main, "update_job"), patch.object(main, "wait_if_paused_or_cancelled"):
+        with patch.object(main.translation, "translate_batch", side_effect=fake_batch), \
+                patch.object(main.jobqueue, "update_job"), patch.object(main.jobqueue, "wait_if_paused_or_cancelled"):
             mixed = main.translate_chunks_batched(chunks, "eng_Latn", "deu_Latn", "job", 4, mixed=True)
             calls_mixed, calls[:] = list(calls), []
             plain = main.translate_chunks_batched(chunks, "eng_Latn", "deu_Latn", "job", 4)
@@ -1513,20 +1513,20 @@ class MainTests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
 
     def test_export_original_history_content_exports_docx(self):
-        with patch.object(main, "export_docx_with_translated_text", return_value=b"translated docx") as export_mock:
+        with patch.object(main.formats, "export_docx_with_translated_text", return_value=b"translated docx") as export_mock:
             result = main.export_original_history_content("docx", b"source docx", "translated text", {})
 
         export_mock.assert_called_once_with(b"source docx", "translated text", "")
         self.assertEqual(result, b"translated docx")
 
     def test_export_original_history_content_passes_docx_page_range_through(self):
-        with patch.object(main, "export_docx_with_translated_text", return_value=b"translated docx") as export_mock:
+        with patch.object(main.formats, "export_docx_with_translated_text", return_value=b"translated docx") as export_mock:
             main.export_original_history_content("docx", b"source docx", "translated text", {"page_range": "2-3"})
 
         export_mock.assert_called_once_with(b"source docx", "translated text", "2-3")
 
     def test_export_original_history_content_uses_layout_overlay_when_marked(self):
-        with patch.object(main, "export_pdf_layout_with_translated_text", return_value=b"overlay pdf") as overlay_mock:
+        with patch.object(main.pdf_layout, "export_pdf_layout_with_translated_text", return_value=b"overlay pdf") as overlay_mock:
             result = main.export_original_history_content(
                 "pdf", b"source pdf", "text", {"layout": "true", "page_range": "2-5"}
             )
@@ -1550,7 +1550,7 @@ class MainTests(unittest.TestCase):
             kept = history / "2026-01-01-other.pdf-99999999.json"
             kept.write_text("{}", encoding="utf-8")
 
-            with patch.object(main, "HISTORY_DIR", history), patch.object(main, "HISTORY_HOURS", 24):
+            with patch.object(main.config, "HISTORY_DIR", history), patch.object(main.config, "HISTORY_HOURS", 24):
                 main.cleanup_history()
 
             self.assertFalse(export.exists())
@@ -1567,7 +1567,7 @@ class MainTests(unittest.TestCase):
             "busy": {"id": "busy", "status": "running", "finished_at": None},
         }
         with tempfile.TemporaryDirectory() as directory:
-            with patch.dict(main.JOBS, jobs, clear=True), patch.object(main, "JOBS_DIR", Path(directory)):
+            with patch.dict(main.JOBS, jobs, clear=True), patch.object(main.config, "JOBS_DIR", Path(directory)):
                 main.cleanup_finished_jobs()
                 remaining = set(main.JOBS)
 
@@ -1590,8 +1590,8 @@ class MainTests(unittest.TestCase):
         # Rebuilding a layout PDF per download cost seconds before the button did anything
         # (measured 2.8 s for 12 pages). The second call must come off the disk.
         with tempfile.TemporaryDirectory() as directory:
-            with patch.object(main, "HISTORY_DIR", Path(directory)):
-                with patch.object(main, "export_original_history_content",
+            with patch.object(main.config, "HISTORY_DIR", Path(directory)):
+                with patch.object(main.history, "export_original_history_content",
                                   return_value=b"rendered pdf") as export_mock:
                     first = main.history_original_export("entry", "pdf", b"source", "text", {})
                     second = main.history_original_export("entry", "pdf", b"source", "text", {})
@@ -2128,7 +2128,7 @@ class MainTests(unittest.TestCase):
                 return SimpleNamespace(input_ids=text.split())
 
         text = ". ".join(f"Satz nummer {n} mit etwas Text" for n in range(300)) + "."
-        with patch.object(main, "TRANSLATE_TEXT_TOKENS", 50):
+        with patch.object(main.translation, "TRANSLATE_TEXT_TOKENS", 50):
             parts = main.split_to_token_limit(WordTokenizer(), text)
 
         self.assertGreater(len(parts), 1)
@@ -2150,7 +2150,7 @@ class MainTests(unittest.TestCase):
             def __call__(self, text):
                 return SimpleNamespace(input_ids=list(text))
 
-        with patch.object(main, "TRANSLATE_TEXT_TOKENS", 10):
+        with patch.object(main.translation, "TRANSLATE_TEXT_TOKENS", 10):
             parts = main.split_to_token_limit(CharTokenizer(), "x" * 100)
 
         self.assertEqual("".join(parts), "x" * 100)
@@ -2836,7 +2836,7 @@ class MainTests(unittest.TestCase):
         # The image ships fonts-dejavu-core, which has no italic cut. Falling through to the
         # base-14 stand-in there would cost a Cyrillic or Greek document its glyphs, so the
         # upright file of the same family is used instead and only the slant is lost.
-        with patch.object(main, "PDF_FONT_ITALIC_CANDIDATES", ("/nonexistent/italic.ttf",)):
+        with patch.object(main.textdocs, "PDF_FONT_ITALIC_CANDIDATES", ("/nonexistent/italic.ttf",)):
             main.font_file.cache_clear()
             self.assertEqual(main.font_file(False, "", False, True),
                              main.font_file(False, "", False, False))
@@ -3391,13 +3391,13 @@ class MainTests(unittest.TestCase):
         }])
         temp_dir = test_temp_dir()
         try:
-            with patch.object(main, "HISTORY_DIR", temp_dir):
-                with patch.object(main, "JOBS_DIR", temp_dir / "jobs"):
+            with patch.object(main.config, "HISTORY_DIR", temp_dir):
+                with patch.object(main.config, "JOBS_DIR", temp_dir / "jobs"):
                     with main.JOBS_LOCK:
                         main.JOBS.clear()
                         main.JOB_RUNNERS.clear()
                     job_id = main.create_job("translate-pdf-layout", "eng_Latn", "deu_Latn", "input.pdf")
-                    with patch.object(main, "translate_batch", return_value=["Hallo Welt"]):
+                    with patch.object(main.translation, "translate_batch", return_value=["Hallo Welt"]):
                         main.run_pdf_layout_translate_job(job_id, source, "eng_Latn", "deu_Latn", "input.pdf")
 
                     job = main.get_job(job_id)
@@ -3429,8 +3429,8 @@ class MainTests(unittest.TestCase):
                 main.JOB_RUNNERS.clear()
             job_id = main.create_job("translate-pdf-layout", "eng_Latn", "deu_Latn", "scan.pdf")
             no_positioned_text = HTTPException(status_code=422, detail="No positioned text found.")
-            with patch.object(main, "extract_pdf_layout", side_effect=no_positioned_text):
-                with patch.object(main, "run_pdf_translate_job") as fallback_mock:
+            with patch.object(main.pdf_layout, "extract_pdf_layout", side_effect=no_positioned_text):
+                with patch.object(main.pipeline, "run_pdf_translate_job") as fallback_mock:
                     main.run_pdf_layout_translate_job(job_id, b"content", "eng_Latn", "deu_Latn", "scan.pdf", "1-2")
 
             fallback_mock.assert_called_once_with(
@@ -3452,7 +3452,7 @@ class MainTests(unittest.TestCase):
             old_time = time.time() - (main.HISTORY_HOURS * 3600) - 60
             os.utime(old_file, (old_time, old_time))
 
-            with patch.object(main, "HISTORY_DIR", temp_dir):
+            with patch.object(main.config, "HISTORY_DIR", temp_dir):
                 main.cleanup_history()
 
             self.assertFalse(old_file.exists())
@@ -3467,7 +3467,7 @@ class MainTests(unittest.TestCase):
             old_file.write_text("old", encoding="utf-8")
             os.utime(old_file, (0, 0))
 
-            with patch.object(main, "HISTORY_DIR", temp_dir), patch.object(main, "HISTORY_HOURS", None):
+            with patch.object(main.config, "HISTORY_DIR", temp_dir), patch.object(main.config, "HISTORY_HOURS", None):
                 main.cleanup_history()
 
             self.assertTrue(old_file.exists())
@@ -3490,7 +3490,7 @@ class MainTests(unittest.TestCase):
                 "filename": md_path.name,
             }), encoding="utf-8")
 
-            with patch.object(main, "HISTORY_DIR", temp_dir):
+            with patch.object(main.config, "HISTORY_DIR", temp_dir):
                 items = main.history_items()
 
             self.assertEqual(items[0]["size_bytes"], len("result"))
@@ -3504,7 +3504,7 @@ class MainTests(unittest.TestCase):
             "target": "eng_Latn",
         }
 
-        with patch.object(main, "HISTORY_TIMEZONE", "UTC"):
+        with patch.object(main.config, "HISTORY_TIMEZONE", "UTC"):
             name = main.history_download_name(item, "pdf")
 
         # Sanitised, but every part a reader needs to tell two downloads apart is in there, and
@@ -3515,9 +3515,9 @@ class MainTests(unittest.TestCase):
     def test_history_download_name_uses_the_configured_timezone(self):
         item = {"original_name": "x.pdf", "created_at": "2026-08-10T09:54:00+00:00", "target": "eng_Latn"}
 
-        with patch.object(main, "HISTORY_TIMEZONE", "Europe/Berlin"):
+        with patch.object(main.config, "HISTORY_TIMEZONE", "Europe/Berlin"):
             self.assertIn("_1154_", main.history_download_name(item, "pdf"))
-        with patch.object(main, "HISTORY_TIMEZONE", "Not/AZone"):
+        with patch.object(main.config, "HISTORY_TIMEZONE", "Not/AZone"):
             # An unusable zone must not break the download, it just leaves the time as stored.
             self.assertIn("_0954_", main.history_download_name(item, "pdf"))
 
@@ -3540,8 +3540,8 @@ class MainTests(unittest.TestCase):
                 "target": "eng_Latn",
             }), encoding="utf-8")
 
-            with patch.object(main, "HISTORY_DIR", temp_dir):
-                with patch.object(main, "HISTORY_TIMEZONE", "UTC"):
+            with patch.object(main.config, "HISTORY_DIR", temp_dir):
+                with patch.object(main.config, "HISTORY_TIMEZONE", "UTC"):
                     response = TestClient(main.app).get(f"/history/{item_id}/export?format=txt")
 
             self.assertEqual(response.status_code, 200)
@@ -3556,7 +3556,7 @@ class MainTests(unittest.TestCase):
             md_path = temp_dir / f"{item_id}.md"
             md_path.write_text("Translated result", encoding="utf-8")
 
-            with patch.object(main, "HISTORY_DIR", temp_dir):
+            with patch.object(main.config, "HISTORY_DIR", temp_dir):
                 client = TestClient(main.app)
                 text_response = client.get(f"/history/{item_id}/export?format=txt")
                 pdf_response = client.get(f"/history/{item_id}/export?format=pdf")
@@ -3583,7 +3583,7 @@ class MainTests(unittest.TestCase):
     def test_save_history_includes_a_short_disambiguation_code(self):
         temp_dir = test_temp_dir()
         try:
-            with patch.object(main, "HISTORY_DIR", temp_dir):
+            with patch.object(main.config, "HISTORY_DIR", temp_dir):
                 item_id = main.save_history("text", "Hallo", "eng_Latn", "deu_Latn", "notes.txt")
                 items = main.history_items()
 
@@ -3596,7 +3596,7 @@ class MainTests(unittest.TestCase):
         temp_dir = test_temp_dir()
         try:
             source = minimal_docx(["Hello"])
-            with patch.object(main, "HISTORY_DIR", temp_dir):
+            with patch.object(main.config, "HISTORY_DIR", temp_dir):
                 item_id = main.save_history(
                     "text",
                     "Hallo",
@@ -3624,7 +3624,7 @@ class MainTests(unittest.TestCase):
     def test_delete_history_removes_stored_source_file(self):
         temp_dir = test_temp_dir()
         try:
-            with patch.object(main, "HISTORY_DIR", temp_dir):
+            with patch.object(main.config, "HISTORY_DIR", temp_dir):
                 item_id = main.save_history(
                     "text",
                     "Hallo",
@@ -3648,7 +3648,7 @@ class MainTests(unittest.TestCase):
         # file, leaving this one behind until the time-based cleanup_history caught up with it.
         temp_dir = test_temp_dir()
         try:
-            with patch.object(main, "HISTORY_DIR", temp_dir):
+            with patch.object(main.config, "HISTORY_DIR", temp_dir):
                 item_id = main.save_history(
                     "text", "Hallo", "eng_Latn", "deu_Latn", "source.docx",
                     minimal_docx(["Hello"]), "docx",
@@ -3673,7 +3673,7 @@ class MainTests(unittest.TestCase):
                     "created_at": f"2026-08-{day}T00:00:00+00:00", "filename": f"{item_id}.md",
                 }), encoding="utf-8")
 
-            with patch.object(main, "HISTORY_DIR", temp_dir):
+            with patch.object(main.config, "HISTORY_DIR", temp_dir):
                 response = TestClient(main.app).delete("/history?keep=1")
                 remaining = main.history_items()
 
@@ -3685,7 +3685,7 @@ class MainTests(unittest.TestCase):
     def test_model_download_is_reported_next_to_the_chunk_progress(self):
         temp_dir = test_temp_dir()
         try:
-            with patch.object(main, "JOBS_DIR", temp_dir):
+            with patch.object(main.config, "JOBS_DIR", temp_dir):
                 with main.JOBS_LOCK:
                     main.JOBS.clear()
                     main.JOB_RUNNERS.clear()
@@ -3694,9 +3694,9 @@ class MainTests(unittest.TestCase):
                 seen = []
                 main.ACTIVE_JOB.id = job_id
                 try:
-                    with patch.object(main, "model_is_downloaded", return_value=False), \
-                            patch.object(main, "model_download_size", return_value=200), \
-                            patch.object(main, "model_cache_bytes", return_value=50):
+                    with patch.object(main.models, "model_is_downloaded", return_value=False), \
+                            patch.object(main.models, "model_download_size", return_value=200), \
+                            patch.object(main.models, "model_cache_bytes", return_value=50):
                         with main.report_model_download("some/model"):
                             deadline = time.time() + 5
                             while not main.get_job(job_id)["downloading"] and time.time() < deadline:
@@ -3711,7 +3711,7 @@ class MainTests(unittest.TestCase):
                 self.assertIsNone(main.get_job(job_id)["downloading"])
 
                 # Outside a job, and for a model that is there already, nothing is reported.
-                with patch.object(main, "model_download_size", side_effect=AssertionError("asked the hub")):
+                with patch.object(main.models, "model_download_size", side_effect=AssertionError("asked the hub")):
                     with main.report_model_download("some/model"):
                         pass
         finally:
@@ -3725,9 +3725,9 @@ class MainTests(unittest.TestCase):
         (cache_dir(pair_model) / "blobs" / "weights").write_bytes(b"x" * 10)
         client = TestClient(main.app)
         try:
-            with patch.object(main, "JOBS_DIR", temp_dir / "jobs"), \
-                    patch.object(main, "model_cache_dir", side_effect=cache_dir), \
-                    patch.object(main, "model_is_downloaded", side_effect=lambda model_id: cache_dir(model_id).exists()):
+            with patch.object(main.config, "JOBS_DIR", temp_dir / "jobs"), \
+                    patch.object(main.models, "model_cache_dir", side_effect=cache_dir), \
+                    patch.object(main.models, "model_is_downloaded", side_effect=lambda model_id: cache_dir(model_id).exists()):
                 with main.JOBS_LOCK:
                     main.JOBS.clear()
                     main.JOB_RUNNERS.clear()
@@ -3755,7 +3755,7 @@ class MainTests(unittest.TestCase):
     def test_update_job_caps_percent_below_complete_while_still_running(self):
         temp_dir = test_temp_dir()
         try:
-            with patch.object(main, "JOBS_DIR", temp_dir):
+            with patch.object(main.config, "JOBS_DIR", temp_dir):
                 with main.JOBS_LOCK:
                     main.JOBS.clear()
                     main.JOB_RUNNERS.clear()
@@ -3778,7 +3778,7 @@ class MainTests(unittest.TestCase):
         # only the first write per throttle window, and every terminal one, reaches disk.
         temp_dir = test_temp_dir()
         try:
-            with patch.object(main, "JOBS_DIR", temp_dir):
+            with patch.object(main.config, "JOBS_DIR", temp_dir):
                 with main.JOBS_LOCK:
                     main.JOBS.clear()
                     main.JOB_RUNNERS.clear()
@@ -3808,7 +3808,7 @@ class MainTests(unittest.TestCase):
     def test_list_jobs_hides_payloads_and_adds_queue_positions(self):
         temp_dir = test_temp_dir()
         try:
-            with patch.object(main, "JOBS_DIR", temp_dir):
+            with patch.object(main.config, "JOBS_DIR", temp_dir):
                 with main.JOBS_LOCK:
                     main.JOBS.clear()
                     main.JOB_RUNNERS.clear()
@@ -3832,8 +3832,8 @@ class MainTests(unittest.TestCase):
     def test_get_job_recovers_completed_result_from_history(self):
         temp_dir = test_temp_dir()
         try:
-            with patch.object(main, "HISTORY_DIR", temp_dir):
-                with patch.object(main, "JOBS_DIR", temp_dir / "jobs"):
+            with patch.object(main.config, "HISTORY_DIR", temp_dir):
+                with patch.object(main.config, "JOBS_DIR", temp_dir / "jobs"):
                     with main.JOBS_LOCK:
                         main.JOBS.clear()
                         main.JOB_RUNNERS.clear()
@@ -3853,7 +3853,7 @@ class MainTests(unittest.TestCase):
     def test_control_queued_job_cancels_without_worker(self):
         temp_dir = test_temp_dir()
         try:
-            with patch.object(main, "JOBS_DIR", temp_dir):
+            with patch.object(main.config, "JOBS_DIR", temp_dir):
                 with main.JOBS_LOCK:
                     main.JOBS.clear()
                     main.JOB_RUNNERS.clear()
@@ -3911,7 +3911,7 @@ class MainTests(unittest.TestCase):
                 "started_at": 101.0,
             }), encoding="utf-8")
 
-            with patch.object(main, "JOBS_DIR", temp_dir):
+            with patch.object(main.config, "JOBS_DIR", temp_dir):
                 with main.JOBS_LOCK:
                     main.JOBS.clear()
                     main.JOB_RUNNERS.clear()
@@ -3945,7 +3945,7 @@ class MainTests(unittest.TestCase):
     def test_languages_endpoint_returns_core_languages_without_loading_a_model(self):
         client = TestClient(main.app)
 
-        with patch.object(main, "load_tokenizer", side_effect=RuntimeError("must not load a model")):
+        with patch.object(main.models, "load_tokenizer", side_effect=RuntimeError("must not load a model")):
             response = client.get("/languages")
 
         self.assertEqual(response.status_code, 200)
@@ -4020,7 +4020,7 @@ class MainTests(unittest.TestCase):
     def test_zip_size_limit_rejects_large_uncompressed_archives(self):
         content = minimal_docx(["First paragraph"])
 
-        with patch.object(main, "MAX_ZIP_UNCOMPRESSED_BYTES", 1):
+        with patch.object(main.config, "MAX_ZIP_UNCOMPRESSED_BYTES", 1):
             with self.assertRaises(HTTPException) as raised:
                 main.extract_docx_text_from_bytes(content)
 

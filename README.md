@@ -97,7 +97,7 @@ contain further information about source code, training data and notices.
 
 Model cards: https://huggingface.co/Helsinki-NLP
 
-The fallback model is fixed in `app/main.py` rather than configurable, so that this section stays
+The fallback model is fixed in `app/config.py` rather than configurable, so that this section stays
 true for every deployment. Before swapping it there, or extending `app/opus_pairs.json`, check that
 model's own license and training-data rights.
 

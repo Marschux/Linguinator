@@ -23,7 +23,7 @@ from typing import Dict, List, Optional
 API_URL = "https://huggingface.co/api/models?author=Helsinki-NLP&limit=1000"
 OUTPUT_PATH = Path(__file__).resolve().parent.parent / "app" / "opus_pairs.json"
 
-# Same short list as app/main.py's CORE_LANGUAGES; kept as a plain default here since this
+# Same short list as app/langs.py's CORE_LANGUAGES; kept as a plain default here since this
 # script must run standalone, without importing the app.
 DEFAULT_LANGUAGES = [
     "en", "de", "fr", "es", "it", "nl", "pt", "pl", "ru", "uk", "sv", "da", "fi", "el",
