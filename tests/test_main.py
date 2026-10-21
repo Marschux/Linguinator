@@ -42,6 +42,19 @@ def pdf_text(content):
     return "\n".join(page.extract_text() or "" for page in PdfReader(BytesIO(content)).pages)
 
 
+# Long enough for paragraph_language to trust langdetect (Ruders KA's Danish synopsis).
+DANISH_PARAGRAPH = (
+    "Vi er til stede ved en verdensomspændende videokonference: det Tolvte Symposium om Republikken "
+    "Gilead. I begyndelsen af det 21. århundrede tog Bibelbæltet kvælertag på USA, og de nægtede "
+    "kvinder retten til arbejde og til at besidde ejendom, samt til at læse og skrive."
+)
+GERMAN_PARAGRAPH = (
+    "Wir sind bei einer weltweiten Videokonferenz anwesend: dem zwölften Symposium über die Republik "
+    "Gilead. Zu Beginn des 21. Jahrhunderts nahm der Bibelgürtel die Vereinigten Staaten in den "
+    "Würgegriff, und den Frauen wurde das Recht auf Arbeit und Eigentum verweigert."
+)
+
+
 class FakePage:
     def __init__(self, text):
         self.text = text
@@ -1206,6 +1219,44 @@ class MainTests(unittest.TestCase):
                 main.extract_pdf_markdown_from_bytes(b"%PDF", source="fra_Latn")
 
         mocked_ocr.assert_called_once_with(b"%PDF", 1, "fra_Latn")
+
+    def test_pdf_extraction_rereads_a_scanned_page_in_its_own_language(self):
+        document = FakeDocument([FakePage(""), FakePage("")])
+        reads = iter(["english", DANISH_PARAGRAPH, "dansk igen"])
+
+        with patch.object(main.pymupdf, "open", return_value=document):
+            with patch.object(main, "detect_source_language", return_value="eng_Latn"):
+                with patch.object(main, "ocr_pdf_page", side_effect=lambda *_args: next(reads)) as mocked_ocr:
+                    markdown = main.extract_pdf_markdown_from_bytes(b"%PDF")
+
+        self.assertEqual([call.args[2] for call in mocked_ocr.call_args_list],
+                         [main.AUTO_SOURCE, "eng_Latn", "dan_Latn"])
+        self.assertIn("dansk igen", markdown)
+
+    def test_paragraph_language_only_overrides_the_document_when_sure(self):
+        self.assertEqual(main.paragraph_language(DANISH_PARAGRAPH, "eng_Latn"), "dan_Latn")
+        # Short pieces detect unreliably and stay with the document.
+        self.assertEqual(main.paragraph_language("Artefakte sind als realer Inhalt getaggt.", "deu_Latn"), "deu_Latn")
+
+    def test_translate_chunks_batched_groups_a_mixed_document_by_language(self):
+        chunks = ["Hello", DANISH_PARAGRAPH, "World", GERMAN_PARAGRAPH]
+        calls = []
+
+        def fake_batch(texts, source, target):
+            calls.append((source, len(texts)))
+            return [f"{source}:{text[:5]}" for text in texts]
+
+        with patch.object(main, "translate_batch", side_effect=fake_batch), \
+                patch.object(main, "update_job"), patch.object(main, "wait_if_paused_or_cancelled"):
+            mixed = main.translate_chunks_batched(chunks, "eng_Latn", "deu_Latn", "job", 4, mixed=True)
+            calls_mixed, calls[:] = list(calls), []
+            plain = main.translate_chunks_batched(chunks, "eng_Latn", "deu_Latn", "job", 4)
+
+        # One call per language, results back in place, the German paragraph left as it was.
+        self.assertEqual(calls_mixed, [("eng_Latn", 2), ("dan_Latn", 1)])
+        self.assertEqual(mixed, ["eng_Latn:Hello", "dan_Latn:Vi er", "eng_Latn:World", GERMAN_PARAGRAPH])
+        # A source the user picked is taken at its word.
+        self.assertEqual(calls, [("eng_Latn", 4)])
 
     def test_create_text_pdf_returns_pdf_document(self):
         content = main.create_text_pdf("Translated text\n\nSecond paragraph")

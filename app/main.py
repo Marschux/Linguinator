@@ -36,7 +36,7 @@ from lxml import etree as ElementTree
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from fastapi.staticfiles import StaticFiles
-from langdetect import DetectorFactory, LangDetectException, detect
+from langdetect import DetectorFactory, LangDetectException, detect, detect_langs
 from pydantic import BaseModel
 # Text extraction runs on PyMuPDF (it decodes subset fonts pypdf silently drops words from and
 # reports position, size and bold in one pass); pypdf still does the overlay merge.
@@ -656,6 +656,46 @@ def detect_source_language(text: str) -> str:
     except LangDetectException:
         return DEFAULT_SOURCE
     return CORE_LANGUAGES.get(guess.split("-", 1)[0], DEFAULT_SOURCE)
+
+
+# A paragraph overrides the document's language only when it is long and langdetect is sure.
+# Measured 21.10.2026 over every testfile (1160 paragraphs): each true switch (Mixed_Languages,
+# the Danish half of Ruders KA) ran 266+ characters, each false one 100 or fewer ("Artefakte
+# sind als realer Inhalt getaggt." came back Danish). The probability alone does not separate
+# them, it is 1.00 for most of the wrong guesses too.
+PARAGRAPH_LANGUAGE_MIN_CHARS = 200
+PARAGRAPH_LANGUAGE_MIN_PROBABILITY = 0.9
+
+
+def paragraph_language(text: str, document_source: str) -> str:
+    """The language of one paragraph of a mixed document, the document's own when unsure."""
+    if len(text.strip()) < PARAGRAPH_LANGUAGE_MIN_CHARS:
+        return document_source
+    try:
+        best = detect_langs(text)[0]
+    except LangDetectException:
+        return document_source
+    if best.prob < PARAGRAPH_LANGUAGE_MIN_PROBABILITY:
+        return document_source
+    return CORE_LANGUAGES.get(best.lang.split("-", 1)[0], document_source)
+
+
+def language_groups(chunks: List[str], source: str, target: str, mixed: bool) -> List[Tuple[str, List[int]]]:
+    """Chunk positions per language, in order of first appearance.
+
+    `mixed` only for an auto-detected source: one the user picked is taken at its word. Grouped so
+    a mixed document switches models once per language, not at every paragraph (only one model
+    stays loaded). A paragraph already in the target language is left out, its original stays.
+    """
+    if not mixed:
+        return [(source, list(range(len(chunks))))]
+    groups: Dict[str, List[int]] = {}
+    for index, chunk in enumerate(chunks):
+        language = paragraph_language(chunk, source)
+        if language == target and language != source:
+            continue
+        groups.setdefault(language, []).append(index)
+    return list(groups.items())
 
 
 def resolve_model(source: str, target: str) -> Tuple[str, bool]:
@@ -2053,29 +2093,32 @@ def cleanup_job_payload(job_id: str):
         persist_job(job)
 
 
-def translate_chunks(chunks: List[str], source: str, target: str, job_id: str, offset: int = 0) -> List[str]:
-    translated = []
-    for index, chunk in enumerate(chunks, start=1):
-        wait_if_paused_or_cancelled(job_id)
-        update_job(
-            job_id,
-            status="running",
-            current=offset + index - 1,
-            message=f"Translating chunk {offset + index}",
-        )
-        translated.append(translate_one(chunk, source, target))
-        update_job(job_id, current=offset + index)
+def translate_chunks(chunks: List[str], source: str, target: str, job_id: str, mixed: bool = False) -> List[str]:
+    translated = list(chunks)
+    done = 0
+    for language, positions in language_groups(chunks, source, target, mixed):
+        for index in positions:
+            wait_if_paused_or_cancelled(job_id)
+            update_job(job_id, status="running", current=done, message=f"Translating chunk {done + 1}")
+            translated[index] = translate_one(chunks[index], language, target)
+            done += 1
+            update_job(job_id, current=done)
     return translated
 
 
-def translate_chunks_batched(chunks: List[str], source: str, target: str, job_id: str, batch_size: int) -> List[str]:
-    translated: List[str] = []
-    for start in range(0, len(chunks), batch_size):
-        wait_if_paused_or_cancelled(job_id)
-        group = chunks[start:start + batch_size]
-        update_job(job_id, status="running", current=start, message=f"Translating {start} / {len(chunks)} chunks")
-        translated.extend(translate_batch(group, source, target))
-        update_job(job_id, current=start + len(group))
+def translate_chunks_batched(chunks: List[str], source: str, target: str, job_id: str, batch_size: int,
+                             mixed: bool = False) -> List[str]:
+    translated = list(chunks)
+    done = 0
+    for language, positions in language_groups(chunks, source, target, mixed):
+        for start in range(0, len(positions), batch_size):
+            wait_if_paused_or_cancelled(job_id)
+            group = positions[start:start + batch_size]
+            update_job(job_id, status="running", current=done, message=f"Translating {done} / {len(chunks)} chunks")
+            for index, text in zip(group, translate_batch([chunks[i] for i in group], language, target)):
+                translated[index] = text
+            done += len(group)
+            update_job(job_id, current=done)
     return translated
 
 
@@ -2108,7 +2151,8 @@ def split_markdown_blocks(markdown: str) -> List[Tuple[str, str]]:
     return blocks
 
 
-def translate_markdown_document(markdown: str, source: str, target: str, job_id: str) -> Tuple[str, int]:
+def translate_markdown_document(markdown: str, source: str, target: str, job_id: str,
+                                mixed: bool = False) -> Tuple[str, int]:
     blocks = split_markdown_blocks(markdown)
     # Only lines with something to translate are sent; the markers, blank lines and any
     # wordless leftovers (fenced code included) keep their place so the document reassembles
@@ -2116,7 +2160,7 @@ def translate_markdown_document(markdown: str, source: str, target: str, job_id:
     translatable = [index for index, (_prefix, text) in enumerate(blocks) if has_translatable_text(text)]
     chunks = [blocks[index][1] for index in translatable]
     update_job(job_id, total=len(chunks), message=f"Translating 0 / {len(chunks)} chunks")
-    translated_chunks = translate_chunks_batched(chunks, source, target, job_id, PDF_LAYOUT_BATCH_SIZE)
+    translated_chunks = translate_chunks_batched(chunks, source, target, job_id, PDF_LAYOUT_BATCH_SIZE, mixed)
 
     lines = [prefix + text for prefix, text in blocks]
     for index, translated in zip(translatable, translated_chunks):
@@ -2585,6 +2629,7 @@ def extract_pdf_markdown_from_bytes(
         # Checked once on the first page that has one, not per page: a text layer is written by one
         # producer for the whole file, and the check costs a render plus an OSD call.
         trust_text_layer = None
+        auto = source == AUTO_SOURCE
         for index in selected_pages:
             text = document[index - 1].get_text() or ""
             text = re.sub(r"[ \t]+\n", "\n", text).strip()
@@ -2595,12 +2640,19 @@ def extract_pdf_markdown_from_bytes(
                 needs_ocr = not trust_text_layer
             if needs_ocr:
                 ocr_text = ocr_pdf_page(content, index, source)
-                if ocr_text:
-                    text = ocr_text
+                if ocr_text and auto:
                     if source == AUTO_SOURCE:
                         # Keep what the first scanned page turned out to be: the pages after it then
                         # read in one pass instead of probing the same document over and over.
                         source = detect_source_language(ocr_text)
+                    else:
+                        # Unless a page is clearly in another language: Ruders KA's Danish synopsis,
+                        # read with English traineddata, lost every æ/ø/å ("fgdselsrate").
+                        own = paragraph_language(ocr_text, source)
+                        if own != source:
+                            ocr_text = ocr_pdf_page(content, index, own) or ocr_text
+                if ocr_text:
+                    text = ocr_text
 
             if text:
                 pages_with_text += 1
@@ -5792,14 +5844,15 @@ def run_text_job(
     source_meta: Optional[Dict[str, str]] = None,
 ):
     try:
-        if source == AUTO_SOURCE:
+        mixed = source == AUTO_SOURCE
+        if mixed:
             source = detect_source_language(text)
             update_job(job_id, source=source)
         update_job(job_id, status="running", message="Model loading or translation running", started_at=time.time())
         if source_extension == "md":
             # Headings/lists/quotes need their markers kept out of what the model sees - see
             # translate_markdown_document.
-            result, chunk_count = translate_markdown_document(text, source, target, job_id)
+            result, chunk_count = translate_markdown_document(text, source, target, job_id, mixed)
         else:
             # One paragraph per translate_batch entry: translate_one/translate_batch rejoin
             # sentences with a single space, so a multi-paragraph text sent as one piece loses
@@ -5807,7 +5860,7 @@ def run_text_job(
             # splitting on those lines, and a 6-paragraph DOCX put everything into paragraph 1.
             paragraphs = [part for part in re.split(r"\n\s*\n", text.strip()) if part.strip()] or [text]
             update_job(job_id, total=len(paragraphs), message=f"Translating 0 / {len(paragraphs)} paragraphs")
-            result = "\n\n".join(translate_chunks_batched(paragraphs, source, target, job_id, PDF_LAYOUT_BATCH_SIZE))
+            result = "\n\n".join(translate_chunks_batched(paragraphs, source, target, job_id, PDF_LAYOUT_BATCH_SIZE, mixed))
             chunk_count = len(paragraphs)
         history_id = save_history(
             "text",
@@ -5901,7 +5954,8 @@ def run_pdf_translate_job(
         extracting = "Extracting PDF (detecting scan language)" if source == AUTO_SOURCE else "Extracting PDF"
         update_job(job_id, status="running", message=extracting, started_at=time.time())
         markdown = extract_pdf_markdown_from_bytes(content, content_type, page_range, source)
-        if source == AUTO_SOURCE:
+        mixed = source == AUTO_SOURCE
+        if mixed:
             source = detect_source_language(markdown)
             update_job(job_id, source=source)
         markdown = expand_lowercase_ligatures(markdown, source)
@@ -5910,13 +5964,11 @@ def run_pdf_translate_job(
         total = sum(len(chunks) for _, chunks in planned)
         update_job(job_id, total=total, message=f"Translating 0 / {total} chunks")
 
-        current = 0
-        pages = []
-        for page_number, chunks in planned:
-            translated_chunks = translate_chunks(chunks, source, target, job_id, current)
-            current += len(chunks)
-            update_job(job_id, message=f"Translated page {page_number}")
-            pages.append(f"# Page {page_number}\n\n" + "\n\n".join(translated_chunks))
+        # All pages in one call, so a mixed document is grouped by language across pages, not per page.
+        translated = iter(translate_chunks([chunk for _, chunks in planned for chunk in chunks],
+                                           source, target, job_id, mixed))
+        pages = [f"# Page {page_number}\n\n" + "\n\n".join(next(translated) for _ in chunks)
+                 for page_number, chunks in planned]
 
         result = "\n\n".join(pages)
         history_id = save_history("pdf", result, source, target, filename, content, "pdf")
@@ -5969,7 +6021,8 @@ def run_pdf_layout_translate_job(
         # at the exact position render_pdf_layout_overlay will look for it at, see there.
         paragraphs = [item["text"] for page in pages
                       for item in page["paragraphs"] + page["widgets"]]
-        if source == AUTO_SOURCE:
+        mixed = source == AUTO_SOURCE
+        if mixed:
             source = detect_source_language("\n\n".join(paragraphs))
             update_job(job_id, source=source)
         # Now that the language is settled, see expand_lowercase_ligatures. Only the text handed
@@ -5988,7 +6041,7 @@ def run_pdf_layout_translate_job(
             chunks.extend(parts)
             chunk_counts.append(len(parts))
         update_job(job_id, total=len(chunks), message=f"Translating 0 / {len(chunks)} chunks")
-        translated_chunks = translate_chunks_batched(chunks, source, target, job_id, PDF_LAYOUT_BATCH_SIZE)
+        translated_chunks = translate_chunks_batched(chunks, source, target, job_id, PDF_LAYOUT_BATCH_SIZE, mixed)
 
         translated: List[str] = []
         position = 0
