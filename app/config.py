@@ -24,7 +24,7 @@ MODEL_CACHE_SIZE = 1
 # Characters per chunk. Not a model limit, every chunk is split into single sentences before
 # translation; this bounds how many of them land in one batched call, and with it peak memory.
 MAX_CHARS = 2000
-MAX_FILE_MB = int(env_value("LINGUINATOR_MAX_FILE_MB", "50"))
+MAX_FILE_MB = int(env_value("LINGUINATOR_MAX_FILE_MB", "100"))
 MAX_FILE_BYTES = MAX_FILE_MB * 1024 * 1024
 MAX_ZIP_UNCOMPRESSED_BYTES = MAX_FILE_BYTES * 10
 # In hours, because a day is a coarse setting for a workbench whose history is a convenience,
