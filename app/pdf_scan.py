@@ -124,7 +124,7 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
     if source:
         # What the prose of the document proves it holds, see paragraph_language.
         for lines in ocr_pages.values():
-            if not any(line["noise"] for line in lines):
+            if not any(line["noise"] or line.get("band") for line in lines):
                 proven |= {language for language in (langs.paragraph_language(" ".join(line["text"] for line in lines), None),)
                            if language}
     with pymupdf.open(stream=content, filetype="pdf") as document:
@@ -135,7 +135,7 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
             # ponytail: assumes the crop box sits at the media box's corner, as scans do.
             to_raw = pymupdf.Matrix(scale, scale) * page.derotation_matrix
             lines = ocr_pages.get(number) or []
-            score = any(line["noise"] for line in lines)
+            score = any(line["noise"] or line.get("band") for line in lines)
             skip = secondary_lyrics(lines, source, proven) if score and source else set()
             groups: Dict[Any, List[Dict[str, Any]]] = {}
             for position, line in enumerate(lines):

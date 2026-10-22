@@ -1169,6 +1169,17 @@ class MainTests(unittest.TestCase):
         self.assertEqual(main.ocr_noise_lines(tsv(score)), {"ne VV vv ve vy a", "iE h KI"})
         self.assertEqual(main.ocr_noise_lines(tsv(prose)), set())
 
+    def test_staff_spans_finds_each_staff_and_tolerates_a_broken_line(self):
+        import numpy as np
+        page = np.full((400, 600), 255, dtype=np.uint8)
+        for top in (50, 200):
+            for line in range(5):
+                page[top + 8 * line, 40:560] = 0
+        page[200 + 16, 300:340] = 255   # a beam crossing the middle line of the second staff
+        page[330, 100:160] = 0          # a short rule under a word is not a staff line
+
+        self.assertEqual(main.ocr.staff_spans(page), [(50, 82), (200, 232)])
+
     def test_clean_source_text_spares_the_model_quotes_and_glyphs_it_stops_or_invents_on(self):
         # English curly quotes cut the translation off mid-sentence; a Symbol-font bullet came back
         # as an invented CJK character. Apostrophes stay.

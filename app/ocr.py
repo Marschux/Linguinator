@@ -136,8 +136,10 @@ def ocr_noise_lines(tsv: str) -> Set[str]:
     return {line["text"] for line in ocr_lines(tsv) if line["noise"]}
 
 
-def run_tesseract(image_path: Path, languages: str, lines: Optional[List[Dict[str, Any]]] = None) -> str:
-    """Plain text of an image; with `lines`, its positioned lines (ocr_lines) are added to it."""
+def run_tesseract(image_path: Path, languages: str, lines: Optional[List[Dict[str, Any]]] = None,
+                  psm: Optional[int] = None) -> str:
+    """Plain text of an image; with `lines`, its positioned lines (ocr_lines) are added to it.
+    `psm` sets tesseract's page segmentation (6: one uniform block of text)."""
     if lines is None:
         return subprocess.run(
             ["tesseract", str(image_path), "stdout", "-l", languages],
@@ -148,7 +150,8 @@ def run_tesseract(image_path: Path, languages: str, lines: Optional[List[Dict[st
     # Text and confidences from one run, written to files: tesseract cannot put both on stdout.
     base = image_path.with_name(f"{image_path.stem}-ocr")
     subprocess.run(
-        ["tesseract", str(image_path), str(base), "-l", languages, "txt", "tsv"],
+        ["tesseract", str(image_path), str(base), "-l", languages]
+        + (["--psm", str(psm)] if psm else []) + ["txt", "tsv"],
         check=True,
         capture_output=True,
         text=True,
@@ -436,41 +439,169 @@ def ocr_block_scripts(content: bytes, page_number: int, blocks: List[Dict[str, A
 
 def ocr_pdf_page(content: bytes, page_number: int, source: str = langs.AUTO_SOURCE,
                  lines: Optional[List[Dict[str, Any]]] = None) -> str:
-    """One scanned page as text; `lines` collects its positioned lines, see ocr_lines."""
+    """One scanned page as text; `lines` collects its positioned lines, see ocr_lines. A score
+    page is read again between its staves, see read_score_bands."""
     ensure_ocr_tools()
     with tempfile.TemporaryDirectory() as temp_dir:
         image_path = render_pdf_page(content, page_number, temp_dir)
-        if source != langs.AUTO_SOURCE:
-            return run_tesseract(image_path, ocr_language_code(source), lines=lines)
+        found: Optional[List[Dict[str, Any]]] = [] if lines is not None else None
+        text = read_scanned_page(content, page_number, source, image_path, temp_dir, found)
+        if found and any(line["noise"] for line in found):
+            language = ocr_language_code(source if source != langs.AUTO_SOURCE
+                                         else langs.detect_source_language(text))
+            banded = read_score_bands(image_path, found, language)
+            if banded:
+                text, found = banded
+        if lines is not None:
+            lines.extend(found)
+        return text
 
-        page_script = ocr_page_script(image_path)
-        blocks = ocr_page_blocks(image_path, ocr_probe_languages(page_script))
-        block_scripts = ocr_block_scripts(content, page_number, blocks, page_script, temp_dir)
-        if len({script for script, _region in block_scripts}) < 2:
-            # One script on the page, which is the normal case: read it in one go. Splitting a
-            # page into blocks only to read each in the same language would cost several OCR
-            # runs and lose the layout analysis' view of the whole page for nothing.
-            return ocr_read_with_detection(image_path, page_script, lines=lines)
 
-        # A mixed page. OSD picks one script for the whole image, so reading it in one go always
-        # loses the other script's text: the majority wins and the rest is either dropped or
-        # reinvented in the wrong alphabet. Each block is read in its own script instead and the
-        # results are put back together in tesseract's reading order.
-        pieces = []
-        for index, (block, (script, region)) in enumerate(zip(blocks, block_scripts)):
-            if region is None:
-                region = render_pdf_region(content, page_number, block["box"], temp_dir, f"read{index}")
-            region_lines: Optional[List[Dict[str, Any]]] = [] if lines is not None else None
-            text = ocr_read_with_detection(region, script, lines=region_lines)
-            if lines is not None:
-                # The block was rendered on its own, from its padded box clamped to the page, so
-                # its boxes count from there and not from the page's corner.
-                dx = max(0, block["box"][0] - OCR_REGION_PADDING)
-                dy = max(0, block["box"][1] - OCR_REGION_PADDING)
-                for line in region_lines:
-                    left, top, right, bottom = line["box"]
-                    lines.append({**line, "box": (left + dx, top + dy, right + dx, bottom + dy),
-                                  "par": (index, *line["par"])})
-            if text.strip():
-                pieces.append(text.strip())
-        return "\n\n".join(pieces)
+def read_scanned_page(content: bytes, page_number: int, source: str, image_path: Path, temp_dir: str,
+                      lines: Optional[List[Dict[str, Any]]]) -> str:
+    """The whole-page read of ocr_pdf_page: in the job's language, or detected script by script."""
+    if source != langs.AUTO_SOURCE:
+        return run_tesseract(image_path, ocr_language_code(source), lines=lines)
+
+    page_script = ocr_page_script(image_path)
+    blocks = ocr_page_blocks(image_path, ocr_probe_languages(page_script))
+    block_scripts = ocr_block_scripts(content, page_number, blocks, page_script, temp_dir)
+    if len({script for script, _region in block_scripts}) < 2:
+        # One script on the page, which is the normal case: read it in one go. Splitting a
+        # page into blocks only to read each in the same language would cost several OCR
+        # runs and lose the layout analysis' view of the whole page for nothing.
+        return ocr_read_with_detection(image_path, page_script, lines=lines)
+
+    # A mixed page. OSD picks one script for the whole image, so reading it in one go always
+    # loses the other script's text: the majority wins and the rest is either dropped or
+    # reinvented in the wrong alphabet. Each block is read in its own script instead and the
+    # results are put back together in tesseract's reading order.
+    pieces = []
+    for index, (block, (script, region)) in enumerate(zip(blocks, block_scripts)):
+        if region is None:
+            region = render_pdf_region(content, page_number, block["box"], temp_dir, f"read{index}")
+        region_lines: Optional[List[Dict[str, Any]]] = [] if lines is not None else None
+        text = ocr_read_with_detection(region, script, lines=region_lines)
+        if lines is not None:
+            # The block was rendered on its own, from its padded box clamped to the page, so
+            # its boxes count from there and not from the page's corner.
+            dx = max(0, block["box"][0] - OCR_REGION_PADDING)
+            dy = max(0, block["box"][1] - OCR_REGION_PADDING)
+            for line in region_lines:
+                left, top, right, bottom = line["box"]
+                lines.append({**line, "box": (left + dx, top + dy, right + dx, bottom + dy),
+                              "par": (index, *line["par"])})
+        if text.strip():
+            pieces.append(text.strip())
+    return "\n\n".join(pieces)
+
+
+# A staff is five lines a few pixels apart (7-9 at OCR_DPI). A line is a row covered by long dark
+# runs; its threshold is relative to the page's strongest such row, since staves rarely span the
+# whole page. Lines closer than STAFF_JOIN times the usual gap belong to one staff, and a group of
+# STAFF_MIN_LINES or more (ledger lines and a line broken by a beam allowed for) no taller than
+# STAFF_MAX_HEIGHT gaps is a staff. Measured on Ruders KA p. 24 and 30: every staff found.
+STAFF_DARK = 160
+STAFF_MIN_RUN = 20
+STAFF_LINE_SHARE = 0.45
+STAFF_JOIN = 1.5
+STAFF_MIN_LINES = 4
+STAFF_MAX_HEIGHT = 6
+
+
+def page_gray(image_path: Path):
+    """A page image as a numpy array of grey values, rows by columns."""
+    import numpy as np
+    pix = pymupdf.Pixmap(str(image_path))
+    if pix.n > 1:
+        pix = pymupdf.Pixmap(pymupdf.csGRAY, pix)
+    return np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.stride)[:, :pix.width].copy()
+
+
+def staff_spans(gray) -> List[Tuple[int, int]]:
+    """The staves on a page (page_gray) as (top, bottom) pixel rows, top to bottom."""
+    import numpy as np
+    dark = gray < STAFF_DARK
+    cover = np.zeros(gray.shape[0])
+    for y in range(gray.shape[0]):
+        edges = np.diff(np.concatenate(([0], dark[y].astype(np.int8), [0])))
+        runs = np.where(edges == -1)[0] - np.where(edges == 1)[0]
+        cover[y] = runs[runs >= STAFF_MIN_RUN].sum()
+    # A slightly skewed line spreads over two or three rows.
+    cover = np.maximum.reduce([cover, np.roll(cover, 1), np.roll(cover, -1)])
+    if not cover.any():
+        return []
+    rows = np.where(cover >= STAFF_LINE_SHARE * np.percentile(cover, 99.5))[0]
+    lines: List[int] = []
+    group: List[int] = []
+    for y in rows:
+        if group and y - group[-1] > 2:
+            lines.append(sum(group) // len(group))
+            group = []
+        group.append(int(y))
+    if group:
+        lines.append(sum(group) // len(group))
+    gaps = sorted(b - a for a, b in zip(lines, lines[1:]))
+    if not gaps:
+        return []
+    usual = gaps[len(gaps) // 4]  # the staff gaps are the small and common ones
+    spans: List[Tuple[int, int]] = []
+    members = [lines[0]]
+    for line in lines[1:] + [None]:
+        if line is not None and line - members[-1] <= STAFF_JOIN * usual:
+            members.append(line)
+            continue
+        if len(members) >= STAFF_MIN_LINES and members[-1] - members[0] <= STAFF_MAX_HEIGHT * usual:
+            spans.append((members[0], members[-1]))
+        members = [line]
+    return spans
+
+
+def read_score_bands(image_path: Path, lines: List[Dict[str, Any]],
+                     language: str) -> Optional[Tuple[str, List[Dict[str, Any]]]]:
+    """A score page read band by band between its staves; None when it has fewer than two.
+
+    Read whole, tesseract sees text and notation as one picture: lyric lines came back in pieces
+    or not at all, and staff lines as letters ("ne VV vv ve vy a"). Only whitening the staff lines
+    made it worse (Ruders p. 30: lines read with confidence 11 -> 4), as tesseract then cut every
+    lyric line at the gaps between its syllables. A band between two staves holds the sung text and
+    the directions and nothing else, and read on its own as one block it came back whole ("but
+    there is so much in the way whis-per-ing and gos-sip ..."). The title above the first staff and
+    the footer below the last keep what the whole-page read found. Notation left in a band reads
+    with low confidence and is marked as noise, as on the whole page.
+    """
+    gray = page_gray(image_path)
+    staves = staff_spans(gray)
+    if len(staves) < 2:
+        return None
+    usual = max(1, min(bottom - top for top, bottom in staves) // 4)
+    first, last = staves[0][0], staves[-1][1]
+
+    def middle(line):
+        return (line["box"][1] + line["box"][3]) / 2
+
+    outside = [line for line in lines if not first <= middle(line) <= last]
+    found: List[Dict[str, Any]] = []
+    texts = []
+    for index, ((_, above), (below, _)) in enumerate(zip(staves, staves[1:])):
+        top, bottom = above + usual // 2, below - usual // 2
+        if bottom - top < 2 * usual:
+            continue
+        # Cut from the array: PyMuPDF has no working pixmap-crop constructor (see render_pdf_region).
+        strip = gray[top:bottom]
+        band_path = image_path.with_name(f"band{index}.png")
+        pymupdf.Pixmap(pymupdf.csGRAY, strip.shape[1], strip.shape[0], strip.tobytes(), False).save(str(band_path))
+        band_lines: List[Dict[str, Any]] = []
+        text = run_tesseract(band_path, language, lines=band_lines, psm=6)
+        for line in band_lines:
+            left, line_top, right, line_bottom = line["box"]
+            found.append({**line, "box": (left, line_top + top, right, line_bottom + top),
+                          "par": ("band", index, *line["par"]), "band": True,
+                          "noise": line["conf"] < OCR_NOISE_MAX_CONFIDENCE})
+        if text.strip():
+            texts.append(text.strip())
+    if not found:
+        return None
+    head = "\n".join(line["text"] for line in outside if middle(line) < first)
+    foot = "\n".join(line["text"] for line in outside if middle(line) > last)
+    return "\n\n".join(part for part in (head, *texts, foot) if part), outside + found
