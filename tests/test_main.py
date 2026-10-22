@@ -1253,6 +1253,15 @@ class MainTests(unittest.TestCase):
         self.assertFalse(main.is_row(prose, lines))
         keys = main.scan_paragraph_keys(lines, [], rows=True)
         self.assertNotEqual(keys[0], keys[2])
+        # A row also ends the paragraph above it: the line after it does not join the one before.
+        double = line("The Double (Offred in the Time Before, red hair,", 151, 140, 700)
+        moira = line("Moira (Offred's best friend, black hair, ca. 30)", 151, 251, 700)
+        keys = main.scan_paragraph_keys([double, offred, part, moira], [], rows=True)
+        self.assertNotEqual(keys[0], keys[3])
+        # Three dots after a word are a leader too.
+        self.assertEqual([piece["text"] for piece in main.split_columns(
+            line("midtwenties) ... mezzo soprano", 151, 173, 947), leaders=True)],
+            ["midtwenties)", "...", "mezzo soprano"])
 
     def test_a_score_line_loses_the_notation_at_its_ends(self):
         def line(words):
@@ -1283,7 +1292,8 @@ class MainTests(unittest.TestCase):
             1: [line("ne VV vv ve vy a", 100, conf=40, noise=True),
                 line("hap-pi - ness or snow.", 200),
                 line("JAN. | CE —— | z =", 300),
-                line("Hn. SP", 350)],
+                line("Hn. SP", 350),
+                line("OFFRED", 380)],
             2: [line("Here the classes are run by Aunt", 100),
                 line("Lydia, who is strict.", 150),
                 line("we", 400, par=(2, 1), conf=30)],

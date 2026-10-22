@@ -32,6 +32,9 @@ OCR_SUNG_MIN_LETTERS = 0.75
 # "d Sf") read with confidence too, came back "translated", and their cover cut into the chord
 # beside them (Ruders KA p. 27).
 OCR_SCORE_WORD = re.compile(r"[^\W\d_]{3,}")
+# A single word in capitals on a score is a part's name ("OFFRED", "HANDMAIDS", "CORO"): "OFFRED"
+# came back "AUSFRAGE".
+OCR_SCORE_NAME = re.compile(r"[^\W\d_a-zäöüæøåß]{3,}[.:]?")
 # The dotted leader of a contents page or cast list reads as dots or as a long run of a few
 # letters ("ceessesesessesesessesss..."), and the model then translates it like a word. Measured
 # on Ruders KA's cast list: in a leader the two most frequent letters make up 72-94 % of it, in
@@ -45,9 +48,10 @@ OCR_LEADER_TOP_LETTERS = 0.7
 def is_leader(word: str) -> bool:
     """A dotted leader read as a word: dots only ("..", "........"), or a long run of a few letters
     (see strip_leaders). Not three dots: that is an ellipsis, and prose opens with one ("... She is
-    torn from her husband", Ruders KA p. 8)."""
+    torn from her husband", Ruders KA p. 8) - unless it follows a word ("midtwenties) ... mezzo
+    soprano"), see column_spans."""
     dots = not word.strip(".·…")
-    return (dots and len(word) >= 2 and word not in ("...", "…")) or bool(OCR_LEADER_DOTS.search(word))         or not strip_leaders(word)
+    return (dots and len(word) >= 2) or bool(OCR_LEADER_DOTS.search(word)) or not strip_leaders(word)
 
 
 def strip_leaders(text: str) -> str:
@@ -147,7 +151,8 @@ def column_spans(line: Dict[str, Any], leaders: bool = False) -> List[range]:
             if boxes[index][0] - boxes[index - 1][2] > OCR_COLUMN_GAP * height and ink[index] <= OCR_GAP_MAX_INK}
     if leaders:
         # A dotted leader read as a word fills the gap between a name and its part: it is the gap.
-        cuts |= {cut for index, (word, _) in enumerate(line["words"]) if is_leader(word)
+        cuts |= {cut for index, (word, _) in enumerate(line["words"])
+                 if is_leader(word) and (index or word not in ("...", "…"))
                  for cut in (index, index + 1) if 0 < cut < len(boxes)}
     cuts = [0] + sorted(cuts) + [len(boxes)]
     return [range(start, end) for start, end in zip(cuts, cuts[1:])]
@@ -328,6 +333,11 @@ def scan_paragraph_keys(lines: List[Dict[str, Any]], blocks: Sequence[Tuple[str,
         own = held(line, heron.HERON_TEXT_LABELS)
         if line.get("piece") or (not own and held(line, {"picture"})) or (rows and is_row(line, lines)):
             keys.append(("own", position))
+            if rows:
+                # It also ends the paragraph above it: the next line of the same tesseract
+                # paragraph had otherwise joined the one before the row (Ruders KA p. 6, Moira's
+                # line set after The Double's three rows up).
+                part, current = part + 1, []
             continue
         if current and current[-1]["par"] == line["par"]:
             before = current[-1]
@@ -408,7 +418,7 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
                 if score:
                     text = join_sung_syllables(group[0]["text"])
                     whole = join_sung_syllables(group[0].get("untrimmed", group[0]["text"]))
-                    if letter_share(whole) < OCR_SUNG_MIN_LETTERS or not OCR_SCORE_WORD.search(text):
+                    if letter_share(whole) < OCR_SUNG_MIN_LETTERS or not OCR_SCORE_WORD.search(text)                             or OCR_SCORE_NAME.fullmatch(text.strip()):
                         continue
                 elif sum(line["conf"] for line in group) / len(group) < ocr.OCR_NOISE_MAX_CONFIDENCE:
                     # Not text tesseract was sure of - a logo read as "we" was set back as a huge
