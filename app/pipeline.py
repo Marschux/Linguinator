@@ -141,8 +141,15 @@ def run_pdf_translate_job(
             # Asked for the original layout: set the translation onto the scanned pages themselves.
             pages = pdf_scan.scan_layout_pages(content, ocr_pages, page_range, source)
             paragraphs = [paragraph["text"] for page in pages for paragraph in page["paragraphs"]]
-            jobqueue.update_job(job_id, total=len(paragraphs), message=f"Translating 0 / {len(paragraphs)} chunks")
-            translated = translation.translate_chunks(paragraphs, source, target, job_id, mixed)
+            # A score's lines go to the model as whole sentences and come back spread over them.
+            groups = pdf_scan.sung_sentences(pages)
+            jobqueue.update_job(job_id, total=len(groups), message=f"Translating 0 / {len(groups)} chunks")
+            joined = translation.translate_chunks([" ".join(paragraphs[i] for i in group) for group in groups],
+                                                  source, target, job_id, mixed)
+            translated = list(paragraphs)
+            for group, text in zip(groups, joined):
+                for position, part in zip(group, pdf_scan.spread_words(text, [paragraphs[i] for i in group])):
+                    translated[position] = part
             # One line per paragraph, so the re-export's split on blank lines stays exact.
             result = "\n\n".join(re.sub(r"\s+", " ", text).strip() for text in translated)
             meta = {"layout": "true", "scan": "true", "page_range": page_range, "scan_source": requested_source,
@@ -154,7 +161,7 @@ def run_pdf_translate_job(
             except Exception:
                 # Same as the layout job: the translation is saved, the download builds it again.
                 pass
-            jobqueue.update_job(job_id, status="complete", message="Complete", current=len(paragraphs),
+            jobqueue.update_job(job_id, status="complete", message="Complete", current=len(groups),
                        result=result, history_id=history_id, finished_at=time.time())
             jobqueue.cleanup_job_payload(job_id)
             return

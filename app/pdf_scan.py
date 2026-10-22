@@ -160,6 +160,7 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
                 if not pdf_layout.has_translatable_text(text):
                     continue
                 paragraphs.append({
+                    **({"band": group[0]["par"][1]} if score and group[0].get("band") else {}),
                     "text": text,
                     "lines": [scan_line(line, rect, flip) for line, rect in zip(group, rects)],
                     "cover": [rect + (-OCR_COVER_PADDING, -OCR_COVER_PADDING, OCR_COVER_PADDING, OCR_COVER_PADDING)
@@ -207,6 +208,84 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
                 "scan": True,
             })
         return pages
+
+
+SUNG_SENTENCE_END = re.compile(r"[.!?;:][\"')\]]*$")
+SUNG_LYRIC_MIN_WORDS = 3
+
+
+def sung_sentences(pages: List[Dict[str, Any]]) -> List[List[int]]:
+    """The scan's paragraphs (flattened over pages) grouped into what is translated together.
+
+    A score is set line by line, and one sung sentence runs over several of them: one printed line
+    read as two pieces, and a voice continuing in the next system. Translated line by line, the
+    model saw "…love or sunsets or" and "happiness or snow." apart. Pieces of a band's row are
+    joined left to right; a row continues the row in the same place (same index among as many
+    rows) of the voice's next band, over a page break too. A line joins the one before only while
+    that one has not ended its sentence and it opens in lower case, which keeps a capitalised
+    direction ("Allegro", "Slowly") out. Everything else stays a group of one.
+    """
+    groups: List[List[int]] = []
+    open_by_voice: Dict[Tuple[int, int], List[int]] = {}
+    texts: List[str] = []
+    index = 0
+    for page in pages:
+        bands: Dict[int, List[Tuple[int, Dict[str, Any]]]] = {}
+        for paragraph in page["paragraphs"]:
+            texts.append(paragraph["text"])
+            if "band" in paragraph:
+                bands.setdefault(paragraph["band"], []).append((index, paragraph))
+            else:
+                groups.append([index])
+            index += 1
+        if not bands:
+            open_by_voice = {}
+        for band in sorted(bands):
+            rows: List[List[Tuple[int, Dict[str, Any]]]] = []
+            for item in sorted(bands[band], key=lambda item: item[1]["cover_px"][0][1]):
+                top, bottom = item[1]["cover_px"][0][1], item[1]["cover_px"][0][3]
+                first = rows[-1][0][1]["cover_px"][0] if rows else None
+                if first and first[1] <= (top + bottom) / 2 <= first[3]:
+                    rows[-1].append(item)
+                else:
+                    rows.append([item])
+            sung: Dict[Tuple[int, int], List[int]] = {}
+            for number, row in enumerate(rows):
+                voice = (number, len(rows))
+                group = open_by_voice.get(voice)
+                for position, _ in sorted(row, key=lambda item: item[1]["cover_px"][0][0]):
+                    text = texts[position]
+                    if len(text.split()) < SUNG_LYRIC_MIN_WORDS and not text[:1].islower():
+                        # A direction, or too little to tell: on its own, the voices left as they were.
+                        groups.append([position])
+                        continue
+                    if not (group and not SUNG_SENTENCE_END.search(texts[group[-1]]) and text[:1].islower()
+                            and sum(len(texts[i]) for i in group) + len(text) < config.MAX_CHARS):
+                        group = [position]
+                        groups.append(group)
+                    else:
+                        group.append(position)
+                    sung[voice] = group
+            # A band with sung text in it is the voices' next system; one they are missing from ends them.
+            if sung:
+                open_by_voice = sung
+    return sorted(groups)
+
+
+def spread_words(translation: str, originals: Sequence[str]) -> List[str]:
+    """A translation shared out over the lines its original came from, by each line's share of the
+    original's words, every line keeping at least one word while there are enough."""
+    words = translation.split()
+    counts = [max(1, len(original.split())) for original in originals]
+    total, done, parts, start = sum(counts), 0, [], 0
+    for position, count in enumerate(counts):
+        done += count
+        left = len(counts) - position - 1
+        end = min(max(round(len(words) * done / total), start + 1), len(words) - left) if left else len(words)
+        end = min(max(end, start + 1), len(words))
+        parts.append(" ".join(words[start:end]))
+        start = end
+    return parts
 
 
 def scan_background(pixmap: "pymupdf.Pixmap", box: Sequence[int], dpi: int) -> Tuple[float, float, float]:

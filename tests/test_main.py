@@ -1240,6 +1240,29 @@ class MainTests(unittest.TestCase):
         # With Danish as the document's language, the English lines are the other ones.
         self.assertEqual(main.secondary_lyrics(lines, "dan_Latn", set()), {1, 3})
 
+    def test_sung_lines_are_joined_to_sentences_and_spread_back_by_words(self):
+        def paragraph(text, band, top, left=200):
+            return {"text": text, "band": band, "cover_px": [(left, top, left + 400, top + 40)]}
+
+        pages = [
+            {"paragraphs": [{"text": "Act One", "cover_px": [(0, 0, 10, 10)]},
+                            paragraph("were dif-rent I wish it were about", 0, 100),
+                            paragraph("love or sunsets or", 0, 105, left=700),
+                            paragraph("Allegro", 1, 300)]},
+            # Two voices on the next system, the upper one carries on the sentence.
+            {"paragraphs": [paragraph("happiness or snow.", 0, 100), paragraph("and more", 0, 200)]},
+            {"paragraphs": [paragraph("and so on.", 0, 100)]},
+        ]
+        # Pieces of one row joined; a capitalised direction stays apart; a voice continues only in
+        # the same place among as many rows.
+        self.assertEqual(main.sung_sentences(pages), [[0], [1, 2], [3], [4], [5], [6]])
+        pages[1]["paragraphs"].pop()
+        self.assertEqual(main.sung_sentences(pages), [[0], [1, 2, 4], [3], [5]])
+        self.assertEqual(main.spread_words("waren anders ich wünschte es ginge um Liebe oder Sonnenuntergänge oder Glück oder Schnee.",
+                                           ["were dif-rent I wish it were about", "love or sunsets or", "happiness or snow."]),
+                         ["waren anders ich wünschte es ginge um", "Liebe oder Sonnenuntergänge oder", "Glück oder Schnee."])
+        self.assertEqual(main.spread_words("Ja", ["a b", "c d"]), ["Ja", ""])
+
     def test_a_scan_sent_for_layout_is_overprinted_and_exported_from_history(self):
         document = pymupdf.open()
         # A text layer under the "scan" too, as on a page whose layer failed text_layer_is_trustworthy:
