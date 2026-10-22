@@ -263,9 +263,26 @@ CURLY_DOUBLE_QUOTES = str.maketrans({"“": '"', "”": '"'})
 PRIVATE_USE = re.compile("[-]")
 
 
+# A dash between two spaced words is garbled by several of the dedicated pair models: opus-mt-da-de
+# made "TANTER — militært khaki" "TATTER ÄMIE Militärische Khaki" (and "VAGTER" "WACHSTUM"), da-en
+# put a "•" there, fr-de a comma, pl-de a stray "zu" (measured 22.10.2026, em and en dash alike).
+# With a plain hyphen every one of them came back right, so the model gets " - ", and the
+# translation gets the source's own dash back (restore_dashes).
+SPACED_DASH = re.compile(r"(?<=\s)[—–](?=\s)")
+
+
 def clean_source_text(text: str) -> str:
     text = PRIVATE_USE.sub("•", LEADER_RUN.sub(" ", text))
-    return text.translate(CURLY_DOUBLE_QUOTES).strip()
+    return SPACED_DASH.sub("-", text.translate(CURLY_DOUBLE_QUOTES)).strip()
+
+
+def restore_dashes(source: str, translated: str) -> str:
+    """The spaced dash the source used (see SPACED_DASH) back in place of the model's " - ", unless
+    the source had spaced hyphens of its own, which could not be told apart."""
+    dash = SPACED_DASH.search(source)
+    if not dash or " - " in source:
+        return translated
+    return translated.replace(" - ", f" {dash.group()} ")
 
 
 def guard_hallucination(source: str, translated: str, target: str = "") -> str:
@@ -295,6 +312,7 @@ def translate_batch(texts: List[str], source: str, target: str) -> List[str]:
     """Translate several texts in one translator call. Every sentence is its own entry in the
     batch, never several in one (see split_to_sentences), and each result maps back to its text
     by position."""
+    originals = list(texts)
     texts = [clean_source_text(text) for text in texts]
     indices = [i for i, text in enumerate(texts) if text]
     if not indices:
@@ -328,7 +346,8 @@ def translate_batch(texts: List[str], source: str, target: str) -> List[str]:
             parts.setdefault(owner, []).append(text.strip())
     results = ["" for _ in texts]
     for owner, pieces in parts.items():
-        results[owner] = guard_hallucination(texts[owner], normalize_translated_text(" ".join(pieces)), target)
+        results[owner] = restore_dashes(originals[owner], guard_hallucination(
+            texts[owner], normalize_translated_text(" ".join(pieces)), target))
     return results
 
 

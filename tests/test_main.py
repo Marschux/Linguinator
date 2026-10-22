@@ -1228,6 +1228,13 @@ class MainTests(unittest.TestCase):
         self.assertEqual(main.clean_source_text("von “Software” zu “Mensch”"), 'von "Software" zu "Mensch"')
         self.assertEqual(main.clean_source_text("erfüllt:  Die Schrift"), "erfüllt: • Die Schrift")
         self.assertEqual(main.clean_source_text("The Handmaid’s Tale"), "The Handmaid’s Tale")
+        # A spaced dash is garbled by several pair models ("TANTER — militært khaki" came back
+        # "TATTER ÄMIE ..."): they get a hyphen, the translation the dash back.
+        self.assertEqual(main.clean_source_text("TANTER — militært khaki"), "TANTER - militært khaki")
+        self.assertEqual(main.clean_source_text("1996–98 and well-known"), "1996–98 and well-known")
+        self.assertEqual(main.restore_dashes("TANTER — militært khaki", "TANTEN - militärisches Khaki"),
+                         "TANTEN — militärisches Khaki")
+        self.assertEqual(main.restore_dashes("A – B - C", "A - B - C"), "A - B - C")
 
     def test_strip_leaders_drops_dotted_leaders_read_as_letters(self):
         self.assertEqual(main.strip_leaders("Ofglen ceessesesessesesessesssesssssseesssestssesesenees soprano"),
