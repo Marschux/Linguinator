@@ -995,14 +995,29 @@ class MainTests(unittest.TestCase):
         main.installed_ocr_languages.cache_clear()
 
     def test_ocr_page_script_reads_the_osd_report(self):
-        report = "Page number: 0\nOrientation in degrees: 0\nScript: Cyrillic\nScript confidence: 3.4\n"
+        report = "Page number: 0\nOrientation in degrees: 0\nScript: Latin\nScript confidence: 3.4\n"
         with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout=report)):
-            self.assertEqual(main.ocr_page_script(Path("page.png")), "Cyrillic")
+            self.assertEqual(main.ocr_page_script(Path("page.png")), "Latin")
 
-    def test_ocr_page_script_drops_a_low_confidence_guess(self):
-        # A sparse Danish/English title page guessed as Cyrillic locked a whole score to Ukrainian.
-        with patch.object(main.ocr, "ocr_page_osd", return_value=("Cyrillic", 1.67)):
+    def test_ocr_page_script_drops_a_low_confidence_latin_guess(self):
+        with patch.object(main.ocr, "ocr_page_osd", return_value=("Latin", 1.67)):
             self.assertEqual(main.ocr_page_script(Path("page.png")), "")
+
+    def test_ocr_page_script_checks_another_script_against_a_latin_read(self):
+        def confidence(_image, languages):
+            return reads[languages.split("+")[0]]
+
+        with patch.object(main.ocr, "installed_ocr_languages", return_value=()):
+            with patch.object(main.ocr, "ocr_mean_confidence", side_effect=confidence) as read:
+                # A score's notation OSD calls Cyrillic, surely, reads better in Latin (Ruders p. 26).
+                reads = {"rus": 49.3, "eng": 65.5}
+                with patch.object(main.ocr, "ocr_page_osd", return_value=("Cyrillic", 4.44)):
+                    self.assertEqual(main.ocr_page_script(Path("page.png")), "Latin")
+                # A Russian scan OSD is unsure of still reads far better in Cyrillic.
+                reads = {"rus": 96.2, "eng": 43.7}
+                with patch.object(main.ocr, "ocr_page_osd", return_value=("Cyrillic", 1.43)):
+                    self.assertEqual(main.ocr_page_script(Path("page.png")), "Cyrillic")
+                self.assertEqual(read.call_count, 4)
 
     def test_ocr_page_osd_reads_the_confidence_too(self):
         report = "Page number: 0\nOrientation in degrees: 0\nScript: Cyrillic\nScript confidence: 3.4\n"
@@ -1077,7 +1092,7 @@ class MainTests(unittest.TestCase):
 
     def test_ocr_page_script_lowers_the_osd_character_threshold(self):
         # Without this, a page holding one short line gets no answer at all.
-        report = "Script: Japanese\nScript confidence: 1.2\n"
+        report = "Script: Latin\nScript confidence: 1.2\n"
         with patch.object(main.subprocess, "run", return_value=SimpleNamespace(stdout=report)) as run:
             main.ocr_page_script(Path("page.png"))
 

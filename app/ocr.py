@@ -187,13 +187,29 @@ def ocr_page_osd(image_path: Path) -> Tuple[str, float]:
     return script, confidence
 
 
+def ocr_mean_confidence(image_path: Path, languages: str) -> float:
+    """Tesseract's mean word confidence reading the image in these languages, 0 for no words."""
+    lines: List[Dict[str, Any]] = []
+    run_tesseract(image_path, languages, lines)
+    confs = [conf for line in lines for conf in line.get("confs", [line["conf"]])]
+    return sum(confs) / len(confs) if confs else 0.0
+
+
 def ocr_page_script(image_path: Path) -> str:
     """The script OSD sees in a page image ("Latin", "Cyrillic", …), empty when it cannot tell.
 
-    A low-confidence guess counts as no answer: a sparse Latin title page read as Cyrillic sent the
-    probe to ukr, langdetect said Ukrainian, and every later page was read in Ukrainian.
+    OSD's own confidence does not tell a right answer from a wrong one on its own. A sparse Latin
+    title page came back Cyrillic, a score's notation Cyrillic at 4.44 (Ruders KA p. 26, read as
+    "4 Обтед'я \"УМогуї дгеаш\""), while a real Russian scan came back Cyrillic at only 1.43. So
+    a script other than Latin is checked by reading the image in it and in Latin and keeping the
+    surer read (measured: p. 26 49 vs 66, Russian 96 vs 44, Greek 90 vs 49). Latin, or a script
+    no language is known for, still needs OCR_SCRIPT_MIN_CONFIDENCE.
     """
     script, confidence = ocr_page_osd(image_path)
+    if script and ocr_script_is_usable(script) and not scripts_are_compatible(script, "Latin"):
+        # ponytail: two extra reads, only on the page that sets the document's language.
+        own = ocr_mean_confidence(image_path, ocr_probe_languages(script))
+        return script if own >= ocr_mean_confidence(image_path, ocr_probe_languages("Latin")) else "Latin"
     return script if confidence >= OCR_SCRIPT_MIN_CONFIDENCE else ""
 
 
