@@ -111,17 +111,19 @@ def ocr_lines(tsv: str) -> List[Dict[str, Any]]:
         if len(columns) >= 12 and int(columns[0]) == TSV_WORD_LEVEL and columns[11].strip():
             left, top, width, height = (int(columns[column]) for column in (6, 7, 8, 9))
             line = lines.setdefault((columns[2], columns[3], columns[4]), {
-                "words": [], "confs": [], "heights": [], "box": [left, top, left + width, top + height],
+                "words": [], "confs": [], "heights": [], "boxes": [], "box": [left, top, left + width, top + height],
                 "par": (int(columns[2]), int(columns[3])),
             })
             line["words"].append(columns[11].strip())
             line["heights"].append(height)
+            line["boxes"].append((left, top, left + width, top + height))
             line["confs"].append(float(columns[10]))
             box = line["box"]
             box[0], box[1] = min(box[0], left), min(box[1], top)
             box[2], box[3] = max(box[2], left + width), max(box[3], top + height)
     found = [{"text": " ".join(line["words"]), "box": tuple(line["box"]), "par": line["par"],
-              "words": list(zip(line["words"], line["heights"])),
+              "words": list(zip(line["words"], line["heights"])), "boxes": line["boxes"],
+              "confs": line["confs"],
               "conf": sum(line["confs"]) / len(line["confs"]), "noise": False} for line in lines.values()]
     worded = [line for line in found if pdf_layout.has_translatable_text(line["text"])]
     low = [line for line in worded if line["conf"] < OCR_NOISE_MAX_CONFIDENCE]

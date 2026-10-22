@@ -108,6 +108,36 @@ def secondary_lyrics(lines: List[Dict[str, Any]], source: str, proven: Set[str])
     return others
 
 
+# Tesseract reads a row of a table or diagram as one line across its columns ("Opera [gap]
+# Copenhagen", "Moiras Tante [gap] alt"), and the line's box then spans rows and columns: its
+# translation was set huge and in the wrong place. Measured on Ruders KA pp. 2-10: gaps between
+# columns ran 2.5-46 word heights, gaps inside running text at most 1.6.
+OCR_COLUMN_GAP = 2.0
+
+
+def split_columns(line: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """A prose line cut at every gap wider than OCR_COLUMN_GAP word heights, each piece a line
+    of its own with `piece` set. Not for score pages: a held syllable leaves a long gap in a lyric."""
+    boxes = line.get("boxes") or []
+    if len(boxes) < 2:
+        return [line]
+    height = sorted(box[3] - box[1] for box in boxes)[len(boxes) // 2]
+    cuts = [0] + [index for index in range(1, len(boxes))
+                  if boxes[index][0] - boxes[index - 1][2] > OCR_COLUMN_GAP * height] + [len(boxes)]
+    if len(cuts) == 2:
+        return [line]
+    pieces = []
+    for start, end in zip(cuts, cuts[1:]):
+        own = boxes[start:end]
+        confs = line["confs"][start:end]
+        pieces.append({**line, "text": " ".join(word for word, _ in line["words"][start:end]),
+                       "words": line["words"][start:end], "boxes": own, "confs": confs,
+                       "conf": sum(confs) / len(confs), "piece": True,
+                       "box": (min(box[0] for box in own), min(box[1] for box in own),
+                               max(box[2] for box in own), max(box[3] for box in own))})
+    return pieces
+
+
 def scan_paragraph_keys(lines: List[Dict[str, Any]], blocks: Sequence[Tuple[str, Any]]) -> List[Any]:
     """Which paragraph each line of a prose page belongs to: tesseract's own, split further by
     the layout model's blocks (heron.page_blocks, in OCR pixels).
@@ -116,7 +146,8 @@ def scan_paragraph_keys(lines: List[Dict[str, Any]], blocks: Sequence[Tuple[str,
     labels (Ruders KA's "three time levels") into one that was then set in its top box. Lines in
     disjoint text blocks part, as in group_pdf_paragraphs, unless the upper one breaks off a
     sentence the lower carries on. A line in a picture and in no text block is a label, its own
-    paragraph: heron sees the diagram as one picture with nothing inside it.
+    paragraph: heron sees the diagram as one picture with nothing inside it. So is a piece of a
+    line split_columns cut up, a cell of its row.
     """
     def held(line: Dict[str, Any], labels: Set[str]) -> Set[int]:
         left, top, right, bottom = line["box"]
@@ -130,8 +161,8 @@ def scan_paragraph_keys(lines: List[Dict[str, Any]], blocks: Sequence[Tuple[str,
     part, current, previous_blocks = 0, [], set()
     for position, line in enumerate(lines):
         own = held(line, heron.HERON_TEXT_LABELS)
-        if not own and held(line, {"picture"}):
-            keys.append(("picture", position))
+        if line.get("piece") or (not own and held(line, {"picture"})):
+            keys.append(("own", position))
             continue
         if current and current[-1]["par"] == line["par"]:
             before = current[-1]
@@ -151,7 +182,7 @@ def scan_paragraph_keys(lines: List[Dict[str, Any]], blocks: Sequence[Tuple[str,
 
 def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]],
                       page_range: str = "", source: Optional[str] = None,
-                      layout_model: bool = False) -> List[Dict[str, Any]]:
+                      layout_model: bool = False, columns: bool = False) -> List[Dict[str, Any]]:
     """A scanned document in extract_pdf_layout's shape, from the lines OCR found, so
     render_pdf_layout_overlay can set the translation where the text was printed.
 
@@ -162,6 +193,8 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
     score's lines in another language than the document's keep their original (secondary_lyrics).
     With `layout_model`, a prose page's paragraphs are split by heron's blocks
     (scan_paragraph_keys); a score page never is, heron finds hundreds of overlapping blocks there.
+    With `columns`, a prose page's lines are cut at column gaps first (split_columns). Both are
+    flags so a history entry re-exports with the grouping it was translated with.
     """
     scale = 72.0 / ocr.OCR_DPI
     proven: Set[str] = set()
@@ -184,6 +217,8 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
             if score:
                 keys: List[Any] = list(range(len(lines)))
             else:
+                if columns:
+                    lines = [piece for line in lines for piece in split_columns(line)]
                 scale_blocks = ocr.OCR_DPI / heron.HERON_DPI
                 blocks = [(label, rect * scale_blocks) for label, rect in heron.page_blocks(page)] \
                     if layout_model and lines else []
@@ -362,14 +397,14 @@ def scan_background(pixmap: "pymupdf.Pixmap", box: Sequence[int], dpi: int) -> T
 
 def export_scan_with_translated_text(content: bytes, translated_text: str, page_range: str = "",
                                      source: str = langs.AUTO_SOURCE, language: Optional[str] = None,
-                                     layout_model: bool = False) -> bytes:
+                                     layout_model: bool = False, columns: bool = False) -> bytes:
     """The history re-export of a scan overlay: read the pages again and zip the stored
     translations back on by position, as export_pdf_layout_with_translated_text does."""
     ocr_pages: Dict[int, List[Dict[str, Any]]] = {}
     pdf_text.extract_pdf_markdown_from_bytes(content, "application/pdf", page_range, source, ocr_pages)
     blocks = [block.strip() for block in translated_text.split("\n\n")]
     return pdf_layout.render_pdf_layout_overlay(
-        content, scan_layout_pages(content, ocr_pages, page_range, language, layout_model), blocks)
+        content, scan_layout_pages(content, ocr_pages, page_range, language, layout_model, columns), blocks)
 
 
 def is_score_page(text: str, noise: Optional[Set[str]]) -> bool:

@@ -1249,6 +1249,25 @@ class MainTests(unittest.TestCase):
         self.assertEqual(keys[2], keys[3])
         self.assertNotEqual(keys[4], keys[5])
 
+    def test_a_scanned_line_is_cut_where_it_jumps_a_column(self):
+        def line(words):
+            boxes = [(left, 100, left + 10 * len(word), 118) for word, left in words]
+            return {"text": " ".join(word for word, _ in words), "box": (boxes[0][0], 100, boxes[-1][2], 118),
+                    "par": (1, 1), "words": [(word, 18) for word, _ in words], "boxes": boxes,
+                    "confs": [90.0, 30.0, 90.0][:len(words)], "conf": 70.0, "noise": False}
+
+        # Moiras Tante ........ alt: two columns of a cast list, 300px apart at 18px words.
+        pieces = main.split_columns(line([("Moiras", 100), ("Tante", 170), ("alt", 520)]))
+        self.assertEqual([piece["text"] for piece in pieces], ["Moiras Tante", "alt"])
+        self.assertEqual(pieces[1]["box"], (520, 100, 550, 118))
+        self.assertEqual(pieces[0]["conf"], 60.0)
+        self.assertTrue(all(piece["piece"] for piece in pieces))
+        self.assertEqual(main.scan_paragraph_keys(pieces, []), [("own", 0), ("own", 1)])
+        # Running text keeps its line whole, so does a line without word boxes (older readings).
+        whole = line([("run", 100), ("by", 140), ("Aunt", 175)])
+        self.assertEqual(main.split_columns(whole), [whole])
+        self.assertEqual(main.split_columns({**whole, "boxes": []}), [{**whole, "boxes": []}])
+
     def test_a_bilingual_score_translates_only_its_documents_language(self):
         def line(text, noise=False):
             return {"text": text, "box": (0, 0, 10, 10), "par": (1, 1), "conf": 90, "noise": noise, "words": []}

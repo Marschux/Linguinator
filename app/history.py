@@ -234,7 +234,8 @@ def export_original_history_content(extension: str, content: bytes, text: str, s
             return pdf_scan.export_scan_with_translated_text(content, text, source_meta.get("page_range", ""),
                                                     source_meta.get("scan_source", langs.AUTO_SOURCE),
                                                     source_meta.get("scan_language"),
-                                                    source_meta.get("layout_model") == "true")
+                                                    source_meta.get("layout_model") == "true",
+                                                    source_meta.get("scan_columns") == "true")
         if source_meta.get("layout") == "true":
             return pdf_layout.export_pdf_layout_with_translated_text(content, text, source_meta.get("page_range", ""),
                                                                     source_meta.get("layout_model") == "true")

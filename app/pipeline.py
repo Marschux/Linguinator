@@ -139,7 +139,7 @@ def run_pdf_translate_job(
             jobqueue.update_job(job_id, source=source)
         if layout_fallback and any(ocr_pages.values()):
             # Asked for the original layout: set the translation onto the scanned pages themselves.
-            pages = pdf_scan.scan_layout_pages(content, ocr_pages, page_range, source, config.LAYOUT_MODEL)
+            pages = pdf_scan.scan_layout_pages(content, ocr_pages, page_range, source, config.LAYOUT_MODEL, True)
             paragraphs = [paragraph["text"] for page in pages for paragraph in page["paragraphs"]]
             # A score's lines go to the model as whole sentences and come back spread over them.
             groups = pdf_scan.sung_sentences(pages)
@@ -153,7 +153,7 @@ def run_pdf_translate_job(
             # One line per paragraph, so the re-export's split on blank lines stays exact.
             result = "\n\n".join(re.sub(r"\s+", " ", text).strip() for text in translated)
             meta = {"layout": "true", "scan": "true", "page_range": page_range, "scan_source": requested_source,
-                    "scan_language": source, "layout_model": str(config.LAYOUT_MODEL).lower()}
+                    "scan_language": source, "layout_model": str(config.LAYOUT_MODEL).lower(), "scan_columns": "true"}
             history_id = history.save_history("translate-pdf-layout", result, source, target, filename, content, "pdf", meta)
             jobqueue.update_job(job_id, message="Rendering PDF")
             try:
