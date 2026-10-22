@@ -598,6 +598,7 @@ def read_score_bands(image_path: Path, lines: List[Dict[str, Any]],
         for line in band_lines:
             left, line_top, right, line_bottom = line["box"]
             found.append({**line, "box": (left, line_top + top, right, line_bottom + top),
+                          "boxes": [(x0, y0 + top, x1, y1 + top) for x0, y0, x1, y1 in line["boxes"]],
                           "par": ("band", index, *line["par"]), "band": True,
                           "noise": line["conf"] < OCR_NOISE_MAX_CONFIDENCE})
         if text.strip():

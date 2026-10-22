@@ -1268,6 +1268,32 @@ class MainTests(unittest.TestCase):
         self.assertEqual(main.split_columns(whole), [whole])
         self.assertEqual(main.split_columns({**whole, "boxes": []}), [{**whole, "boxes": []}])
 
+    def test_a_stage_direction_is_taken_out_of_a_sung_line_and_translated_on_its_own(self):
+        def line(words, top, band=0):
+            boxes, left = [], 100
+            for word, gap in words:
+                left += gap
+                boxes.append((left, top, left + 8 * len(word), top + 13))
+                left += 8 * len(word)
+            return {"text": " ".join(word for word, _ in words), "box": (boxes[0][0], top, boxes[-1][2], top + 13),
+                    "par": ("band", band, 1, 1), "band": True, "noise": False, "conf": 90.0,
+                    "words": [(word, 13) for word, _ in words], "boxes": boxes, "confs": [90.0] * len(words)}
+
+        # Ruders KA p. 26: the lyric, then the direction 150px (11 word heights) to its right.
+        sung = line([("i", 0), ("stil", 160), ("-", 20), ("le", 20), ("skov,", 50),
+                     ("off", 150), ("stage", 5), ("right.", 5), ("The", 5), ("Double,", 5)], 100)
+        lyric, direction = main.split_directions(sung)
+        self.assertEqual(lyric["text"], "i stil - le skov,")
+        self.assertEqual(direction["text"], "off stage right. The Double,")
+        self.assertTrue(direction["direction"])
+        # A lyric whose syllables are only spaced by the notes stays whole, hyphens without spaces too.
+        whispered = line([("whis-per-ing", 0), ("and", 5), ("gos-sip", 5), ("and", 200), ("so", 5), ("on", 5)], 130)
+        self.assertEqual(main.split_directions(whispered), [whispered])
+        # The next direction line below, overlapping it side to side, carries the same direction.
+        below, = main.split_directions(line([("her", 600), ("arms", 5), ("held", 5), ("by", 5), ("two", 5),
+                                             ("Guards,", 5)], 118))
+        self.assertEqual(main.direction_groups([lyric, direction, below]), {1: 1, 2: 1})
+
     def test_a_bilingual_score_translates_only_its_documents_language(self):
         def line(text, noise=False):
             return {"text": text, "box": (0, 0, 10, 10), "par": (1, 1), "conf": 90, "noise": noise, "words": []}
@@ -1301,6 +1327,12 @@ class MainTests(unittest.TestCase):
         self.assertEqual(main.sung_sentences(pages), [[0], [1, 2], [3], [4], [5], [6]])
         pages[1]["paragraphs"].pop()
         self.assertEqual(main.sung_sentences(pages), [[0], [1, 2, 4], [3], [5]])
+        # The lines of one stage direction go together, wherever the sung lines run.
+        directions = [{"text": "Armed Guards enter and drag", "direction": (9, 0)},
+                      paragraph("si-lent wood", 0, 100),
+                      {"text": "off stage right.", "direction": (9, 0)},
+                      {"text": "Offred watches.", "direction": (9, 3)}]
+        self.assertEqual(main.sung_sentences([{"paragraphs": directions}]), [[0, 2], [1], [3]])
         self.assertEqual(main.spread_words("waren anders ich wünschte es ginge um Liebe oder Sonnenuntergänge oder Glück oder Schnee.",
                                            ["were dif-rent I wish it were about", "love or sunsets or", "happiness or snow."]),
                          ["waren anders ich wünschte es ginge um", "Liebe oder Sonnenuntergänge oder", "Glück oder Schnee."])

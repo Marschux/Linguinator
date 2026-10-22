@@ -115,27 +115,93 @@ def secondary_lyrics(lines: List[Dict[str, Any]], source: str, proven: Set[str])
 OCR_COLUMN_GAP = 2.0
 
 
-def split_columns(line: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """A prose line cut at every gap wider than OCR_COLUMN_GAP word heights, each piece a line
-    of its own with `piece` set. Not for score pages: a held syllable leaves a long gap in a lyric."""
+def column_spans(line: Dict[str, Any]) -> List[range]:
+    """The word ranges of a line between gaps wider than OCR_COLUMN_GAP word heights."""
     boxes = line.get("boxes") or []
     if len(boxes) < 2:
-        return [line]
+        return [range(len(line.get("words") or []))]
     height = sorted(box[3] - box[1] for box in boxes)[len(boxes) // 2]
     cuts = [0] + [index for index in range(1, len(boxes))
                   if boxes[index][0] - boxes[index - 1][2] > OCR_COLUMN_GAP * height] + [len(boxes)]
-    if len(cuts) == 2:
+    return [range(start, end) for start, end in zip(cuts, cuts[1:])]
+
+
+def sub_line(line: Dict[str, Any], words: Sequence[int], **extra: Any) -> Dict[str, Any]:
+    """The line made of only these of its words."""
+    own = [line["boxes"][index] for index in words]
+    confs = [line["confs"][index] for index in words]
+    return {**line, "text": " ".join(line["words"][index][0] for index in words),
+            "words": [line["words"][index] for index in words], "boxes": own, "confs": confs,
+            "conf": sum(confs) / len(confs), **extra,
+            "box": (min(box[0] for box in own), min(box[1] for box in own),
+                    max(box[2] for box in own), max(box[3] for box in own))}
+
+
+def split_columns(line: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """A prose line cut at every column gap (column_spans), each piece a line of its own with
+    `piece` set. Not for score pages: a held syllable leaves a long gap in a lyric."""
+    spans = column_spans(line)
+    if len(spans) < 2:
         return [line]
-    pieces = []
-    for start, end in zip(cuts, cuts[1:]):
-        own = boxes[start:end]
-        confs = line["confs"][start:end]
-        pieces.append({**line, "text": " ".join(word for word, _ in line["words"][start:end]),
-                       "words": line["words"][start:end], "boxes": own, "confs": confs,
-                       "conf": sum(confs) / len(confs), "piece": True,
-                       "box": (min(box[0] for box in own), min(box[1] for box in own),
-                               max(box[2] for box in own), max(box[3] for box in own))})
-    return pieces
+    return [sub_line(line, span, piece=True) for span in spans]
+
+
+# A stage direction shares a score's bands with the sung text, often a line too ("i stil - le
+# skov, —___ [gap] off stage right. The Double, stage centre, ..."), and the two went to the model
+# as one sentence: "Stilles Holz, bewaffnete Wachen betreten ...". The gap cannot tell them apart,
+# notes space a lyric's syllables up to 30 word heights (Ruders KA pp. 23-30). The text can: a
+# lyric is broken into syllables ("stil - le", "whis-per-ing") or held ("__") every few words, a
+# direction is not. Between two letters only: OCR reads stray rules as dashes ("——- Pe").
+OCR_DIRECTION_MIN_WORDS = 5
+SUNG_MARKS = re.compile(r"[^\W\d_]\s*-\s*[^\W\d_]|_")
+
+
+def is_direction(text: str) -> bool:
+    return len(re.findall(r"[^\W\d_]{2,}", text)) >= OCR_DIRECTION_MIN_WORDS and not SUNG_MARKS.search(text)
+
+
+def split_directions(line: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """A score line as its sung part (one line, as before) and its directions (`direction` set).
+    The sung text stands left of the directions, so what follows one ("initially offstage.") is
+    direction too, however short."""
+    if not line.get("boxes"):
+        return [line]
+    spans = column_spans(line)
+    first = next((number for number, span in enumerate(spans)
+                  if is_direction(" ".join(line["words"][i][0] for i in span))), None)
+    if first is None:
+        return [line]
+    sung = [index for span in spans[:first] for index in span]
+    return ([sub_line(line, sung)] if sung else []) + [sub_line(line, span, direction=True) for span in spans[first:]]
+
+
+def direction_groups(lines: List[Dict[str, Any]]) -> Dict[int, int]:
+    """The direction lines of a score page, each mapped to the first line of the direction it
+    belongs to: one carries on the one just above it in the same band where the two overlap side
+    to side, as a direction is set over several lines, two side by side in places (Ruders KA
+    p. 27). They are translated together and set line by line (sung_sentences)."""
+    groups: Dict[int, int] = {}
+    open_ends: Dict[int, Dict[str, Any]] = {}
+    for position, line in enumerate(lines):
+        if not line.get("direction"):
+            continue
+        left, top, right, bottom = line["box"]
+        for first, last in open_ends.items():
+            if (last["par"][:2] == line["par"][:2] and last["box"][0] < right and left < last["box"][2]
+                    and -0.5 * (bottom - top) <= top - last["box"][3] <= 1.5 * (bottom - top)):
+                groups[position] = first
+                open_ends[first] = line
+                break
+        else:
+            groups[position] = position
+            open_ends[position] = line
+    return groups
+
+
+# Which grouping of a scan's lines a history entry was translated with, so its re-export zips the
+# translations onto the same paragraphs: 1 cuts prose lines at column gaps, 2 also takes the
+# directions out of a score's sung lines.
+SCAN_GROUPING = 2
 
 
 def scan_paragraph_keys(lines: List[Dict[str, Any]], blocks: Sequence[Tuple[str, Any]]) -> List[Any]:
@@ -182,7 +248,7 @@ def scan_paragraph_keys(lines: List[Dict[str, Any]], blocks: Sequence[Tuple[str,
 
 def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]],
                       page_range: str = "", source: Optional[str] = None,
-                      layout_model: bool = False, columns: bool = False) -> List[Dict[str, Any]]:
+                      layout_model: bool = False, grouping: int = 0) -> List[Dict[str, Any]]:
     """A scanned document in extract_pdf_layout's shape, from the lines OCR found, so
     render_pdf_layout_overlay can set the translation where the text was printed.
 
@@ -193,8 +259,9 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
     score's lines in another language than the document's keep their original (secondary_lyrics).
     With `layout_model`, a prose page's paragraphs are split by heron's blocks
     (scan_paragraph_keys); a score page never is, heron finds hundreds of overlapping blocks there.
-    With `columns`, a prose page's lines are cut at column gaps first (split_columns). Both are
-    flags so a history entry re-exports with the grouping it was translated with.
+    `grouping` (SCAN_GROUPING) cuts a prose page's lines at column gaps first (split_columns) and
+    takes a score's directions out of its sung lines (split_directions). Both are parameters so a
+    history entry re-exports with the grouping it was translated with.
     """
     scale = 72.0 / ocr.OCR_DPI
     proven: Set[str] = set()
@@ -213,11 +280,15 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
             to_raw = pymupdf.Matrix(scale, scale) * page.derotation_matrix
             lines = ocr_pages.get(number) or []
             score = any(line["noise"] or line.get("band") for line in lines)
+            if score and grouping >= 2:
+                lines = [piece for line in lines for piece in
+                         ([line] if line["noise"] else split_directions(line))]
             skip = secondary_lyrics(lines, source, proven) if score and source else set()
+            directions = direction_groups(lines) if score else {}
             if score:
                 keys: List[Any] = list(range(len(lines)))
             else:
-                if columns:
+                if grouping >= 1:
                     lines = [piece for line in lines for piece in split_columns(line)]
                 scale_blocks = ocr.OCR_DPI / heron.HERON_DPI
                 blocks = [(label, rect * scale_blocks) for label, rect in heron.page_blocks(page)] \
@@ -229,7 +300,7 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
                     continue
                 groups.setdefault(keys[position], []).append(line)
             paragraphs = []
-            for group in groups.values():
+            for key, group in groups.items():
                 rects = [pymupdf.Rect(line["box"]) * to_raw for line in group]
                 if score:
                     text = join_sung_syllables(group[0]["text"])
@@ -246,7 +317,9 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
                 if not pdf_layout.has_translatable_text(text):
                     continue
                 paragraphs.append({
-                    **({"band": group[0]["par"][1]} if score and group[0].get("band") else {}),
+                    # A direction is translated with the rest of its own lines, never with a sung one.
+                    **({"direction": (number, directions[key])} if key in directions
+                       else {"band": group[0]["par"][1]} if score and group[0].get("band") else {}),
                     "text": text,
                     "lines": [scan_line(line, rect, flip) for line, rect in zip(group, rects)],
                     "cover": [rect + (-OCR_COVER_PADDING, -OCR_COVER_PADDING, OCR_COVER_PADDING, OCR_COVER_PADDING)
@@ -309,10 +382,12 @@ def sung_sentences(pages: List[Dict[str, Any]]) -> List[List[int]]:
     joined left to right; a row continues the row in the same place (same index among as many
     rows) of the voice's next band, over a page break too. A line joins the one before only while
     that one has not ended its sentence and it opens in lower case, which keeps a capitalised
-    direction ("Allegro", "Slowly") out. Everything else stays a group of one.
+    direction ("Allegro", "Slowly") out. The lines of one stage direction (split_directions) are
+    one group. Everything else stays a group of one.
     """
     groups: List[List[int]] = []
     open_by_voice: Dict[Tuple[int, int], List[int]] = {}
+    directions: Dict[Any, List[int]] = {}
     texts: List[str] = []
     index = 0
     for page in pages:
@@ -321,6 +396,13 @@ def sung_sentences(pages: List[Dict[str, Any]]) -> List[List[int]]:
             texts.append(paragraph["text"])
             if "band" in paragraph:
                 bands.setdefault(paragraph["band"], []).append((index, paragraph))
+            elif "direction" in paragraph:
+                group = directions.get(paragraph["direction"])
+                if group and sum(len(texts[i]) for i in group) + len(paragraph["text"]) < config.MAX_CHARS:
+                    group.append(index)
+                else:
+                    directions[paragraph["direction"]] = [index]
+                    groups.append(directions[paragraph["direction"]])
             else:
                 groups.append([index])
             index += 1
@@ -397,14 +479,14 @@ def scan_background(pixmap: "pymupdf.Pixmap", box: Sequence[int], dpi: int) -> T
 
 def export_scan_with_translated_text(content: bytes, translated_text: str, page_range: str = "",
                                      source: str = langs.AUTO_SOURCE, language: Optional[str] = None,
-                                     layout_model: bool = False, columns: bool = False) -> bytes:
+                                     layout_model: bool = False, grouping: int = 0) -> bytes:
     """The history re-export of a scan overlay: read the pages again and zip the stored
     translations back on by position, as export_pdf_layout_with_translated_text does."""
     ocr_pages: Dict[int, List[Dict[str, Any]]] = {}
     pdf_text.extract_pdf_markdown_from_bytes(content, "application/pdf", page_range, source, ocr_pages)
     blocks = [block.strip() for block in translated_text.split("\n\n")]
     return pdf_layout.render_pdf_layout_overlay(
-        content, scan_layout_pages(content, ocr_pages, page_range, language, layout_model, columns), blocks)
+        content, scan_layout_pages(content, ocr_pages, page_range, language, layout_model, grouping), blocks)
 
 
 def is_score_page(text: str, noise: Optional[Set[str]]) -> bool:
