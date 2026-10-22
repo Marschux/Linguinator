@@ -1197,6 +1197,20 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual(main.ocr.staff_spans(page), [(50, 82), (200, 232)])
 
+    def test_staff_spans_finds_a_staff_whose_line_is_scanned_askew(self):
+        import numpy as np
+        page = np.full((400, 600), 255, dtype=np.uint8)
+        for top in (50, 200, 300):
+            for line in range(5):
+                page[top + 8 * line, 40:560] = 0
+        # A long beam sets the scale the lines are measured against.
+        page[120:124, 40:560] = 0
+        # Ruders KA p. 30: a skewed line falls into three rows, a third of its length in each.
+        page[316, 40:560] = 255
+        page[315, 40:213] = page[316, 213:386] = page[317, 386:560] = 0
+
+        self.assertEqual(main.ocr.staff_spans(page), [(50, 82), (200, 232), (300, 332)])
+
     def test_clean_source_text_spares_the_model_quotes_and_glyphs_it_stops_or_invents_on(self):
         # English curly quotes cut the translation off mid-sentence; a Symbol-font bullet came back
         # as an invented CJK character. Apostrophes stay.

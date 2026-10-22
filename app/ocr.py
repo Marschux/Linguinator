@@ -10,7 +10,7 @@ from fastapi import HTTPException
 # Text extraction runs on PyMuPDF (it decodes subset fonts pypdf silently drops words from and
 # reports position, size and bold in one pass); pypdf still does the overlay merge.
 import pymupdf
-from . import langs, pdf_layout
+from . import langs, pdf_layout, pdf_scan
 
 
 def ensure_ocr_tools():
@@ -99,6 +99,11 @@ OCR_BLOCK_MIN_CHARS = 100
 # heading, a dotted contents leader), and leaving one prose line out would tear its sentence.
 OCR_NOISE_MAX_CONFIDENCE = 62
 OCR_NOISE_MIN_SHARE = 0.4
+# Read band by band, a lyric can come out a little below that: Ruders KA p. 24's "were dif -rent
+# __ I wish it were a - bout love" read at 61 once its staves were all found, and notation in the
+# bands of pp. 23-30 read up to 62 too. What tells them apart there is the syllable hyphen or hold
+# line (pdf_scan.SUNG_MARKS) a lyric carries and notation does not, from 55 up.
+OCR_SUNG_MIN_CONFIDENCE = 55
 
 
 def ocr_lines(tsv: str) -> List[Dict[str, Any]]:
@@ -545,8 +550,11 @@ def staff_spans(gray) -> List[Tuple[int, int]]:
         edges = np.diff(np.concatenate(([0], dark[y].astype(np.int8), [0])))
         runs = np.where(edges == -1)[0] - np.where(edges == 1)[0]
         cover[y] = runs[runs >= STAFF_MIN_RUN].sum()
-    # A slightly skewed line spreads over two or three rows.
-    cover = np.maximum.reduce([cover, np.roll(cover, 1), np.roll(cover, -1)])
+    # A slightly skewed line spreads over two or three rows, so they are added up. Taking the
+    # largest of them lost one line of Ruders KA p. 30's CORO staff by 2 of 237, and with it that
+    # staff, the piano's below and the CORO lyric between them; added up, pp. 23-30 gave 0-4 more
+    # staves a page, all real, and lost none.
+    cover = cover + np.roll(cover, 1) + np.roll(cover, -1)
     if not cover.any():
         return []
     rows = np.where(cover >= STAFF_LINE_SHARE * np.percentile(cover, 99.5))[0]
@@ -616,7 +624,8 @@ def read_score_bands(image_path: Path, lines: List[Dict[str, Any]],
             found.append({**line, "box": (left, line_top + top, right, line_bottom + top),
                           "boxes": [(x0, y0 + top, x1, y1 + top) for x0, y0, x1, y1 in line["boxes"]],
                           "par": ("band", index, *line["par"]), "band": True,
-                          "noise": line["conf"] < OCR_NOISE_MAX_CONFIDENCE})
+                          "noise": line["conf"] < OCR_NOISE_MAX_CONFIDENCE and not (
+                              line["conf"] >= OCR_SUNG_MIN_CONFIDENCE and pdf_scan.SUNG_MARKS.search(line["text"]))})
         if text.strip():
             texts.append(text.strip())
     if not found:
