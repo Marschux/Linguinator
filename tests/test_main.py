@@ -1239,6 +1239,31 @@ class MainTests(unittest.TestCase):
         # Even ones that repeat two letters a lot (Ruders KA p. 9).
         self.assertEqual(main.strip_leaders("hængningen medlemmerne"), "hængningen medlemmerne")
 
+    def test_a_line_read_unsure_is_read_again_on_its_own(self):
+        import numpy as np
+        gray = np.full((100, 400), 255, dtype=np.uint8)
+        line = {"text": "IVDQUn ea", "conf": 20.0, "par": (13, 1), "noise": False, "box": (100, 40, 300, 60),
+                "words": [("IVDQUn", 18), ("ea", 13)], "boxes": [(100, 40, 180, 60), (200, 42, 300, 60)],
+                "confs": [20.0, 20.0]}
+
+        def read(_path, _language, lines, psm=None):
+            self.assertEqual(psm, 7)
+            # The rules of the box around it come back at its ends.
+            lines.append({"text": "|| Realtime", "conf": 70.0, "par": (1, 1), "noise": False,
+                          "box": (0, 6, 150, 26), "words": [("||", 20), ("Realtime", 20)],
+                          "boxes": [(0, 6, 10, 26), (40, 6, 150, 26)], "confs": [66.0, 74.0]})
+            return "|| Realtime"
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.object(main.ocr, "run_tesseract", side_effect=read):
+                again = main.ocr.reread_line(Path(temp_dir) / "page.png", gray, line, "eng")
+        self.assertEqual(again["text"], "Realtime")
+        self.assertEqual(again["box"], (140, 40, 250, 60))   # back in the page's pixels
+        self.assertEqual(again["par"], (13, 1))
+        # A line read surely is left alone.
+        self.assertIs(main.ocr.reread_line(Path("page.png"), gray, {**line, "conf": 90.0}, "eng")["text"],
+                      line["text"])
+
     def test_a_cast_list_is_set_row_by_row(self):
         def line(text, left, top, right):
             words = text.split()
@@ -1264,6 +1289,13 @@ class MainTests(unittest.TestCase):
         self.assertFalse(main.is_row(prose, lines))
         keys = main.scan_paragraph_keys(lines, [], rows=True)
         self.assertNotEqual(keys[0], keys[2])
+        # Where tesseract read neither the leader nor the part, the leader's dots still show.
+        self.assertTrue(main.is_row({**prose, "leader_after": True}, [prose]))
+        # A leader read stuck to the part ("…..mezzo sopran", p. 7) is cut there and dropped.
+        glued = line("Dobbeltgængeren (Tilfred i Tiden Før) …..mezzo sopran", 151, 247, 954)
+        self.assertEqual([piece["text"] for piece in main.split_columns(glued, leaders=True)],
+                         ["Dobbeltgængeren (Tilfred i Tiden Før)", "…..mezzo sopran"])
+        self.assertEqual(main.strip_leaders("…..mezzo sopran"), "mezzo sopran")
         # A row also ends the paragraph above it: the line after it does not join the one before.
         double = line("The Double (Offred in the Time Before, red hair,", 151, 140, 700)
         moira = line("Moira (Offred's best friend, black hair, ca. 30)", 151, 251, 700)
@@ -1445,6 +1477,10 @@ class MainTests(unittest.TestCase):
         numbered = line([("7", 0), ("hold", 8), ("Offred,", 5), ("and", 5), ("the", 5), ("Double", 5)], 160)
         self.assertEqual([(piece["text"], piece.get("direction")) for piece in main.split_directions(numbered)],
                          [("7", None), ("hold Offred, and the Double", True)])
+        # A cue read into the end of a direction (p. 27's "Cl./Vl./Va." as "Pe", confidence 0).
+        cued = line([("hold", 0), ("Offred,", 5), ("and", 5), ("the", 5), ("Double", 5), ("——-", 5), ("Pe", 5)], 190)
+        cued["confs"][-2:] = [1.0, 0.0]
+        self.assertEqual([piece["text"] for piece in main.split_directions(cued)], ["hold Offred, and the Double ——-"])
         # A lyric whose syllables are only spaced by the notes stays whole, hyphens without spaces too.
         whispered = line([("whis-per-ing", 0), ("and", 5), ("gos-sip", 5), ("and", 200), ("so", 5), ("on", 5)], 130)
         self.assertEqual(main.split_directions(whispered), [whispered])

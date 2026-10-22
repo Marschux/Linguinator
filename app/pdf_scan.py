@@ -45,6 +45,9 @@ OCR_LEADER_MIN_LENGTH = 12
 OCR_LEADER_TOP_LETTERS = 0.7
 
 
+GLUED_LEADER = re.compile(r"[.·…]{2,}(?=[^\W\d_])")
+
+
 def is_leader(word: str) -> bool:
     """A dotted leader read as a word: dots only ("..", "........"), or a long run of a few letters
     (see strip_leaders). Not three dots: that is an ellipsis, and prose opens with one ("... She is
@@ -55,6 +58,8 @@ def is_leader(word: str) -> bool:
 
 
 def strip_leaders(text: str) -> str:
+    text = " ".join(GLUED_LEADER.sub("", word) for word in text.split())
+
     def leader(word: str) -> bool:
         word = word.lower()
         top = sum(count for _, count in Counter(word).most_common(2))
@@ -154,6 +159,8 @@ def column_spans(line: Dict[str, Any], leaders: bool = False) -> List[range]:
         cuts |= {cut for index, (word, _) in enumerate(line["words"])
                  if is_leader(word) and (index or word not in ("...", "…"))
                  for cut in (index, index + 1) if 0 < cut < len(boxes)}
+        # Or it is read stuck to the front of the part ("…..mezzo sopran", Ruders KA p. 7).
+        cuts |= {index for index, (word, _) in enumerate(line["words"]) if index and GLUED_LEADER.match(word)}
     cuts = [0] + sorted(cuts) + [len(boxes)]
     return [range(start, end) for start, end in zip(cuts, cuts[1:])]
 
@@ -207,6 +214,15 @@ OCR_SCORE_JUNK_CONFIDENCE = 50
 SUNG_HOLD = re.compile(r"[-_—–]+")
 
 
+def is_score_junk(word: str, conf: float) -> bool:
+    """A mark tesseract read off the notation of a score: no letter in it (a syllable's hyphen or
+    hold line aside), or a letter or two read with less than OCR_SCORE_JUNK_CONFIDENCE."""
+    letters = sum(c.isalpha() for c in word)
+    if not letters:
+        return not SUNG_HOLD.fullmatch(word)
+    return letters <= 2 and conf < OCR_SCORE_JUNK_CONFIDENCE
+
+
 def trim_score_line(line: Dict[str, Any]) -> List[Dict[str, Any]]:
     """A score line without the notation tesseract read at either end of it ("7 8 ee I'm sor-ry",
     "| want you", Ruders KA pp. 23-24): marks with no letter (a syllable's hyphen or hold line
@@ -218,11 +234,7 @@ def trim_score_line(line: Dict[str, Any]) -> List[Dict[str, Any]]:
         return [line]
 
     def junk(index: int) -> bool:
-        word = line["words"][index][0]
-        letters = sum(c.isalpha() for c in word)
-        if not letters:
-            return not SUNG_HOLD.fullmatch(word)
-        return letters <= 2 and line["confs"][index] < OCR_SCORE_JUNK_CONFIDENCE
+        return is_score_junk(line["words"][index][0], line["confs"][index])
 
     start, end = 0, len(line["words"])
     while start < end and junk(start):
@@ -255,8 +267,18 @@ def split_directions(line: Dict[str, Any], numbers: bool = True) -> List[Dict[st
     sung = [index for span in spans[:first] for index in span]
     number = [sub_line(line, range(spans[first].start, start))] if start > spans[first].start else []
     spans = spans[:first] + [range(start, spans[first].stop)] + spans[first + 1:]
+
+    def trimmed(span: range) -> range:
+        # A cue read into the end of a direction ("unobtrusively ——- Pe", where "Pe" is the
+        # "Cl./Vl./Va." above the bar, Ruders KA p. 27) is no part of it, and is not painted over.
+        stop = span.stop
+        while numbers and stop - 1 > span.start and is_score_junk(line["words"][stop - 1][0], line["confs"][stop - 1]) \
+                and any(c.isalpha() for c in line["words"][stop - 1][0]):
+            stop -= 1
+        return range(span.start, stop)
+
     return (([sub_line(line, sung)] if sung else []) + number
-            + [sub_line(line, span, direction=True) for span in spans[first:]])
+            + [sub_line(line, trimmed(span), direction=True) for span in spans[first:]])
 
 
 def direction_groups(lines: List[Dict[str, Any]]) -> Dict[int, int]:
@@ -298,7 +320,12 @@ OCR_ROW_CELL_WORDS = 3
 
 
 def is_row(line: Dict[str, Any], lines: List[Dict[str, Any]]) -> bool:
-    """Whether a short line (a cell) stands right beside this one, overlapping it in height."""
+    """Whether a short line (a cell) stands right beside this one, overlapping it in height, or
+    a dotted leader tesseract did not read as text runs on from it (ocr.fit_to_ink's
+    `leader_after`: "Serena Joy (the Commander's wife, ca. 60) ........", its part in bold that
+    tesseract did not read at all)."""
+    if line.get("leader_after"):
+        return True
     left, top, right, bottom = line["box"]
     # Across a column gap: tesseract also breaks a line of prose in two at a wide space.
     return any(other["box"][0] - right > OCR_COLUMN_GAP * (bottom - top)

@@ -248,12 +248,24 @@ def fit_to_ink(lines: List[Dict[str, Any]], image_path: Path) -> List[Dict[str, 
             # How much ink each gap between two words holds: a word tesseract misread or left out
             # ("year-ph [gap] )" for "year-plus-six)") leaves a gap as wide as a column's, but not empty.
             top, bottom = line["box"][1], line["box"][3]
+            # Leader dots tesseract did not read run on from a cast list's name: ink, but only
+            # in the lower half of the line, where dots sit (text beside it reaches up too).
+            # Measured on Ruders KA p. 6: 5-11 % of the next 14 line heights for every name with
+            # a leader, 0 for every line of prose on pp. 6, 8 and 9.
+            height = bottom - top
+            trail = gray[top:bottom, line["box"][2] + height:line["box"][2] + OCR_LEADER_REACH * height] < STAFF_DARK
+            if trail.size and trail.any():
+                lower = trail[height // 2:].sum() / trail.sum()
+                line["leader_after"] = bool(trail.mean() >= OCR_LEADER_MIN_INK and lower >= OCR_LEADER_LOWER_SHARE)
             line["gap_ink"] = [0.0] + [float((gray[top:bottom, before[2]:after[0]] < STAFF_DARK).mean())
                                        if after[0] > before[2] else 0.0
                                        for before, after in zip(boxes, boxes[1:])]
     return lines
 
 
+OCR_LEADER_REACH = 15
+OCR_LEADER_MIN_INK = 0.02
+OCR_LEADER_LOWER_SHARE = 0.8
 # An underline: a dark run at least this long, a fifth of the word at least, within this many rows
 # below the word's letters.
 OCR_UNDERLINE_REACH = 5
@@ -571,15 +583,59 @@ def ocr_pdf_page(content: bytes, page_number: int, source: str = langs.AUTO_SOUR
         image_path = render_pdf_page(content, page_number, temp_dir)
         found: Optional[List[Dict[str, Any]]] = [] if lines is not None else None
         text = read_scanned_page(content, page_number, source, image_path, temp_dir, found)
-        if found and any(line["noise"] for line in found):
+        if found:
             language = ocr_language_code(source if source != langs.AUTO_SOURCE
                                          else langs.detect_source_language(text))
-            banded = read_score_bands(image_path, found, language)
-            if banded:
-                text, found = banded
+            if any(line["noise"] for line in found):
+                banded = read_score_bands(image_path, found, language)
+                if banded:
+                    text, found = banded
+            elif any(line["conf"] < OCR_NOISE_MAX_CONFIDENCE for line in found):
+                gray = page_gray(image_path)
+                found = [reread_line(image_path, gray, line, language) for line in found]
         if lines is not None:
             lines.extend(found)
         return text
+
+
+# A line of prose tesseract read unsure, read again as a single line on its own: in a page read
+# whole the bold serif parts of a cast list came back as garbage, alone "Eye and Guard 2 ........
+# bass" read at 66 (Ruders KA p. 6). Kept only when the new read is the surer one by this much.
+OCR_REREAD_GAIN = 10
+OCR_REREAD_PADDING = 6
+
+
+def reread_line(image_path: Path, gray, line: Dict[str, Any], language: str) -> Dict[str, Any]:
+    """The line read again on its own (tesseract --psm 7) when its read was below
+    OCR_NOISE_MAX_CONFIDENCE, and the new read is surer by OCR_REREAD_GAIN."""
+    if line["conf"] >= OCR_NOISE_MAX_CONFIDENCE or not line.get("boxes"):
+        return line
+    try:
+        left, top, right, bottom = line["box"]
+        top = max(0, top - OCR_REREAD_PADDING)
+        strip = gray[top:bottom + OCR_REREAD_PADDING, left:right].copy()
+        path = image_path.with_name(f"{image_path.stem}-line.png")
+        pymupdf.Pixmap(pymupdf.csGRAY, strip.shape[1], strip.shape[0], strip.tobytes(), False).save(str(path))
+        again: List[Dict[str, Any]] = []
+        run_tesseract(path, language, again, psm=7)
+    except Exception:
+        return line
+    if len(again) != 1 or again[0]["conf"] < line["conf"] + OCR_REREAD_GAIN:
+        return line
+
+    def shift(box):
+        return (box[0] + left, box[1] + top, box[2] + left, box[3] + top)
+    read = again[0]
+    # Read alone, the rules of a box around the line come back as marks at its ends ("~ || Realtime",
+    # p. 10's diagram), and would be painted over with it.
+    words = [any(c.isalpha() for c in word) for word, _ in read["words"]]
+    if not any(words):
+        return line
+    first, last = words.index(True), len(words) - words[::-1].index(True)
+    if (first, last) != (0, len(words)):
+        read = pdf_scan.sub_line(read, range(first, last))
+    return {**line, **read, "par": line["par"], "noise": False, "box": shift(read["box"]),
+            **{key: [shift(box) for box in read[key]] for key in ("boxes", "covers") if key in read}}
 
 
 def read_scanned_page(content: bytes, page_number: int, source: str, image_path: Path, temp_dir: str,
