@@ -405,8 +405,8 @@ OCR_REGION_PADDING = 8
 
 
 def render_pdf_region(content: bytes, page_number: int, box: Tuple[int, int, int, int],
-                      temp_dir: str, name: str) -> Path:
-    """One block of a page as its own PNG, `box` in pixels of the OCR_DPI page rendering.
+                      temp_dir: str, name: str, dpi: int = OCR_DPI) -> Path:
+    """One block of a page as its own PNG at `dpi`, `box` in pixels of the OCR_DPI page rendering.
 
     Re-rendered from the PDF rather than cut out of the page image: PyMuPDF has no working
     pixmap-crop constructor left, and rasterising the region directly is both sharper and one
@@ -420,7 +420,7 @@ def render_pdf_region(content: bytes, page_number: int, box: Tuple[int, int, int
             right + OCR_REGION_PADDING, bottom + OCR_REGION_PADDING,
         ) * (72.0 / OCR_DPI)
         path = Path(temp_dir) / f"{name}.png"
-        page.get_pixmap(dpi=OCR_DPI, clip=clip & page.rect).save(str(path))
+        page.get_pixmap(dpi=dpi, clip=clip & page.rect).save(str(path))
         return path
 
 
@@ -590,42 +590,51 @@ def ocr_pdf_page(content: bytes, page_number: int, source: str = langs.AUTO_SOUR
                 banded = read_score_bands(image_path, found, language)
                 if banded:
                     text, found = banded
-            elif any(line["conf"] < OCR_NOISE_MAX_CONFIDENCE for line in found):
-                gray = page_gray(image_path)
-                found = [reread_line(image_path, gray, line, language) for line in found]
+            else:
+                found = [reread_line(content, page_number, line, language, temp_dir) for line in found]
         if lines is not None:
             lines.extend(found)
         return text
 
 
-# A line of prose tesseract read unsure, read again as a single line on its own: in a page read
-# whole the bold serif parts of a cast list came back as garbage, alone "Eye and Guard 2 ........
-# bass" read at 66 (Ruders KA p. 6). Kept only when the new read is the surer one by this much.
+# A line of prose tesseract read unsure, read again on its own (as a single line) and at twice the
+# resolution: in the page read whole the bold serif parts of a cast list came back as garbage
+# ("IVDQUn ea 7S) AN ed"), alone at 300 dpi as "Eye and Guard 1", "MEZZO Soprano" (Ruders KA
+# p. 6), while "Eye and Guard 2" read right only at 150 dpi: both are read, the surer one is kept
+# (upscaling the 150 dpi image instead read worse). Confidence is compared without the dotted
+# leader read along (pdf_scan.is_leader, confidence 0), which otherwise drags every such line
+# down. Kept only when the new read is the surer one by OCR_REREAD_GAIN.
 OCR_REREAD_GAIN = 10
-OCR_REREAD_PADDING = 6
+OCR_REREAD_DPIS = (OCR_DPI, 300)
 
 
-def reread_line(image_path: Path, gray, line: Dict[str, Any], language: str) -> Dict[str, Any]:
-    """The line read again on its own (tesseract --psm 7) when its read was below
-    OCR_NOISE_MAX_CONFIDENCE, and the new read is surer by OCR_REREAD_GAIN."""
-    if line["conf"] >= OCR_NOISE_MAX_CONFIDENCE or not line.get("boxes"):
-        return line
-    try:
-        left, top, right, bottom = line["box"]
-        top = max(0, top - OCR_REREAD_PADDING)
-        strip = gray[top:bottom + OCR_REREAD_PADDING, left:right].copy()
-        path = image_path.with_name(f"{image_path.stem}-line.png")
-        pymupdf.Pixmap(pymupdf.csGRAY, strip.shape[1], strip.shape[0], strip.tobytes(), False).save(str(path))
-        again: List[Dict[str, Any]] = []
-        run_tesseract(path, language, again, psm=7)
-    except Exception:
-        return line
-    if len(again) != 1 or again[0]["conf"] < line["conf"] + OCR_REREAD_GAIN:
-        return line
+def text_confidence(line: Dict[str, Any]) -> float:
+    """A line's mean word confidence, leaving out leader dots read as words."""
+    confs = [conf for (word, _), conf in zip(line["words"], line.get("confs", []))
+             if not pdf_scan.is_leader(word)]
+    return sum(confs) / len(confs) if confs else line["conf"]
 
-    def shift(box):
-        return (box[0] + left, box[1] + top, box[2] + left, box[3] + top)
-    read = again[0]
+
+def reread_line(content: bytes, page_number: int, line: Dict[str, Any], language: str,
+                temp_dir: str) -> Dict[str, Any]:
+    """The line read again on its own (OCR_REREAD_*) when its read was below
+    OCR_NOISE_MAX_CONFIDENCE, its boxes put back into the page's OCR_DPI pixels."""
+    before = text_confidence(line) if line.get("confs") else line["conf"]
+    if before >= OCR_NOISE_MAX_CONFIDENCE or not line.get("boxes"):
+        return line
+    reads = []
+    for dpi in OCR_REREAD_DPIS:
+        try:
+            path = render_pdf_region(content, page_number, line["box"], temp_dir, f"reread{dpi}", dpi)
+            again: List[Dict[str, Any]] = []
+            run_tesseract(path, language, again, psm=7)
+        except Exception:
+            continue
+        if len(again) == 1:
+            reads.append((text_confidence(again[0]), dpi, again[0]))
+    if not reads or max(reads, key=lambda item: item[0])[0] < before + OCR_REREAD_GAIN:
+        return line
+    _, dpi, read = max(reads, key=lambda item: item[0])
     # Read alone, the rules of a box around the line come back as marks at its ends ("~ || Realtime",
     # p. 10's diagram), and would be painted over with it.
     words = [any(c.isalpha() for c in word) for word, _ in read["words"]]
@@ -634,8 +643,17 @@ def reread_line(image_path: Path, gray, line: Dict[str, Any], language: str) -> 
     first, last = words.index(True), len(words) - words[::-1].index(True)
     if (first, last) != (0, len(words)):
         read = pdf_scan.sub_line(read, range(first, last))
-    return {**line, **read, "par": line["par"], "noise": False, "box": shift(read["box"]),
-            **{key: [shift(box) for box in read[key]] for key in ("boxes", "covers") if key in read}}
+    # The region was rendered from its padded box, clamped to the page, at `dpi`.
+    scale = OCR_DPI / dpi
+    dx, dy = max(0, line["box"][0] - OCR_REGION_PADDING), max(0, line["box"][1] - OCR_REGION_PADDING)
+
+    def back(box):
+        return (round(box[0] * scale) + dx, round(box[1] * scale) + dy,
+                round(box[2] * scale) + dx, round(box[3] * scale) + dy)
+    boxes = [back(box) for box in read["boxes"]]
+    return {**line, **read, "par": line["par"], "noise": False, "box": back(read["box"]), "boxes": boxes,
+            "words": [(word, box[3] - box[1]) for (word, _), box in zip(read["words"], boxes)],
+            **({"covers": [back(box) for box in read["covers"]]} if "covers" in read else {})}
 
 
 def read_scanned_page(content: bytes, page_number: int, source: str, image_path: Path, temp_dir: str,

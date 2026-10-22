@@ -46,6 +46,8 @@ OCR_LEADER_TOP_LETTERS = 0.7
 
 
 GLUED_LEADER = re.compile(r"[.·…]{2,}(?=[^\W\d_])")
+TRAILING_DOTS = re.compile(r"(?<=[^.·…])[.·…]{2,}$")
+SHORT_LEADER = re.compile(r"[^\W\d_]{1,2}[.·…]{2,}")
 
 
 def is_leader(word: str) -> bool:
@@ -159,8 +161,13 @@ def column_spans(line: Dict[str, Any], leaders: bool = False) -> List[range]:
         cuts |= {cut for index, (word, _) in enumerate(line["words"])
                  if is_leader(word) and (index or word not in ("...", "…"))
                  for cut in (index, index + 1) if 0 < cut < len(boxes)}
-        # Or it is read stuck to the front of the part ("…..mezzo sopran", Ruders KA p. 7).
+        # Or it is read stuck to the front of the part ("…..mezzo sopran", Ruders KA p. 7), or as a
+        # letter or two and dots, unsure ("Eye and Guard 1 ou...", p. 6; a sure "so..." is prose).
         cuts |= {index for index, (word, _) in enumerate(line["words"]) if index and GLUED_LEADER.match(word)}
+        confs = line.get("confs") or [100.0] * len(boxes)
+        cuts |= {cut for index, (word, _) in enumerate(line["words"])
+                 if index and SHORT_LEADER.fullmatch(word) and confs[index] < ocr.OCR_NOISE_MAX_CONFIDENCE
+                 for cut in (index, index + 1) if cut < len(boxes)}
     cuts = [0] + sorted(cuts) + [len(boxes)]
     return [range(start, end) for start, end in zip(cuts, cuts[1:])]
 
@@ -326,6 +333,13 @@ def is_row(line: Dict[str, Any], lines: List[Dict[str, Any]]) -> bool:
     tesseract did not read at all)."""
     if line.get("leader_after"):
         return True
+    # Or one read stuck to its last word ("ca. 60) 1...", "(ca. 50).…", Ruders KA p. 7): unsure,
+    # or more than an ellipsis, which a line of prose can end on too.
+    if line.get("words"):
+        last, conf = line["words"][-1][0], (line.get("confs") or [100.0])[-1]
+        dots = TRAILING_DOTS.search(last)
+        if dots and (conf < ocr.OCR_NOISE_MAX_CONFIDENCE or dots.group() not in ("...", "…")):
+            return True
     left, top, right, bottom = line["box"]
     # Across a column gap: tesseract also breaks a line of prose in two at a wide space.
     return any(other["box"][0] - right > OCR_COLUMN_GAP * (bottom - top)

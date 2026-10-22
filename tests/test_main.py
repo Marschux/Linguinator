@@ -1240,29 +1240,38 @@ class MainTests(unittest.TestCase):
         self.assertEqual(main.strip_leaders("hængningen medlemmerne"), "hængningen medlemmerne")
 
     def test_a_line_read_unsure_is_read_again_on_its_own(self):
-        import numpy as np
-        gray = np.full((100, 400), 255, dtype=np.uint8)
         line = {"text": "IVDQUn ea", "conf": 20.0, "par": (13, 1), "noise": False, "box": (100, 40, 300, 60),
                 "words": [("IVDQUn", 18), ("ea", 13)], "boxes": [(100, 40, 180, 60), (200, 42, 300, 60)],
                 "confs": [20.0, 20.0]}
 
-        def read(_path, _language, lines, psm=None):
+        def read(path, _language, lines, psm=None):
             self.assertEqual(psm, 7)
-            # The rules of the box around it come back at its ends.
-            lines.append({"text": "|| Realtime", "conf": 70.0, "par": (1, 1), "noise": False,
-                          "box": (0, 6, 150, 26), "words": [("||", 20), ("Realtime", 20)],
-                          "boxes": [(0, 6, 10, 26), (40, 6, 150, 26)], "confs": [66.0, 74.0]})
+            if path.name == "150.png":   # the read at the page's own resolution is the worse one
+                lines.append({"text": "Rcaltime", "conf": 30.0, "par": (1, 1), "noise": False, "box": (0, 0, 9, 9),
+                              "words": [("Rcaltime", 9)], "boxes": [(0, 0, 9, 9)], "confs": [30.0]})
+                return "Rcaltime"
+            # At 300 dpi; the rules of the box around it come back at its ends, and the leader
+            # read along does not count against it.
+            lines.append({"text": "|| Realtime ......cccsss", "conf": 40.0, "par": (1, 1), "noise": False,
+                          "box": (0, 6, 300, 26), "words": [("||", 20), ("Realtime", 20), ("......cccsss", 4)],
+                          "boxes": [(0, 6, 10, 26), (40, 6, 150, 26), (160, 20, 300, 26)],
+                          "confs": [66.0, 74.0, 0.0]})
             return "|| Realtime"
 
-        with tempfile.TemporaryDirectory() as temp_dir:
+        def render(_content, _page, _box, _temp_dir, _name, dpi):
+            return Path(f"{dpi}.png")
+
+        with patch.object(main.ocr, "render_pdf_region", side_effect=render):
             with patch.object(main.ocr, "run_tesseract", side_effect=read):
-                again = main.ocr.reread_line(Path(temp_dir) / "page.png", gray, line, "eng")
-        self.assertEqual(again["text"], "Realtime")
-        self.assertEqual(again["box"], (140, 40, 250, 60))   # back in the page's pixels
+                again = main.ocr.reread_line(b"%PDF", 6, line, "eng", "tmp")
+        self.assertEqual(again["text"], "Realtime ......cccsss")
+        # Back in the page's 150 dpi pixels, from the padded box the region was rendered from.
+        self.assertEqual(again["boxes"][0], (112, 35, 167, 45))
+        self.assertEqual(again["words"][0], ("Realtime", 10))
         self.assertEqual(again["par"], (13, 1))
         # A line read surely is left alone.
-        self.assertIs(main.ocr.reread_line(Path("page.png"), gray, {**line, "conf": 90.0}, "eng")["text"],
-                      line["text"])
+        sure = {**line, "confs": [90.0, 90.0]}
+        self.assertIs(main.ocr.reread_line(b"%PDF", 6, sure, "eng", "tmp"), sure)
 
     def test_a_cast_list_is_set_row_by_row(self):
         def line(text, left, top, right):
@@ -1291,11 +1300,22 @@ class MainTests(unittest.TestCase):
         self.assertNotEqual(keys[0], keys[2])
         # Where tesseract read neither the leader nor the part, the leader's dots still show.
         self.assertTrue(main.is_row({**prose, "leader_after": True}, [prose]))
+        # Or one stuck to the last word, read unsure (p. 7's "ca. 60) 1..."); a sentence may end on
+        # an ellipsis, read surely.
+        stuck = line("Kommandanten (fornavn Fred, ca. 60) 1...", 159, 646, 915)
+        stuck["confs"][-1] = 0.0
+        self.assertTrue(main.is_row(stuck, [stuck]))
+        self.assertFalse(main.is_row(line("and then she waited...", 151, 300, 600), []))
         # A leader read stuck to the part ("…..mezzo sopran", p. 7) is cut there and dropped.
         glued = line("Dobbeltgængeren (Tilfred i Tiden Før) …..mezzo sopran", 151, 247, 954)
         self.assertEqual([piece["text"] for piece in main.split_columns(glued, leaders=True)],
                          ["Dobbeltgængeren (Tilfred i Tiden Før)", "…..mezzo sopran"])
         self.assertEqual(main.strip_leaders("…..mezzo sopran"), "mezzo sopran")
+        # A leader read as a letter or two and dots, unsure, is one too.
+        guard = line("Eye and Guard 1 ou... bass", 150, 929, 946)
+        guard["confs"][4] = 20.0
+        self.assertEqual([piece["text"] for piece in main.split_columns(guard, leaders=True)],
+                         ["Eye and Guard 1", "ou...", "bass"])
         # A row also ends the paragraph above it: the line after it does not join the one before.
         double = line("The Double (Offred in the Time Before, red hair,", 151, 140, 700)
         moira = line("Moira (Offred's best friend, black hair, ca. 30)", 151, 251, 700)
