@@ -1279,6 +1279,24 @@ class MainTests(unittest.TestCase):
         self.assertEqual(keys[2], keys[3])
         self.assertNotEqual(keys[4], keys[5])
 
+    def test_a_padded_word_box_is_fitted_to_its_ink(self):
+        page = pymupdf.open().new_page(width=100, height=60)
+        page.draw_rect(pymupdf.Rect(12, 20, 30, 31), color=None, fill=(0, 0, 0))   # the letters
+        page.draw_line((5, 50), (95, 50), width=1)                                 # a rule below
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image = Path(temp_dir) / "page.png"
+            page.get_pixmap(dpi=72).save(str(image))
+            # Ruders KA p. 10: "PROLOGUE" came back 29px high around 11px of ink.
+            lines = [{"text": "PROLOGUE", "box": (10, 13, 40, 42), "words": [("PROLOGUE", 29)],
+                      "boxes": [(10, 13, 40, 42)]},
+                     {"text": "rule", "box": (5, 45, 95, 55), "words": [("rule", 10)], "boxes": [(5, 45, 95, 55)]}]
+            fitted, rule = main.ocr.fit_to_ink(lines, image)
+        self.assertEqual(fitted["boxes"], [(10, 20, 40, 31)])
+        self.assertEqual(fitted["words"], [("PROLOGUE", 11)])
+        self.assertEqual(fitted["box"], (10, 20, 40, 31))
+        # A rule is no ink of a word's own: nothing left to fit to, the box stays.
+        self.assertEqual(rule["boxes"], [(5, 45, 95, 55)])
+
     def test_a_capital_with_a_mark_above_does_not_size_its_line(self):
         rect, flip = pymupdf.Rect(0, 0, 100, 10), pymupdf.Matrix(1, 0, 0, -1, 0, 842)
 

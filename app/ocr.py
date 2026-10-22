@@ -163,8 +163,36 @@ def run_tesseract(image_path: Path, languages: str, lines: Optional[List[Dict[st
         capture_output=True,
         text=True,
     )
-    lines.extend(ocr_lines(base.with_suffix(".tsv").read_text(encoding="utf-8")))
+    lines.extend(fit_to_ink(ocr_lines(base.with_suffix(".tsv").read_text(encoding="utf-8")), image_path))
     return base.with_suffix(".txt").read_text(encoding="utf-8").strip()
+
+
+# A row this much of a word's width dark is a rule under or through it, not its letters.
+OCR_RULE_ROW = 0.9
+
+
+def fit_to_ink(lines: List[Dict[str, Any]], image_path: Path) -> List[Dict[str, Any]]:
+    """The lines with each word's box cut down to the rows its letters are printed in.
+
+    Tesseract pads a word's box at times: Ruders KA p. 10's "PROLOGUE" came back 29px high for
+    11px of ink, and its translation was set in a size to match. Sizes and covers are taken from
+    these boxes, so they are fitted to the ink first. Left as they are when the image cannot be read.
+    """
+    try:
+        gray = page_gray(image_path)
+    except Exception:
+        return lines
+    for line in lines:
+        boxes = []
+        for left, top, right, bottom in line.get("boxes", []):
+            dark = gray[top:bottom, left:right] < STAFF_DARK
+            rows = [y for y, row in enumerate(dark) if row.any() and row.mean() < OCR_RULE_ROW] if dark.size else []
+            boxes.append((left, top + rows[0], right, top + rows[-1] + 1) if rows else (left, top, right, bottom))
+        if boxes:
+            line["boxes"] = boxes
+            line["words"] = [(word, box[3] - box[1]) for (word, _), box in zip(line["words"], boxes)]
+            line["box"] = (line["box"][0], min(box[1] for box in boxes), line["box"][2], max(box[3] for box in boxes))
+    return lines
 
 
 def ocr_page_osd(image_path: Path) -> Tuple[str, float]:
