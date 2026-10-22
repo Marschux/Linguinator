@@ -1792,7 +1792,10 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
         targets = []
         for (paragraph, _, _, _, _, _, placed), base in zip(reflowed, bases):
             if paragraph.get("own_size") == "page":
-                targets.append(min(placed[0]["size"], base * page_scales[round(base, 1)]))
+                # No larger than the document's own text of that size either, though it never
+                # makes that smaller (Ruders KA p. 8's one-line paragraph stood out of its page).
+                key = round(base, 1)
+                targets.append(min(placed[0]["size"], base * min(page_scales[key], scales.get(key, 1.0))))
                 continue
             if paragraph.get("own_size"):
                 # Fits its own line and nothing else's, see scan_layout_pages.
