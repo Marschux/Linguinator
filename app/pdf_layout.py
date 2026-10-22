@@ -9,7 +9,7 @@ from fastapi import HTTPException
 # reports position, size and bold in one pass); pypdf still does the overlay merge.
 import pymupdf
 from pypdf import PdfReader, PdfWriter
-from . import config, translation, textdocs, ocr, pdf_text, pdf_scan
+from . import config, translation, textdocs, ocr, pdf_text, pdf_scan, heron
 
 
 MUPDF_BOLD_FLAG = 1 << 4  # span flag bit 4, per PyMuPDF's text-extraction flag table
@@ -581,13 +581,44 @@ def pdf_layout_justified_columns(lines: List[Dict[str, Any]]) -> Set[int]:
     return columns
 
 
+PDF_LINE_ENDS_SENTENCE = re.compile(r"[.!?:;][\"'”’)\]]*\s*$")
+
+
 def group_pdf_paragraphs(lines: List[Dict[str, Any]],
-                         rules: Optional[List[Dict[str, float]]] = None) -> List[Dict[str, Any]]:
+                         rules: Optional[List[Dict[str, float]]] = None,
+                         blocks: Sequence[Any] = ()) -> List[Dict[str, Any]]:
     """Bundle lines into paragraphs, purely so the model gets whole sentences.
 
     A wrong split only costs translation quality here, never placement: every line keeps its
     own coordinates and the translation is reflowed into exactly those.
+
+    `blocks` are the layout model's text blocks (heron.page_text_blocks). Two lines that sit in
+    different ones never share a paragraph: the geometry alone ran paragraphs set without a gap
+    into one (MatterhornProtokoll p. 2, four into one) and a heading into the text under it
+    (Stall Kamera System). Overlapping blocks are common, so lines only part when no block holds
+    both; a line in none (a table cell, text in a picture) is left to the geometry. A block often
+    stops short of a paragraph's last wrapped line ("…internet" / "access."), so a line that
+    carries on a broken-off sentence is never parted from it (wraps_into).
     """
+    def line_blocks(line: Dict[str, Any]) -> Set[int]:
+        point = pymupdf.Point((line["x"] + line["right"]) / 2, line["y"] + 0.3 * line["size"])
+        return {number for number, block in enumerate(blocks) if point in block}
+
+    held = {id(line): line_blocks(line) for line in lines} if blocks else {}
+
+    def wraps_into(current: Dict[str, Any], line: Dict[str, Any]) -> bool:
+        previous = current["lines"][-1]
+        if PDF_LINE_ENDS_SENTENCE.search(previous["text"]):
+            return False
+        if line["text"][:1].islower():
+            return True
+        # A German noun opens in capitals: then the line above must have run the full width.
+        widest = max(own["right"] - own["x"] for own in current["lines"])
+        return len(current["lines"]) > 1 and previous["right"] - previous["x"] >= 0.9 * widest
+
+    def blocks_part(current: Dict[str, Any], line: Dict[str, Any]) -> bool:
+        before, after = held.get(id(current["lines"][-1])), held.get(id(line))
+        return bool(before and after and before.isdisjoint(after)) and not wraps_into(current, line)
     # Allowed with a bit of room over the page's own leading, so an ordinary line of the same
     # paragraph still fits while the wider gap before the next one does not.
     spacing_limit = 1.25 * typical_line_spacing(lines)
@@ -631,6 +662,7 @@ def group_pdf_paragraphs(lines: List[Dict[str, Any]],
             # alignment. Safe against a bold lead-in inside a sentence, because a line's own
             # weight is already decided by which face most of its characters use.
             and bool(previous.get("bold")) == bool(line.get("bold"))
+            and not blocks_part(current, line)
         )
 
     justified_columns = pdf_layout_justified_columns(lines)
@@ -826,7 +858,11 @@ def pdf_page_widget_values(page) -> List[Dict[str, Any]]:
     return values
 
 
-def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, Any]]:
+def extract_pdf_layout(content: bytes, page_range: str = "", layout_model: Optional[bool] = None) -> List[Dict[str, Any]]:
+    """`layout_model` (default config.LAYOUT_MODEL) lets heron split paragraphs, see
+    group_pdf_paragraphs. A history re-export passes what the job used: the stored translations
+    are zipped back by position, so the paragraphs must come out exactly as they did then."""
+    layout_model = config.LAYOUT_MODEL if layout_model is None else layout_model
     try:
         document = pymupdf.open(stream=content, filetype="pdf")
     except Exception as exc:
@@ -873,7 +909,7 @@ def extract_pdf_layout(content: bytes, page_range: str = "") -> List[Dict[str, A
                 "number": index,
                 "width": float(box.width),
                 "height": float(box.height),
-                "paragraphs": group_pdf_paragraphs(lines, rules),
+                "paragraphs": group_pdf_paragraphs(lines, rules, heron.page_text_blocks(page) if lines and layout_model else []),
                 "obstacles": obstacles,
                 "columns": page_column_walls(lines),
                 "row_rules": row_rules,
@@ -1796,7 +1832,8 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
     return output.getvalue()
 
 
-def export_pdf_layout_with_translated_text(content: bytes, translated_text: str, page_range: str = "") -> bytes:
+def export_pdf_layout_with_translated_text(content: bytes, translated_text: str, page_range: str = "",
+                                           layout_model: bool = False) -> bytes:
     # Split without dropping empty blocks: translations are matched to paragraphs by position.
     blocks = [block.strip() for block in translated_text.split("\n\n")]
-    return render_pdf_layout_overlay(content, extract_pdf_layout(content, page_range), blocks)
+    return render_pdf_layout_overlay(content, extract_pdf_layout(content, page_range, layout_model), blocks)

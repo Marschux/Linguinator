@@ -21,7 +21,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY docker/requirements.txt .
-# torch only for converting a model to CTranslate2 once, on its first use; CTranslate2 translates.
+# torch for converting a model to CTranslate2 once, on its first use, and for the PDF layout model;
+# CTranslate2 translates.
 RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.7.1 \
     && pip install --no-cache-dir -r requirements.txt
 

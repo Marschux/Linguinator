@@ -235,7 +235,8 @@ def export_original_history_content(extension: str, content: bytes, text: str, s
                                                     source_meta.get("scan_source", langs.AUTO_SOURCE),
                                                     source_meta.get("scan_language"))
         if source_meta.get("layout") == "true":
-            return pdf_layout.export_pdf_layout_with_translated_text(content, text, source_meta.get("page_range", ""))
+            return pdf_layout.export_pdf_layout_with_translated_text(content, text, source_meta.get("page_range", ""),
+                                                                    source_meta.get("layout_model") == "true")
         return textdocs.create_text_pdf(text, content)
     if extension in ("md", "txt"):
         return text.encode("utf-8")

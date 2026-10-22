@@ -74,6 +74,10 @@ AUTH_ENABLED = env_value("LINGUINATOR_AUTH_ENABLED", "false").lower() in ("1", "
 AUTH_USERNAME = env_value("LINGUINATOR_AUTH_USERNAME", "Translator")
 AUTH_PASSWORD = env_value("LINGUINATOR_AUTH_PASSWORD", "")
 MODEL_IDLE_SECONDS = int(env_value("LINGUINATOR_MODEL_IDLE_SECONDS", "600"))
+# Docling's layout model (Apache-2.0) tells group_pdf_paragraphs where one block of text ends
+# and the next begins. Off: paragraphs from the geometry alone, as before 1.6.0.
+LAYOUT_MODEL = env_value("LINGUINATOR_LAYOUT_MODEL", "true").lower() in ("1", "true", "yes", "on")
+LAYOUT_MODEL_ID = "ds4sd/docling-layout-heron"
 PDF_LOW_TEXT_CHARS = 20
 PDF_PAGE_WIDTH = 595
 PDF_PAGE_HEIGHT = 842

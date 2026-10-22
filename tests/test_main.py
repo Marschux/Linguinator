@@ -19,6 +19,8 @@ import pymupdf
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+# The layout model downloads on first use; tests that want it patch heron.page_text_blocks.
+os.environ.setdefault("LINGUINATOR_LAYOUT_MODEL", "false")
 import app.main as main
 import app.server as server
 
@@ -1565,7 +1567,7 @@ class MainTests(unittest.TestCase):
                 "pdf", b"source pdf", "text", {"layout": "true", "page_range": "2-5"}
             )
 
-        overlay_mock.assert_called_once_with(b"source pdf", "text", "2-5")
+        overlay_mock.assert_called_once_with(b"source pdf", "text", "2-5", False)
         self.assertEqual(result, b"overlay pdf")
 
     def test_cleanup_history_takes_the_whole_entry_including_the_prepared_export(self):
@@ -1888,6 +1890,36 @@ class MainTests(unittest.TestCase):
 
         self.assertEqual([paragraph["text"] for paragraph in paragraphs],
                          ["One still one", "far below", "indented"])
+
+    def test_group_pdf_paragraphs_parts_lines_the_layout_model_puts_in_different_blocks(self):
+        def line(text, y, right=550.0):
+            return {"text": text, "x": 50.0, "y": y, "right": right, "size": 11.0}
+
+        lines = [line("1. Vorwort", 700, right=110), line("Ich würde die Kamera in mehrere", 686),
+                 line("Teile unterbrechen.", 672, right=200),
+                 line("Aus diesem Grund haben alle Entwickler eine", 658), line("besondere Verantwortung, um", 644),
+                 line("verlässlich zu sein und zu wenig", 630), line("Bandbreite hat.", 616, right=150)]
+        # Heading, two paragraphs set without a gap; the last block stops short of its wrapped
+        # last line, which stays with its sentence all the same.
+        blocks = [pymupdf.Rect(40, 698, 560, 712), pymupdf.Rect(40, 670, 560, 697),
+                  pymupdf.Rect(40, 628, 560, 669), pymupdf.Rect(40, 600, 560, 627)]
+
+        self.assertEqual(len(main.group_pdf_paragraphs(lines)), 1)
+        self.assertEqual([paragraph["text"] for paragraph in main.group_pdf_paragraphs(lines, blocks=blocks)],
+                         ["1. Vorwort", "Ich würde die Kamera in mehrere Teile unterbrechen.",
+                          "Aus diesem Grund haben alle Entwickler eine besondere Verantwortung, um "
+                          "verlässlich zu sein und zu wenig Bandbreite hat."])
+
+    def test_a_history_re_export_asks_the_layout_model_only_when_the_job_did(self):
+        document = pymupdf.open()
+        document.new_page().insert_text((72, 72), "Restart the camera.")
+        content = document.tobytes()
+        with patch.object(main.heron, "page_text_blocks", return_value=[]) as blocks:
+            main.history.export_original_history_content("pdf", content, "Kamera neu starten.", {"layout": "true"})
+            blocks.assert_not_called()
+            main.history.export_original_history_content("pdf", content, "Kamera neu starten.",
+                                                         {"layout": "true", "layout_model": "true"})
+            blocks.assert_called_once()
 
     def test_group_pdf_paragraphs_reads_a_double_spaced_page(self):
         # The dedication page of the test document runs at 2.35 times its 11pt and opens with an
@@ -3443,7 +3475,7 @@ class MainTests(unittest.TestCase):
             self.assertEqual(job["status"], "complete")
             self.assertEqual(job["result"], "Hallo Welt")
             self.assertEqual(history["source_extension"], "pdf")
-            self.assertEqual(history["source_meta"], {"layout": "true", "page_range": ""})
+            self.assertEqual(history["source_meta"], {"layout": "true", "page_range": "", "layout_model": "false"})
             self.assertIn("Hallo Welt", pdf_text(exported))
         finally:
             with main.JOBS_LOCK:

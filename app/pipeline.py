@@ -271,12 +271,12 @@ def run_pdf_layout_translate_job(
             filename,
             content,
             "pdf",
-            {"layout": "true", "page_range": page_range},
+            {"layout": "true", "page_range": page_range, "layout_model": str(config.LAYOUT_MODEL).lower()},
         )
         jobqueue.update_job(job_id, message="Rendering PDF")
         try:
             history.history_original_export(history_id, "pdf", content, result,
-                                    {"layout": "true", "page_range": page_range})
+                                    {"layout": "true", "page_range": page_range, "layout_model": str(config.LAYOUT_MODEL).lower()})
         except Exception:
             # The translation is done and saved; only the head start on the download is lost, and
             # the download builds it again. Failing the whole job over that would throw away work.

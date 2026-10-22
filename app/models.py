@@ -9,7 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict
 from fastapi import HTTPException
-from . import config, langs, jobqueue
+from . import config, langs, jobqueue, heron
 
 
 MODEL_LOCK = threading.RLock()
@@ -195,10 +195,11 @@ def unload_model_cache() -> bool:
     with MODEL_LOCK:
         if MODEL_ACTIVE_USERS > 0:
             return False
-        if not model_cache_loaded():
+        if not model_cache_loaded() and not heron.load_layout_model.cache_info().currsize:
             return False
         load_model.cache_clear()
         load_tokenizer.cache_clear()
+        heron.load_layout_model.cache_clear()
     gc.collect()
     try:
         # glibc keeps freed heap arenas rather than returning them to the OS, so RSS stays

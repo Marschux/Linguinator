@@ -13,6 +13,7 @@ splits on, or every translation after it lands on the wrong paragraph.
 Capped at MAX_PAGES per document: the long ones repeat the same layout constructs page after
 page, so more pages cost runtime without covering anything new.
 """
+import os
 import sys
 import unittest
 from functools import lru_cache
@@ -23,6 +24,8 @@ import pymupdf
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+# The layout model downloads on first use; tests that want it patch heron.page_text_blocks.
+os.environ.setdefault("LINGUINATOR_LAYOUT_MODEL", "false")
 import app.main as main
 from fastapi import HTTPException
 
