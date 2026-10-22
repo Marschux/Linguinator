@@ -501,10 +501,11 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
                         # A line on its own (a row of a list, a heading) stays one line: in a box of
                         # its own a longer translation shrinks instead of wrapping onto what lies
                         # below, which on a scan may be text OCR never read ("Mitte Zwanzig)" over
-                        # the bold line under it, Ruders KA p. 7). Levelled with nothing, or one
-                        # long row would set the page's body text smaller (see the score's lines).
+                        # the bold line under it, Ruders KA p. 7). Levelled only with the other such
+                        # lines of its page: with the document's body text, one long row would set
+                        # it all smaller; with nothing, a cast list came out in two sizes.
                         line = paragraph["lines"][0]
-                        paragraph["own_size"] = True
+                        paragraph["own_size"] = "page"
                         obstacles.append({"x": line["x"] - 1, "right": line["right"] + 1, "top": line["y"] + own,
                                           "bottom": line["y"] - OCR_GLYPH_DESCENT * own - 0.5})
             if score and paragraphs:

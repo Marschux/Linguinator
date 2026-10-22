@@ -1783,8 +1783,17 @@ def render_pdf_layout_overlay(content: bytes, pages: List[Dict[str, Any]], trans
     # table does not set the size of every cramped paragraph in the book.
     for page, reflowed, cramped in zip(pages, per_page, cramped_pages):
         bases = [paragraph_base_size(item[0]) for item in reflowed]
+        # own_size "page": levelled with the page's other such paragraphs of its base size only.
+        page_scales: Dict[float, float] = {}
+        for (paragraph, _, _, _, _, _, placed), base in zip(reflowed, bases):
+            if paragraph.get("own_size") == "page":
+                key = round(base, 1)
+                page_scales[key] = min(page_scales.get(key, 1.0), placed[0]["size"] / base)
         targets = []
         for (paragraph, _, _, _, _, _, placed), base in zip(reflowed, bases):
+            if paragraph.get("own_size") == "page":
+                targets.append(min(placed[0]["size"], base * page_scales[round(base, 1)]))
+                continue
             if paragraph.get("own_size"):
                 # Fits its own line and nothing else's, see scan_layout_pages.
                 targets.append(placed[0]["size"])
