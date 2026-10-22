@@ -17,7 +17,10 @@ OCR_GLYPH_DESCENT = 0.22
 OCR_DESCENDERS = set("gjpqyQ(),;[]{}")
 OCR_ASCENDERS = set("bdfhklt0123456789ABCDEFGHIJKLMNOPRSTUVWXYZÄÖÜÆØÅ'\"!?/|")
 OCR_COVER_PADDING = 1.5
-OCR_FULL_HEIGHT = set("bdfhklABCDEFGHIJKLMNOPRSTUVWXYZÄÖÜÆØÅ0123456789")
+OCR_FULL_HEIGHT = set("bdfhklABCDEFGHIJKLMNOPRSTUVWXYZÆ0123456789")
+# Capitals with a mark above or a stroke through reach past the others: "ØJNE" read 22px where
+# the capitals around it read 18, and Ruders KA p. 7's line came out a fifth larger than its list.
+OCR_OVERSIZE = set("ÄÖÜØÅÀÁÂÈÉÊÌÍÎÒÓÔÙÚÛÇÑ")
 OCR_SIZE_SNAP = 0.15
 # A sung line between staves still has to be mostly letters once its syllables are joined, or it
 # is notation that happened to read with some confidence: "JAN. | CE —— | z =" (55 %) came back
@@ -66,7 +69,7 @@ def scan_line(line: Dict[str, Any], rect: "pymupdf.Rect", flip: "pymupdf.Matrix"
     # Only words that reach the full ascender height: "t" and "i" stop short of it, and counting
     # "want" or "it" as full height set lyrics a third smaller than the print around them.
     estimates = sorted(height * px_to_pt / sum(glyph_extent(word)) for word, height in line.get("words", [])
-                       if any(c in OCR_FULL_HEIGHT for c in word)) or [rect.height / sum(glyph_extent(text))]
+                       if any(c in OCR_FULL_HEIGHT for c in word) and not OCR_OVERSIZE & set(word)) or [rect.height / sum(glyph_extent(text))]
     size = estimates[len(estimates) // 2]
     descent = glyph_extent(text)[1]
     bottom = (pymupdf.Point(rect.x0, rect.y1) * flip).y

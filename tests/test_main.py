@@ -1279,6 +1279,17 @@ class MainTests(unittest.TestCase):
         self.assertEqual(keys[2], keys[3])
         self.assertNotEqual(keys[4], keys[5])
 
+    def test_a_capital_with_a_mark_above_does_not_size_its_line(self):
+        rect, flip = pymupdf.Rect(0, 0, 100, 10), pymupdf.Matrix(1, 0, 0, -1, 0, 842)
+
+        def size(words):
+            line = {"text": " ".join(word for word, _ in words), "box": (0, 0, 100, 25), "words": words}
+            return main.scan_line(line, rect, flip)["size"]
+
+        # Ruders KA p. 7: "ØJNE" reads 22px where the capitals of the list around it read 18.
+        self.assertEqual(size([("ØJNE", 22), ("—", 2), ("grå", 24), ("uniform", 18)]),
+                         size([("ENKER", 18), ("-", 32), ("sort", 16), ("dragt", 22)]))
+
     def test_a_scanned_line_is_cut_where_it_jumps_a_column(self):
         def line(words):
             boxes = [(left, 100, left + 10 * len(word), 118) for word, left in words]
