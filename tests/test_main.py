@@ -1186,6 +1186,17 @@ class MainTests(unittest.TestCase):
         self.assertEqual(main.ocr_noise_lines(tsv(score)), {"ne VV vv ve vy a", "iE h KI"})
         self.assertEqual(main.ocr_noise_lines(tsv(prose)), set())
 
+    def test_a_band_line_read_unsure_is_still_sung_when_it_reads_whole_words(self):
+        def line(text, conf):
+            return {"text": text, "conf": conf}
+
+        # Ruders KA pp. 23-30, as tesseract read them between the staves.
+        self.assertTrue(main.ocr.reads_as_sung(line("my —sto-ry is __ in frag-ments. I'm sor-ry___. I can’t", 44)))
+        self.assertTrue(main.ocr.reads_as_sung(line("were dif -rent____ I wish it were a - bout love", 61)))
+        self.assertFalse(main.ocr.reads_as_sung(line("hry ple 6 IF stie - le", 50)))
+        self.assertFalse(main.ocr.reads_as_sung(line("Hi — | ieee.", 40)))
+        self.assertFalse(main.ocr.reads_as_sung(line("my —sto-ry is __ in frag-ments. I'm sor-ry", 30)))
+
     def test_staff_spans_finds_each_staff_and_tolerates_a_broken_line(self):
         import numpy as np
         page = np.full((400, 600), 255, dtype=np.uint8)

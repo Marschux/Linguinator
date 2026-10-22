@@ -102,8 +102,22 @@ OCR_NOISE_MIN_SHARE = 0.4
 # Read band by band, a lyric can come out a little below that: Ruders KA p. 24's "were dif -rent
 # __ I wish it were a - bout love" read at 61 once its staves were all found, and notation in the
 # bands of pp. 23-30 read up to 62 too. What tells them apart there is the syllable hyphen or hold
-# line (pdf_scan.SUNG_MARKS) a lyric carries and notation does not, from 55 up.
+# line (pdf_scan.SUNG_MARKS) a lyric carries and notation does not, from 55 up. Lower still, a
+# lyric reads whole words where notation does not: "my —sto-ry is __ in frag-ments. I'm sor-ry"
+# (p. 23) read at 44, notation with a hyphen in it ("hry ple 6 IF stie - le") at 40-52 with three
+# words of three letters at most.
 OCR_SUNG_MIN_CONFIDENCE = 55
+OCR_SUNG_LOW_CONFIDENCE = 40
+OCR_SUNG_MIN_WORDS = 4
+
+
+def reads_as_sung(line: Dict[str, Any]) -> bool:
+    """Whether a band line below the noise confidence is a lyric after all (see OCR_SUNG_*)."""
+    if not pdf_scan.SUNG_MARKS.search(line["text"]):
+        return False
+    return line["conf"] >= OCR_SUNG_MIN_CONFIDENCE or (
+        line["conf"] >= OCR_SUNG_LOW_CONFIDENCE
+        and len(re.findall(r"[^\W\d_]{3,}", line["text"])) >= OCR_SUNG_MIN_WORDS)
 
 
 def ocr_lines(tsv: str) -> List[Dict[str, Any]]:
@@ -715,8 +729,7 @@ def read_score_bands(image_path: Path, lines: List[Dict[str, Any]],
                           **{key: [(x0, y0 + top, x1, y1 + top) for x0, y0, x1, y1 in line[key]]
                              for key in ("boxes", "covers") if key in line},
                           "par": ("band", index, *line["par"]), "band": True,
-                          "noise": line["conf"] < OCR_NOISE_MAX_CONFIDENCE and not (
-                              line["conf"] >= OCR_SUNG_MIN_CONFIDENCE and pdf_scan.SUNG_MARKS.search(line["text"]))})
+                          "noise": line["conf"] < OCR_NOISE_MAX_CONFIDENCE and not reads_as_sung(line)})
         if text.strip():
             texts.append(text.strip())
     if not found:
