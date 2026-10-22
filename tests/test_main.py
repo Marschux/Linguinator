@@ -1280,6 +1280,28 @@ class MainTests(unittest.TestCase):
         sure = {**line, "confs": [90.0, 90.0]}
         self.assertIs(main.ocr.reread_line(b"%PDF", 6, sure, "eng", "tmp"), sure)
 
+    def test_the_part_after_a_leader_is_read_again_on_its_own(self):
+        words = ["Eye", "and", "Guard", "2", "........cccsss", "DASS"]
+        line = {"text": " ".join(words), "conf": 70.0, "par": (21, 1), "noise": False, "box": (150, 969, 946, 991),
+                "words": [(word, 20) for word in words], "confs": [87.0, 96.0, 92.0, 62.0, 0.0, 71.0],
+                "boxes": [(150 + 60 * i, 969, 200 + 60 * i, 991) for i in range(5)] + [(880, 969, 946, 991)]}
+
+        def read(_path, _language, lines, psm=None):
+            # Alone, the bold "bass" reads right; the leader's last dots come along in front.
+            lines.append({"text": ".... bass", "conf": 60.0, "par": (1, 1), "noise": False, "box": (0, 0, 70, 30),
+                          "words": [("....", 4), ("bass", 20)], "boxes": [(0, 20, 10, 24), (14, 4, 70, 26)],
+                          "confs": [23.0, 96.0]})
+            return ".... bass"
+
+        with patch.object(main.ocr, "render_pdf_region", return_value=Path("cell.png")):
+            with patch.object(main.ocr, "run_tesseract", side_effect=read):
+                again = main.ocr.reread_cell(b"%PDF", 6, line, "eng", "tmp")
+        self.assertEqual(again["text"], "Eye and Guard 2 ........cccsss bass")
+        self.assertEqual(again["boxes"], line["boxes"])   # still where the line put it
+        # A line without a leader is left alone.
+        plain = {**line, "words": [("Eye", 20), ("and", 20)], "confs": [87.0, 96.0], "text": "Eye and"}
+        self.assertIs(main.ocr.reread_cell(b"%PDF", 6, plain, "eng", "tmp"), plain)
+
     def test_a_cast_list_is_set_row_by_row(self):
         def line(text, left, top, right):
             words = text.split()
@@ -1318,6 +1340,11 @@ class MainTests(unittest.TestCase):
         self.assertEqual([piece["text"] for piece in main.split_columns(glued, leaders=True)],
                          ["Dobbeltgængeren (Tilfred i Tiden Før)", "…..mezzo sopran"])
         self.assertEqual(main.strip_leaders("…..mezzo sopran"), "mezzo sopran")
+        # Dots stuck to the end of the name, unsure, end it there (p. 7's "ca. 30)... SOPran").
+        moira = line("Moira (Tilfreds bedste ven, ca. 30)... SOPran", 158, 446, 955)
+        moira["confs"][5] = 0.0
+        self.assertEqual([piece["text"] for piece in main.split_columns(moira, leaders=True)],
+                         ["Moira (Tilfreds bedste ven, ca. 30)...", "SOPran"])
         # A leader read as a letter or two and dots, unsure, is one too.
         guard = line("Eye and Guard 1 ou... bass", 150, 929, 946)
         guard["confs"][4] = 20.0

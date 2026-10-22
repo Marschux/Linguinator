@@ -591,7 +591,8 @@ def ocr_pdf_page(content: bytes, page_number: int, source: str = langs.AUTO_SOUR
                 if banded:
                     text, found = banded
             else:
-                found = [reread_line(content, page_number, line, language, temp_dir) for line in found]
+                found = [reread_cell(content, page_number, reread_line(content, page_number, line, language, temp_dir),
+                                     language, temp_dir) for line in found]
         if lines is not None:
             lines.extend(found)
         return text
@@ -654,6 +655,44 @@ def reread_line(content: bytes, page_number: int, line: Dict[str, Any], language
     return {**line, **read, "par": line["par"], "noise": False, "box": back(read["box"]), "boxes": boxes,
             "words": [(word, box[3] - box[1]) for (word, _), box in zip(read["words"], boxes)],
             **({"covers": [back(box) for box in read["covers"]]} if "covers" in read else {})}
+
+
+# The part at the end of a cast list's row, after its leader, read again on its own: in the line
+# the bold serif "bass" came back "DASS" at 71, alone "bass" at 96 (Ruders KA p. 6).
+OCR_CELL_MAX_WORDS = 3
+
+
+def reread_cell(content: bytes, page_number: int, line: Dict[str, Any], language: str,
+                temp_dir: str) -> Dict[str, Any]:
+    """The line with the few words after its last leader (pdf_scan.is_leader) read again alone,
+    at OCR_DPI, kept when surer by OCR_REREAD_GAIN."""
+    words = line.get("words") or []
+    leaders = [index for index, (word, _) in enumerate(words) if pdf_scan.is_leader(word)]
+    if not leaders or not line.get("confs") or not 0 < len(words) - leaders[-1] - 1 <= OCR_CELL_MAX_WORDS:
+        return line
+    start = leaders[-1] + 1
+    cell = pdf_scan.sub_line(line, range(start, len(words)))
+    try:
+        path = render_pdf_region(content, page_number, cell["box"], temp_dir, "cell")
+        again: List[Dict[str, Any]] = []
+        run_tesseract(path, language, again, psm=7)
+    except Exception:
+        return line
+    letters = [index for index, (word, _) in enumerate(again[0]["words"]) if any(c.isalpha() for c in word)] \
+        if len(again) == 1 else []
+    if not letters:
+        return line
+    # The leader's last dots come along at the front ("w+.", "...."): only the words are kept.
+    read = pdf_scan.sub_line(again[0], range(letters[0], letters[-1] + 1))
+    if len(read["words"]) != len(cell["words"]) or text_confidence(read) < text_confidence(cell) + OCR_REREAD_GAIN:
+        return line
+    # A dot of the leader read onto the part's first word (".stum rolle", p. 7) goes too.
+    cell_words = [word for word, _ in read["words"]]
+    cell_words[0] = cell_words[0].lstrip(".·…") or cell_words[0]
+    texts = [word for word, _ in words[:start]] + cell_words
+    confs = line["confs"][:start] + read["confs"]
+    return {**line, "text": " ".join(texts), "confs": confs, "conf": sum(confs) / len(confs),
+            "words": words[:start] + [(word, height) for word, (_, height) in zip(cell_words, words[start:])]}
 
 
 def read_scanned_page(content: bytes, page_number: int, source: str, image_path: Path, temp_dir: str,

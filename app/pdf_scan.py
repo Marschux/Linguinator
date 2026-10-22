@@ -168,6 +168,10 @@ def column_spans(line: Dict[str, Any], leaders: bool = False) -> List[range]:
         cuts |= {cut for index, (word, _) in enumerate(line["words"])
                  if index and SHORT_LEADER.fullmatch(word) and confs[index] < ocr.OCR_NOISE_MAX_CONFIDENCE
                  for cut in (index, index + 1) if cut < len(boxes)}
+        # Or stuck to the end of the name, unsure, with the part still to come ("ca. 30)... SOPran",
+        # p. 7): the name ends there.
+        cuts |= {index + 1 for index, (word, _) in enumerate(line["words"][:-1])
+                 if TRAILING_DOTS.search(word) and confs[index] < ocr.OCR_NOISE_MAX_CONFIDENCE}
     cuts = [0] + sorted(cuts) + [len(boxes)]
     return [range(start, end) for start, end in zip(cuts, cuts[1:])]
 
