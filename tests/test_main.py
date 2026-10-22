@@ -1210,7 +1210,8 @@ class MainTests(unittest.TestCase):
         ocr_pages = {
             1: [line("ne VV vv ve vy a", 100, conf=40, noise=True),
                 line("hap-pi - ness or snow.", 200),
-                line("JAN. | CE —— | z =", 300)],
+                line("JAN. | CE —— | z =", 300),
+                line("Hn. SP", 350)],
             2: [line("Here the classes are run by Aunt", 100),
                 line("Lydia, who is strict.", 150),
                 line("we", 400, par=(2, 1), conf=30)],

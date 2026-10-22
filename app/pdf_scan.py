@@ -23,6 +23,10 @@ OCR_SIZE_SNAP = 0.15
 # is notation that happened to read with some confidence: "JAN. | CE —— | z =" (55 %) came back
 # as an invented "Was ist los?", while "not com - mit a - - dul - te - ry." joins to 95 %.
 OCR_SUNG_MIN_LETTERS = 0.75
+# A score line also needs one word of three letters: instrument cues and dynamics ("Hn. SP",
+# "d Sf") read with confidence too, came back "translated", and their cover cut into the chord
+# beside them (Ruders KA p. 27).
+OCR_SCORE_WORD = re.compile(r"[^\W\d_]{3,}")
 # The dotted leader of a contents page or cast list reads as dots or as a long run of a few
 # letters ("ceessesesessesesessesss..."), and the model then translates it like a word. Measured
 # on Ruders KA's cast list: in a leader the two most frequent letters make up 72-94 % of it, in
@@ -304,7 +308,7 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
                 rects = [pymupdf.Rect(line["box"]) * to_raw for line in group]
                 if score:
                     text = join_sung_syllables(group[0]["text"])
-                    if letter_share(text) < OCR_SUNG_MIN_LETTERS:
+                    if letter_share(text) < OCR_SUNG_MIN_LETTERS or not OCR_SCORE_WORD.search(text):
                         continue
                 elif sum(line["conf"] for line in group) / len(group) < ocr.OCR_NOISE_MAX_CONFIDENCE:
                     # Not text tesseract was sure of - a logo read as "we" was set back as a huge
