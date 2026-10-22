@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from . import config, langs, models, translation, textdocs, history, jobqueue, ocr, pdf_text, formats, pipeline
 
 
-app = FastAPI(title="Linguinator", version="1.3.0", root_path=config.ROOT_PATH)
+app = FastAPI(title="Linguinator", version="1.4.0", root_path=config.ROOT_PATH)
 app.mount("/static", StaticFiles(directory=config.APP_DIR / "static"), name="static")
 
 
