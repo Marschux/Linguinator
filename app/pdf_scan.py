@@ -74,7 +74,7 @@ def scan_line(line: Dict[str, Any], rect: "pymupdf.Rect", flip: "pymupdf.Matrix"
     descent = glyph_extent(text)[1]
     bottom = (pymupdf.Point(rect.x0, rect.y1) * flip).y
     return {"text": text, "x": rect.x0, "right": rect.x1, "y": bottom + descent * size, "size": size,
-            "bold": False, "serif": False, "italic": False, "color": 0}
+            "bold": False, "serif": False, "italic": bool(line.get("italic")), "color": 0}
 
 
 SECONDARY_LYRICS_MIN_SHARE = 0.2
@@ -120,6 +120,9 @@ def secondary_lyrics(lines: List[Dict[str, Any]], source: str, proven: Set[str])
 # translation was set huge and in the wrong place. Measured on Ruders KA pp. 2-10: gaps between
 # columns ran 2.5-46 word heights, gaps inside running text at most 1.6.
 OCR_COLUMN_GAP = 2.0
+# Unless the gap holds ink: a word misread or left out leaves one as wide ("year-ph [gap] )" for
+# "year-plus-six)", 17 % ink), where column gaps held 6 % at most, dotted leaders included.
+OCR_GAP_MAX_INK = 0.1
 
 
 def column_spans(line: Dict[str, Any]) -> List[range]:
@@ -128,8 +131,10 @@ def column_spans(line: Dict[str, Any]) -> List[range]:
     if len(boxes) < 2:
         return [range(len(line.get("words") or []))]
     height = sorted(box[3] - box[1] for box in boxes)[len(boxes) // 2]
+    ink = line.get("gap_ink") or [0.0] * len(boxes)
     cuts = [0] + [index for index in range(1, len(boxes))
-                  if boxes[index][0] - boxes[index - 1][2] > OCR_COLUMN_GAP * height] + [len(boxes)]
+                  if boxes[index][0] - boxes[index - 1][2] > OCR_COLUMN_GAP * height
+                  and ink[index] <= OCR_GAP_MAX_INK] + [len(boxes)]
     return [range(start, end) for start, end in zip(cuts, cuts[1:])]
 
 
@@ -137,11 +142,21 @@ def sub_line(line: Dict[str, Any], words: Sequence[int], **extra: Any) -> Dict[s
     """The line made of only these of its words."""
     own = [line["boxes"][index] for index in words]
     confs = [line["confs"][index] for index in words]
+    extra = {**{key: [line[key][index] for index in words] for key in ("covers", "gap_ink") if key in line},
+             **extra}
     return {**line, "text": " ".join(line["words"][index][0] for index in words),
             "words": [line["words"][index] for index in words], "boxes": own, "confs": confs,
             "conf": sum(confs) / len(confs), **extra,
             "box": (min(box[0] for box in own), min(box[1] for box in own),
                     max(box[2] for box in own), max(box[3] for box in own))}
+
+
+def cover_box(line: Dict[str, Any]) -> Tuple[int, int, int, int]:
+    """The pixels a line's original occupies, its words' underlines included."""
+    covers = line.get("covers")
+    if not covers:
+        return tuple(line["box"])
+    return (line["box"][0], line["box"][1], line["box"][2], max(line["box"][3], max(box[3] for box in covers)))
 
 
 def split_columns(line: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -167,7 +182,7 @@ def is_direction(text: str) -> bool:
     return len(re.findall(r"[^\W\d_]{2,}", text)) >= OCR_DIRECTION_MIN_WORDS and not SUNG_MARKS.search(text)
 
 
-def split_directions(line: Dict[str, Any]) -> List[Dict[str, Any]]:
+def split_directions(line: Dict[str, Any], numbers: bool = True) -> List[Dict[str, Any]]:
     """A score line as its sung part (one line, as before) and its directions (`direction` set).
     The sung text stands left of the directions, so what follows one ("initially offstage.") is
     direction too, however short."""
@@ -178,8 +193,16 @@ def split_directions(line: Dict[str, Any]) -> List[Dict[str, Any]]:
                   if is_direction(" ".join(line["words"][i][0] for i in span))), None)
     if first is None:
         return [line]
+    # A bar or rehearsal number set right before a direction ("7 hold Offred, ...", Ruders KA
+    # p. 27) is no part of it: a piece of its own, which as a bare number keeps its original.
+    start = spans[first].start
+    while numbers and start < spans[first].stop - 1 and line["words"][start][0].isdigit():
+        start += 1
     sung = [index for span in spans[:first] for index in span]
-    return ([sub_line(line, sung)] if sung else []) + [sub_line(line, span, direction=True) for span in spans[first:]]
+    number = [sub_line(line, range(spans[first].start, start))] if start > spans[first].start else []
+    spans = spans[:first] + [range(start, spans[first].stop)] + spans[first + 1:]
+    return (([sub_line(line, sung)] if sung else []) + number
+            + [sub_line(line, span, direction=True) for span in spans[first:]])
 
 
 def direction_groups(lines: List[Dict[str, Any]]) -> Dict[int, int]:
@@ -207,8 +230,9 @@ def direction_groups(lines: List[Dict[str, Any]]) -> Dict[int, int]:
 
 # Which grouping of a scan's lines a history entry was translated with, so its re-export zips the
 # translations onto the same paragraphs: 1 cuts prose lines at column gaps, 2 also takes the
-# directions out of a score's sung lines.
-SCAN_GROUPING = 2
+# directions out of a score's sung lines, 3 keeps a gap with ink in it whole (OCR_GAP_MAX_INK) and a
+# number before a direction apart from it.
+SCAN_GROUPING = 3
 
 
 def scan_paragraph_keys(lines: List[Dict[str, Any]], blocks: Sequence[Tuple[str, Any]]) -> List[Any]:
@@ -287,9 +311,11 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
             to_raw = pymupdf.Matrix(scale, scale) * page.derotation_matrix
             lines = ocr_pages.get(number) or []
             score = any(line["noise"] or line.get("band") for line in lines)
+            if grouping < 3:
+                lines = [{key: value for key, value in line.items() if key != "gap_ink"} for line in lines]
             if score and grouping >= 2:
                 lines = [piece for line in lines for piece in
-                         ([line] if line["noise"] else split_directions(line))]
+                         ([line] if line["noise"] else split_directions(line, numbers=grouping >= 3))]
             skip = secondary_lyrics(lines, source, proven) if score and source else set()
             directions = direction_groups(lines) if score else {}
             if score:
@@ -329,8 +355,10 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
                        else {"band": group[0]["par"][1]} if score and group[0].get("band") else {}),
                     "text": text,
                     "lines": [scan_line(line, rect, flip) for line, rect in zip(group, rects)],
-                    "cover": [rect + (-OCR_COVER_PADDING, -OCR_COVER_PADDING, OCR_COVER_PADDING, OCR_COVER_PADDING)
-                              for rect in rects],
+                    # Reaching below the letters where an underline hangs under them (ocr.fit_to_ink).
+                    "cover": [pymupdf.Rect(cover_box(line)) * to_raw
+                              + (-OCR_COVER_PADDING, -OCR_COVER_PADDING, OCR_COVER_PADDING, OCR_COVER_PADDING)
+                              for line in group],
                     "cover_px": [line["box"] for line in group],
                 })
             obstacles = []

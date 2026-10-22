@@ -1297,6 +1297,38 @@ class MainTests(unittest.TestCase):
         # A rule is no ink of a word's own: nothing left to fit to, the box stays.
         self.assertEqual(rule["boxes"], [(5, 45, 95, 55)])
 
+    def test_a_scanned_word_keeps_its_underline_in_what_is_painted_over(self):
+        page = pymupdf.open().new_page(width=100, height=60)
+        page.draw_rect(pymupdf.Rect(12, 20, 30, 31), color=None, fill=(0, 0, 0))
+        page.draw_line((12, 34.5), (32, 34.5), width=1)   # 3px below the letters, as under "zero"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image = Path(temp_dir) / "page.png"
+            page.get_pixmap(dpi=72).save(str(image))
+            line, = main.ocr.fit_to_ink([{"text": "zero", "box": (10, 18, 40, 32), "words": [("zero", 14)],
+                                          "boxes": [(10, 18, 40, 32)]}], image)
+        self.assertEqual(line["boxes"], [(10, 20, 40, 31)])
+        self.assertGreaterEqual(main.cover_box(line)[3], 35)
+
+    def test_a_word_slant_tells_italic_from_upright(self):
+        import numpy as np
+        upright = np.zeros((20, 40), dtype=bool)
+        italic = np.zeros((20, 40), dtype=bool)
+        for x in (5, 15, 25):
+            upright[:, x:x + 2] = True
+            for y in range(20):   # leaning right by a fifth of the height, as a book italic
+                shift = (19 - y) // 5
+                italic[y, x + shift:x + shift + 2] = True
+        self.assertEqual(main.ocr.word_slant(upright), 0.0)
+        self.assertLessEqual(main.ocr.word_slant(italic), main.ocr.OCR_ITALIC_SLANT)
+
+    def test_a_gap_with_ink_in_it_is_no_column(self):
+        words = [("(given", 0), ("year-ph", 60), (")", 160)]
+        line = {"text": "(given year-ph )", "words": [(word, 12) for word, _ in words],
+                "boxes": [(left, 0, left + 50, 12) for _, left in words], "confs": [90.0] * 3}
+        self.assertEqual(len(main.column_spans(line)), 2)
+        # Ruders KA p. 10: "us-six" went unread between "year-ph" and ")", 17 % of the gap ink.
+        self.assertEqual(len(main.column_spans({**line, "gap_ink": [0.0, 0.0, 0.17]})), 1)
+
     def test_a_capital_with_a_mark_above_does_not_size_its_line(self):
         rect, flip = pymupdf.Rect(0, 0, 100, 10), pymupdf.Matrix(1, 0, 0, -1, 0, 842)
 
@@ -1345,6 +1377,10 @@ class MainTests(unittest.TestCase):
         self.assertEqual(lyric["text"], "i stil - le skov,")
         self.assertEqual(direction["text"], "off stage right. The Double,")
         self.assertTrue(direction["direction"])
+        # A rehearsal number set before a direction is not part of it (Ruders KA p. 27).
+        numbered = line([("7", 0), ("hold", 8), ("Offred,", 5), ("and", 5), ("the", 5), ("Double", 5)], 160)
+        self.assertEqual([(piece["text"], piece.get("direction")) for piece in main.split_directions(numbered)],
+                         [("7", None), ("hold Offred, and the Double", True)])
         # A lyric whose syllables are only spaced by the notes stays whole, hyphens without spaces too.
         whispered = line([("whis-per-ing", 0), ("and", 5), ("gos-sip", 5), ("and", 200), ("so", 5), ("on", 5)], 130)
         self.assertEqual(main.split_directions(whispered), [whispered])

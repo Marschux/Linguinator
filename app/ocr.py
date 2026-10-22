@@ -169,30 +169,90 @@ def run_tesseract(image_path: Path, languages: str, lines: Optional[List[Dict[st
 
 # A row this much of a word's width dark is a rule under or through it, not its letters.
 OCR_RULE_ROW = 0.9
+# Slants tried for a word, as how far the top of its box is shifted against the bottom, in box
+# heights; negative straightens a slant to the right. Measured on Ruders KA pp. 8 and 30, where
+# the sharpest of them landed at 0 to -0.05 for upright words and at -0.15 to -0.2 for italic
+# ones ("by Paul Bentley", the Danish lyrics).
+OCR_SLANTS = [step / 20 for step in range(-8, 3)]
+OCR_ITALIC_SLANT = -0.125
+OCR_SLANT_MIN_LETTERS = 3
+
+
+def word_slant(dark) -> float:
+    """The slant at which a word's strokes stand straightest: the shear whose column profile is
+    the most peaked (the sum of its squares is largest)."""
+    import numpy as np
+    height, width = dark.shape
+    best, slant = -1.0, 0.0
+    for shear in OCR_SLANTS:
+        profile = np.zeros(width + 2 * height)
+        for y in range(height):
+            shift = height + int(round(shear * (height - 1 - y)))
+            profile[shift:shift + width] += dark[y]
+        score = float((profile ** 2).sum())
+        if score > best:
+            best, slant = score, shear
+    return slant
 
 
 def fit_to_ink(lines: List[Dict[str, Any]], image_path: Path) -> List[Dict[str, Any]]:
-    """The lines with each word's box cut down to the rows its letters are printed in.
+    """The lines with each word's box cut down to the rows its letters are printed in, and
+    `italic` set on a line most of whose words lean (word_slant).
 
     Tesseract pads a word's box at times: Ruders KA p. 10's "PROLOGUE" came back 29px high for
     11px of ink, and its translation was set in a size to match. Sizes and covers are taken from
-    these boxes, so they are fitted to the ink first. Left as they are when the image cannot be read.
+    these boxes, so they are fitted to the ink first. Tesseract does not report italics at all,
+    so they are measured off the same pixels. Left as they are when the image cannot be read.
     """
     try:
         gray = page_gray(image_path)
     except Exception:
         return lines
     for line in lines:
-        boxes = []
+        if not line.get("noise"):
+            slants = [word_slant(gray[top:bottom, left:right] < STAFF_DARK)
+                      for (word, _), (left, top, right, bottom) in zip(line["words"], line.get("boxes", []))
+                      if sum(c.isalpha() for c in word) >= OCR_SLANT_MIN_LETTERS and bottom > top and right > left]
+            line["italic"] = bool(slants) and sorted(slants)[len(slants) // 2] <= OCR_ITALIC_SLANT
+        boxes, covers = [], []
         for left, top, right, bottom in line.get("boxes", []):
             dark = gray[top:bottom, left:right] < STAFF_DARK
             rows = [y for y, row in enumerate(dark) if row.any() and row.mean() < OCR_RULE_ROW] if dark.size else []
             boxes.append((left, top + rows[0], right, top + rows[-1] + 1) if rows else (left, top, right, bottom))
+            # What is painted over takes the word's underline with it too, which can sit a few
+            # rows below its box (the second rule under "zero" on Ruders KA p. 10, 3px down).
+            inked = [y for y, row in enumerate(dark) if row.any()]
+            cover_bottom = max(top + inked[-1] + 1 if inked else bottom, boxes[-1][3])
+            for y in range(cover_bottom, min(cover_bottom + OCR_UNDERLINE_REACH, gray.shape[0])):
+                if longest_run(gray[y, left:right] < STAFF_DARK) >= max(OCR_UNDERLINE_MIN_RUN, (right - left) // 5):
+                    cover_bottom = y + 1
+            covers.append((left, boxes[-1][1], right, cover_bottom))
         if boxes:
-            line["boxes"] = boxes
+            line["boxes"], line["covers"] = boxes, covers
             line["words"] = [(word, box[3] - box[1]) for (word, _), box in zip(line["words"], boxes)]
             line["box"] = (line["box"][0], min(box[1] for box in boxes), line["box"][2], max(box[3] for box in boxes))
+            # How much ink each gap between two words holds: a word tesseract misread or left out
+            # ("year-ph [gap] )" for "year-plus-six)") leaves a gap as wide as a column's, but not empty.
+            top, bottom = line["box"][1], line["box"][3]
+            line["gap_ink"] = [0.0] + [float((gray[top:bottom, before[2]:after[0]] < STAFF_DARK).mean())
+                                       if after[0] > before[2] else 0.0
+                                       for before, after in zip(boxes, boxes[1:])]
     return lines
+
+
+# An underline: a dark run at least this long, a fifth of the word at least, within this many rows
+# below the word's letters.
+OCR_UNDERLINE_REACH = 5
+OCR_UNDERLINE_MIN_RUN = 8
+
+
+def longest_run(row) -> int:
+    """The longest run of True in a row of pixels."""
+    best = current = 0
+    for value in row:
+        current = current + 1 if value else 0
+        best = max(best, current)
+    return best
 
 
 def ocr_page_osd(image_path: Path) -> Tuple[str, float]:
@@ -541,6 +601,8 @@ def read_scanned_page(content: bytes, page_number: int, source: str, image_path:
             for line in region_lines:
                 left, top, right, bottom = line["box"]
                 lines.append({**line, "box": (left + dx, top + dy, right + dx, bottom + dy),
+                              **{key: [(x0 + dx, y0 + dy, x1 + dx, y1 + dy) for x0, y0, x1, y1 in line[key]]
+                                 for key in ("boxes", "covers") if key in line},
                               "par": (index, *line["par"])})
         if text.strip():
             pieces.append(text.strip())
@@ -650,7 +712,8 @@ def read_score_bands(image_path: Path, lines: List[Dict[str, Any]],
         for line in band_lines:
             left, line_top, right, line_bottom = line["box"]
             found.append({**line, "box": (left, line_top + top, right, line_bottom + top),
-                          "boxes": [(x0, y0 + top, x1, y1 + top) for x0, y0, x1, y1 in line["boxes"]],
+                          **{key: [(x0, y0 + top, x1, y1 + top) for x0, y0, x1, y1 in line[key]]
+                             for key in ("boxes", "covers") if key in line},
                           "par": ("band", index, *line["par"]), "band": True,
                           "noise": line["conf"] < OCR_NOISE_MAX_CONFIDENCE and not (
                               line["conf"] >= OCR_SUNG_MIN_CONFIDENCE and pdf_scan.SUNG_MARKS.search(line["text"]))})
