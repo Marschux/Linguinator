@@ -497,6 +497,16 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
                         own = body
                     for line in paragraph["lines"]:
                         line["size"] = own
+                    if len(paragraph["lines"]) == 1 and grouping >= 4:
+                        # A line on its own (a row of a list, a heading) stays one line: in a box of
+                        # its own a longer translation shrinks instead of wrapping onto what lies
+                        # below, which on a scan may be text OCR never read ("Mitte Zwanzig)" over
+                        # the bold line under it, Ruders KA p. 7). Levelled with nothing, or one
+                        # long row would set the page's body text smaller (see the score's lines).
+                        line = paragraph["lines"][0]
+                        paragraph["own_size"] = True
+                        obstacles.append({"x": line["x"] - 1, "right": line["right"] + 1, "top": line["y"] + own,
+                                          "bottom": line["y"] - OCR_GLYPH_DESCENT * own - 0.5})
             if score and paragraphs:
                 # Sung lines are set in one size, the page's typical one: each size is only an
                 # estimate from its own box, and lyrics a point apart look careless. And each sits
