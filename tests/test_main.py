@@ -1225,6 +1225,49 @@ class MainTests(unittest.TestCase):
         # Long real words are spread over many letters and stay.
         self.assertEqual(main.strip_leaders("Indoktrinationszentren undergrundsbevaegelsen"),
                          "Indoktrinationszentren undergrundsbevaegelsen")
+        # Even ones that repeat two letters a lot (Ruders KA p. 9).
+        self.assertEqual(main.strip_leaders("hængningen medlemmerne"), "hængningen medlemmerne")
+
+    def test_a_cast_list_is_set_row_by_row(self):
+        def line(text, left, top, right):
+            words = text.split()
+            step = (right - left) // len(words)
+            return {"text": text, "box": (left, top, right, top + 22), "par": (3, 1), "noise": False,
+                    "words": [(word, 20) for word in words], "confs": [90.0] * len(words),
+                    "boxes": [(left + i * step, top, left + (i + 1) * step - 6, top + 22) for i in range(len(words))]}
+
+        # Ruders KA p. 6: tesseract ran the names into one paragraph, a leader read as a word, and
+        # where it read no leader the part stands as a line of its own beside the name.
+        pieixoto = line("Professor Pieixoto (ca. 40) ........cccsesese non-singing", 151, 173, 947)
+        offred = line("Offred (red hair, ca. 30)", 151, 212, 393)
+        part = {**line("mezzo soprano", 797, 217, 947), "par": (7, 1)}
+        prose = line("Næste morgen finder Martha-tjenestepigen Rita", 151, 251, 947)
+        pieces = main.split_columns(pieixoto, leaders=True)
+        self.assertEqual([piece["text"] for piece in pieces],
+                         ["Professor Pieixoto (ca. 40)", "........cccsesese", "non-singing"])
+        # An ellipsis opening a sentence is no leader.
+        self.assertEqual(main.split_columns(line("... She is torn from her husband", 151, 173, 947), leaders=True)[0]
+                         ["text"], "... She is torn from her husband")
+        lines = [offred, part, prose]
+        self.assertTrue(main.is_row(offred, lines))
+        self.assertFalse(main.is_row(prose, lines))
+        keys = main.scan_paragraph_keys(lines, [], rows=True)
+        self.assertNotEqual(keys[0], keys[2])
+
+    def test_a_score_line_loses_the_notation_at_its_ends(self):
+        def line(words):
+            return {"text": " ".join(word for word, _ in words), "box": (0, 0, 10 * len(words), 13), "noise": False,
+                    "words": [(word, 13) for word, _ in words], "confs": [conf for _, conf in words],
+                    "boxes": [(10 * i, 0, 10 * i + 8, 13) for i in range(len(words))]}
+
+        # Ruders KA p. 23.
+        trimmed, = main.trim_score_line(line([("7", 47), ("8", 38), ("ee", 24), ("I'm", 68), ("sor", 93),
+                                              ("-", 87), ("ry", 77), ("pain.", 51), ("a", 90), ("-", 80)]))
+        self.assertEqual(trimmed["text"], "I'm sor - ry pain. a -")
+        self.assertEqual(trimmed["untrimmed"], "7 8 ee I'm sor - ry pain. a -")
+        # A longer word read unsure is still sung.
+        whole = line([("my", 90), ("story", 40)])
+        self.assertEqual(main.trim_score_line(whole), [whole])
 
     def test_scan_layout_pages_set_lyrics_line_by_line_and_prose_by_paragraph(self):
         document = pymupdf.open()

@@ -15,7 +15,9 @@ from . import config, langs, translation, ocr, pdf_text, pdf_layout, heron
 OCR_GLYPH_TOP = {"ascender": 0.72, "x-height": 0.5}
 OCR_GLYPH_DESCENT = 0.22
 OCR_DESCENDERS = set("gjpqyQ(),;[]{}")
-OCR_ASCENDERS = set("bdfhklt0123456789ABCDEFGHIJKLMNOPRSTUVWXYZÄÖÜÆØÅ'\"!?/|")
+# i and j too: their dots reach about as high, and "non-singing", sized as if it stopped at the
+# x-height, came out a third larger than the cast list around it (Ruders KA p. 6).
+OCR_ASCENDERS = set("bdfhklt0123456789ABCDEFGHIJKLMNOPRSTUVWXYZÄÖÜÆØÅ'\"!?/|ij")
 OCR_COVER_PADDING = 1.5
 OCR_FULL_HEIGHT = set("bdfhklABCDEFGHIJKLMNOPRSTUVWXYZÆ0123456789")
 # Capitals with a mark above or a stroke through reach past the others: "ØJNE" read 22px where
@@ -33,10 +35,19 @@ OCR_SCORE_WORD = re.compile(r"[^\W\d_]{3,}")
 # The dotted leader of a contents page or cast list reads as dots or as a long run of a few
 # letters ("ceessesesessesesessesss..."), and the model then translates it like a word. Measured
 # on Ruders KA's cast list: in a leader the two most frequent letters make up 72-94 % of it, in
-# real words of 10+ letters (German compounds, Danish OCR) 22-42 %.
+# real words of 10+ letters (German compounds, Danish OCR) 22-42 %, but Danish "hængningen" (60 %)
+# and "medlemmerne" (64 %) were taken for leaders at 0.6 and dropped from the synopsis (p. 9).
 OCR_LEADER_DOTS = re.compile(r"[.·…]{4,}")
-OCR_LEADER_MIN_LENGTH = 10
-OCR_LEADER_TOP_LETTERS = 0.6
+OCR_LEADER_MIN_LENGTH = 12
+OCR_LEADER_TOP_LETTERS = 0.7
+
+
+def is_leader(word: str) -> bool:
+    """A dotted leader read as a word: dots only ("..", "........"), or a long run of a few letters
+    (see strip_leaders). Not three dots: that is an ellipsis, and prose opens with one ("... She is
+    torn from her husband", Ruders KA p. 8)."""
+    dots = not word.strip(".·…")
+    return (dots and len(word) >= 2 and word not in ("...", "…")) or bool(OCR_LEADER_DOTS.search(word))         or not strip_leaders(word)
 
 
 def strip_leaders(text: str) -> str:
@@ -125,16 +136,20 @@ OCR_COLUMN_GAP = 2.0
 OCR_GAP_MAX_INK = 0.1
 
 
-def column_spans(line: Dict[str, Any]) -> List[range]:
+def column_spans(line: Dict[str, Any], leaders: bool = False) -> List[range]:
     """The word ranges of a line between gaps wider than OCR_COLUMN_GAP word heights."""
     boxes = line.get("boxes") or []
     if len(boxes) < 2:
         return [range(len(line.get("words") or []))]
     height = sorted(box[3] - box[1] for box in boxes)[len(boxes) // 2]
     ink = line.get("gap_ink") or [0.0] * len(boxes)
-    cuts = [0] + [index for index in range(1, len(boxes))
-                  if boxes[index][0] - boxes[index - 1][2] > OCR_COLUMN_GAP * height
-                  and ink[index] <= OCR_GAP_MAX_INK] + [len(boxes)]
+    cuts = {index for index in range(1, len(boxes))
+            if boxes[index][0] - boxes[index - 1][2] > OCR_COLUMN_GAP * height and ink[index] <= OCR_GAP_MAX_INK}
+    if leaders:
+        # A dotted leader read as a word fills the gap between a name and its part: it is the gap.
+        cuts |= {cut for index, (word, _) in enumerate(line["words"]) if is_leader(word)
+                 for cut in (index, index + 1) if 0 < cut < len(boxes)}
+    cuts = [0] + sorted(cuts) + [len(boxes)]
     return [range(start, end) for start, end in zip(cuts, cuts[1:])]
 
 
@@ -159,10 +174,10 @@ def cover_box(line: Dict[str, Any]) -> Tuple[int, int, int, int]:
     return (line["box"][0], line["box"][1], line["box"][2], max(line["box"][3], max(box[3] for box in covers)))
 
 
-def split_columns(line: Dict[str, Any]) -> List[Dict[str, Any]]:
+def split_columns(line: Dict[str, Any], leaders: bool = False) -> List[Dict[str, Any]]:
     """A prose line cut at every column gap (column_spans), each piece a line of its own with
     `piece` set. Not for score pages: a held syllable leaves a long gap in a lyric."""
-    spans = column_spans(line)
+    spans = column_spans(line, leaders)
     if len(spans) < 2:
         return [line]
     return [sub_line(line, span, piece=True) for span in spans]
@@ -180,6 +195,40 @@ SUNG_MARKS = re.compile(r"[^\W\d_]\s*-\s*[^\W\d_]|_")
 
 def is_direction(text: str) -> bool:
     return len(re.findall(r"[^\W\d_]{2,}", text)) >= OCR_DIRECTION_MIN_WORDS and not SUNG_MARKS.search(text)
+
+
+# Measured on Ruders KA p. 23: "7 8 ee" read at 47, 38 and 24, the sung words beside them at 68-97.
+OCR_SCORE_JUNK_CONFIDENCE = 50
+SUNG_HOLD = re.compile(r"[-_—–]+")
+
+
+def trim_score_line(line: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """A score line without the notation tesseract read at either end of it ("7 8 ee I'm sor-ry",
+    "| want you", Ruders KA pp. 23-24): marks with no letter (a syllable's hyphen or hold line
+    stays), and a letter or two read with less than OCR_SCORE_JUNK_CONFIDENCE. A longer word read
+    unsure is still a sung one ("story", "unto"). The line had reached out to the margin, and its
+    translation was set there. Empty when nothing is left; a noise line, or one without word
+    boxes, as it is."""
+    if line["noise"] or not line.get("boxes"):
+        return [line]
+
+    def junk(index: int) -> bool:
+        word = line["words"][index][0]
+        letters = sum(c.isalpha() for c in word)
+        if not letters:
+            return not SUNG_HOLD.fullmatch(word)
+        return letters <= 2 and line["confs"][index] < OCR_SCORE_JUNK_CONFIDENCE
+
+    start, end = 0, len(line["words"])
+    while start < end and junk(start):
+        start += 1
+    while end > start and junk(end - 1):
+        end -= 1
+    if (start, end) == (0, len(line["words"])):
+        return [line]
+    # Whether it reads as text at all is still judged on the whole line (OCR_SUNG_MIN_LETTERS):
+    # "i feo | eae | |" is notation, with its bars trimmed off it would pass.
+    return [sub_line(line, range(start, end), untrimmed=line["text"])] if end > start else []
 
 
 def split_directions(line: Dict[str, Any], numbers: bool = True) -> List[Dict[str, Any]]:
@@ -231,11 +280,30 @@ def direction_groups(lines: List[Dict[str, Any]]) -> Dict[int, int]:
 # Which grouping of a scan's lines a history entry was translated with, so its re-export zips the
 # translations onto the same paragraphs: 1 cuts prose lines at column gaps, 2 also takes the
 # directions out of a score's sung lines, 3 keeps a gap with ink in it whole (OCR_GAP_MAX_INK) and a
-# number before a direction apart from it.
-SCAN_GROUPING = 3
+# number before a direction apart from it, 4 cuts at dotted leaders, sets each row of a cast list
+# apart (is_row) and trims notation off the ends of a score's lines.
+SCAN_GROUPING = 4
 
 
-def scan_paragraph_keys(lines: List[Dict[str, Any]], blocks: Sequence[Tuple[str, Any]]) -> List[Any]:
+# A cast list sets each part right of its name ("Offred (red hair, ca. 30) ...... mezzo soprano"),
+# and where tesseract left the leader out, the part is a line of its own beside the name: then the
+# name is a row of a table, not a line of running text, though tesseract runs the names into one
+# paragraph. A two-column page puts a whole line of text beside each line instead.
+OCR_ROW_CELL_WORDS = 3
+
+
+def is_row(line: Dict[str, Any], lines: List[Dict[str, Any]]) -> bool:
+    """Whether a short line (a cell) stands right beside this one, overlapping it in height."""
+    left, top, right, bottom = line["box"]
+    # Across a column gap: tesseract also breaks a line of prose in two at a wide space.
+    return any(other["box"][0] - right > OCR_COLUMN_GAP * (bottom - top)
+               and len(other["text"].split()) <= OCR_ROW_CELL_WORDS
+               and min(bottom, other["box"][3]) - max(top, other["box"][1]) >= (bottom - top) / 2
+               for other in lines if other is not line and not other["noise"])
+
+
+def scan_paragraph_keys(lines: List[Dict[str, Any]], blocks: Sequence[Tuple[str, Any]],
+                        rows: bool = False) -> List[Any]:
     """Which paragraph each line of a prose page belongs to: tesseract's own, split further by
     the layout model's blocks (heron.page_blocks, in OCR pixels).
 
@@ -258,7 +326,7 @@ def scan_paragraph_keys(lines: List[Dict[str, Any]], blocks: Sequence[Tuple[str,
     part, current, previous_blocks = 0, [], set()
     for position, line in enumerate(lines):
         own = held(line, heron.HERON_TEXT_LABELS)
-        if line.get("piece") or (not own and held(line, {"picture"})):
+        if line.get("piece") or (not own and held(line, {"picture"})) or (rows and is_row(line, lines)):
             keys.append(("own", position))
             continue
         if current and current[-1]["par"] == line["par"]:
@@ -313,6 +381,8 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
             score = any(line["noise"] or line.get("band") for line in lines)
             if grouping < 3:
                 lines = [{key: value for key, value in line.items() if key != "gap_ink"} for line in lines]
+            if score and grouping >= 4:
+                lines = [trimmed for line in lines for trimmed in trim_score_line(line)]
             if score and grouping >= 2:
                 lines = [piece for line in lines for piece in
                          ([line] if line["noise"] else split_directions(line, numbers=grouping >= 3))]
@@ -322,11 +392,11 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
                 keys: List[Any] = list(range(len(lines)))
             else:
                 if grouping >= 1:
-                    lines = [piece for line in lines for piece in split_columns(line)]
+                    lines = [piece for line in lines for piece in split_columns(line, leaders=grouping >= 4)]
                 scale_blocks = ocr.OCR_DPI / heron.HERON_DPI
                 blocks = [(label, rect * scale_blocks) for label, rect in heron.page_blocks(page)] \
                     if layout_model and lines else []
-                keys = scan_paragraph_keys(lines, blocks)
+                keys = scan_paragraph_keys(lines, blocks, rows=grouping >= 4)
             groups: Dict[Any, List[Dict[str, Any]]] = {}
             for position, line in enumerate(lines):
                 if line["noise"] or position in skip or not pdf_layout.has_translatable_text(line["text"]):
@@ -337,7 +407,8 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
                 rects = [pymupdf.Rect(line["box"]) * to_raw for line in group]
                 if score:
                     text = join_sung_syllables(group[0]["text"])
-                    if letter_share(text) < OCR_SUNG_MIN_LETTERS or not OCR_SCORE_WORD.search(text):
+                    whole = join_sung_syllables(group[0].get("untrimmed", group[0]["text"]))
+                    if letter_share(whole) < OCR_SUNG_MIN_LETTERS or not OCR_SCORE_WORD.search(text):
                         continue
                 elif sum(line["conf"] for line in group) / len(group) < ocr.OCR_NOISE_MAX_CONFIDENCE:
                     # Not text tesseract was sure of - a logo read as "we" was set back as a huge
@@ -392,10 +463,16 @@ def scan_layout_pages(content: bytes, ocr_pages: Dict[int, List[Dict[str, Any]]]
                     # size the smallest scale any of them needed in the whole document, and one long
                     # lyric anywhere then set every other line a third smaller than its print.
                     paragraph["own_size"] = True
+                    own = size
+                    if "direction" in paragraph:
+                        # A direction or a footer set apart from the sung text in size keeps its
+                        # own: the copyright line came out in lyric size over the ISBN beside it.
+                        own = sorted(line["size"] for line in paragraph["lines"])[len(paragraph["lines"]) // 2]
+                        own = size if abs(own - size) <= OCR_SIZE_SNAP * size else own
                     for line in paragraph["lines"]:
-                        line["size"] = size
-                        obstacles.append({"x": line["x"] - 1, "right": right, "top": line["y"] + size,
-                                          "bottom": line["y"] - OCR_GLYPH_DESCENT * size - 0.5})
+                        line["size"] = own
+                        obstacles.append({"x": line["x"] - 1, "right": right, "top": line["y"] + own,
+                                          "bottom": line["y"] - OCR_GLYPH_DESCENT * own - 0.5})
             pages.append({
                 "number": number, "width": float(page.mediabox.width), "height": float(page.mediabox.height),
                 "paragraphs": paragraphs, "obstacles": obstacles, "columns": [], "row_rules": [], "widgets": [],
