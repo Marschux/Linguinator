@@ -1,7 +1,7 @@
 """Docling's layout model (heron): where a page's text blocks are, as a hint for group_pdf_paragraphs."""
 import logging
 from functools import lru_cache
-from typing import Any, List
+from typing import Any, List, Tuple
 import pymupdf
 from . import config, models
 
@@ -21,9 +21,9 @@ def load_layout_model():
             RTDetrV2ForObjectDetection.from_pretrained(config.LAYOUT_MODEL_ID).eval())
 
 
-def page_text_blocks(page) -> List[Any]:
-    """The page's text blocks as rects in PDF user space (the frame pdf_page_runs puts lines in).
-    Empty when the model cannot run: the geometry then decides alone."""
+def page_blocks(page) -> List[Tuple[str, Any]]:
+    """Every block the model finds as (label, rect in pixels of the page rendered at HERON_DPI,
+    /Rotate applied, counting down from the top). Empty when the model cannot run."""
     models.begin_model_use()
     try:
         import torch
@@ -41,10 +41,15 @@ def page_text_blocks(page) -> List[Any]:
         return []
     finally:
         models.end_model_use()
+    return [(model.config.id2label[label], pymupdf.Rect(*box.tolist()))
+            for label, box in zip(found["labels"].tolist(), found["boxes"])]
+
+
+def page_text_blocks(page) -> List[Any]:
+    """The page's text blocks as rects in PDF user space (the frame pdf_page_runs puts lines in).
+    Empty when the model cannot run: the geometry then decides alone."""
     # Rendered with /Rotate applied and counting down from the top; lines are in the raw frame,
     # counting up. ponytail: assumes the crop box sits at the media box's corner, as in pdf_scan.
     scale = 72.0 / HERON_DPI
     to_user = pymupdf.Matrix(scale, scale) * page.derotation_matrix * pymupdf.Matrix(1, 0, 0, -1, 0, page.mediabox.height)
-    return [pymupdf.Rect(*box.tolist()) * to_user
-            for label, box in zip(found["labels"].tolist(), found["boxes"])
-            if model.config.id2label[label] in HERON_TEXT_LABELS]
+    return [rect * to_user for label, rect in page_blocks(page) if label in HERON_TEXT_LABELS]

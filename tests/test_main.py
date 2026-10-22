@@ -1227,6 +1227,28 @@ class MainTests(unittest.TestCase):
         self.assertEqual(len(prose["paragraphs"][0]["cover"]), 2)
         self.assertTrue(prose["scan"])
 
+    def test_scan_paragraphs_part_where_the_layout_model_sees_separate_blocks(self):
+        def line(text, top, right=900):
+            return {"text": text, "box": (100, top, right, top + 20), "par": (3, 6)}
+
+        # A credits page tesseract ran into one paragraph, a broken-off sentence across a block's
+        # lower edge, and two labels of a diagram heron only sees as one picture.
+        lines = [line("Preparation, editing, proofing: Peter Jorgensen", 100),
+                 line("Printed by CLEMENSTRYKKERIET A/S, Arhus 2002", 160),
+                 line("The extra staves have been maintained and", 220),
+                 line("serve as extra cueing.", 250, right=400),
+                 line("Gilead Revolution taking place", 400), line("Offred at the Red Centre", 440)]
+        blocks = [("text", pymupdf.Rect(90, 90, 950, 130)), ("text", pymupdf.Rect(90, 150, 950, 190)),
+                  ("text", pymupdf.Rect(90, 210, 950, 245)), ("text", pymupdf.Rect(90, 246, 950, 275)),
+                  ("picture", pymupdf.Rect(50, 380, 1000, 500))]
+
+        self.assertEqual(len(set(main.scan_paragraph_keys(lines, []))), 1)
+        keys = main.scan_paragraph_keys(lines, blocks)
+        self.assertEqual(len(set(keys)), 5)
+        self.assertNotEqual(keys[0], keys[1])
+        self.assertEqual(keys[2], keys[3])
+        self.assertNotEqual(keys[4], keys[5])
+
     def test_a_bilingual_score_translates_only_its_documents_language(self):
         def line(text, noise=False):
             return {"text": text, "box": (0, 0, 10, 10), "par": (1, 1), "conf": 90, "noise": noise, "words": []}
